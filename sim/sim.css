@@ -1,0 +1,133 @@
+/* 页面和机身。屏里的内容在 screen.css。 */
+:root {
+  --ink: #161616;
+  --muted: #5c584f;
+  font-family: "Iowan Old Style", "Songti SC", "Source Han Serif SC", Palatino, serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #d9d3c7; color: var(--ink); }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+.stage { max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; }
+.top { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 22px; }
+.kicker { margin: 0 0 4px; letter-spacing: 0.14em; font-size: 12px; color: var(--muted); font-family: "Avenir Next", "PingFang SC", sans-serif; }
+h1 { margin: 0; font-size: 32px; font-weight: 650; letter-spacing: -0.03em; }
+.hint { margin: 0; max-width: 420px; color: var(--muted); font-size: 13px; line-height: 1.5; font-family: "Avenir Next", "PingFang SC", sans-serif; }
+
+.layout { display: grid; grid-template-columns: auto minmax(280px, 1fr); gap: 28px; align-items: start; }
+
+/* 机身尺寸按官方正面渲染图量的：屏在图上是 360×643 px，缩到 246 px 宽，比例 0.683。 */
+.device { padding-right: 78px; }
+.shell {
+  position: relative;
+  width: 300px;
+  height: 522px;
+  background: #f4f2f7;
+  border-radius: 20px;
+  box-shadow:
+    0 16px 36px rgba(40, 32, 18, 0.16),
+    0 0 0 1px #cfccd2,
+    inset 0 3px 0 #5d5c60,
+    inset -6px 0 0 #b4b2b7,
+    inset 5px 0 0 #cfcdd2,
+    inset 0 -2px 0 #dcdadf;
+}
+.plate {
+  position: absolute;
+  left: 8px;
+  top: 10px;
+  right: 9px;
+  bottom: 10px;
+  background: #dbd9dd;
+  border: 1px solid #b4b2b7;
+  border-radius: 13px;
+}
+.panel {
+  position: absolute;
+  left: 27px;
+  top: 27px;
+  width: 246px;
+  height: 438px;
+  background: #f2f2f1;
+  color: var(--ink);
+  outline: 1px solid #cfcfcf;
+  overflow: hidden;
+  user-select: none;
+}
+.panel.flash { animation: flash 260ms steps(2, end); }
+@keyframes flash { 50% { filter: invert(1); } }
+
+/* 屏下：左边橙点是菜单，右边两颗灰键是返回/上一页、前进/下一页。 */
+.cap { position: absolute; border: 0; padding: 0; color: transparent; }
+.cap.menu { left: 27px; top: 477px; width: 25px; height: 25px; border-radius: 50%; background: #e28a06; }
+.cap.prev, .cap.next { top: 480px; width: 51px; height: 20px; border-radius: 999px; background: #a9a7ab; }
+.cap.prev { left: 159px; }
+.cap.next { left: 222px; }
+.cap:hover { filter: brightness(1.06); }
+.cap.down, .cap:active { transform: translateY(1px); filter: brightness(0.9); }
+
+/* 右侧三颗键帽、四个功能（按关机画面上的按键说明对位）：
+   上面短的是 AI 唤醒；中间长条一颗键帽，上半加音量、下半减音量；下面短的是电源。 */
+.key {
+  position: absolute;
+  right: -5px;
+  width: 5px;
+  border: 0;
+  padding: 0;
+  color: transparent;
+  background: linear-gradient(90deg, #bb7b4f, #df9a4e 40%, #e3954a 75%, #ac733a);
+  border-radius: 3px;
+  box-shadow: 1px 0 1px rgba(80, 40, 10, 0.25);
+}
+.key::before { content: ""; position: absolute; top: 0; bottom: 0; left: -6px; right: -14px; }
+.key.ai { top: 94px; height: 58px; }
+.key.up { top: 183px; height: 57px; border-radius: 3px 3px 0 0; box-shadow: 1px 0 1px rgba(80, 40, 10, 0.25), inset 0 -1px 0 rgba(120, 60, 20, 0.45); }
+.key.vdown { top: 240px; height: 57px; border-radius: 0 0 3px 3px; }
+.key.power { top: 328px; height: 29px; }
+.key:hover { filter: brightness(1.08); }
+.key.down, .key:active { transform: translateX(-2px); filter: brightness(0.88); }
+
+.tag {
+  position: absolute;
+  left: calc(100% + 20px);
+  transform: translateY(-50%);
+  font: 12px/1.2 "Avenir Next", "PingFang SC", sans-serif;
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.tag::before { content: ""; position: absolute; right: calc(100% + 4px); top: 50%; width: 8px; border-top: 1px solid #a9a194; }
+.tag.t-ai { top: 123px; }
+.tag.t-up { top: 211px; }
+.tag.t-down { top: 269px; }
+.tag.t-power { top: 342px; }
+
+.legend, .now {
+  width: 300px;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: "Avenir Next", "PingFang SC", sans-serif;
+}
+.now { color: var(--ink); }
+.now p { margin: 0 0 6px; color: var(--muted); }
+.now dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; }
+.now dt { color: var(--muted); white-space: nowrap; }
+.now dd { margin: 0; }
+
+.notes { font-size: 15px; }
+.notes h2 { margin: 20px 0 8px; font-size: 16px; }
+.notes h2:first-child { margin-top: 0; }
+.notes ol, .notes ul { margin: 0; padding-left: 1.2em; line-height: 1.55; }
+.notes li { margin: 3px 0; }
+.log-title { margin: 20px 0 8px; font-size: 13px; letter-spacing: 0.08em; color: var(--muted); font-family: "Avenir Next", "PingFang SC", sans-serif; }
+.log { margin: 0; padding-left: 1.2em; min-height: 4em; font-family: "Avenir Next", "PingFang SC", sans-serif; font-size: 13px; color: #3d3a34; }
+.log li { margin: 3px 0; }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+  .top { flex-direction: column; align-items: start; }
+}

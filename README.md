@@ -6,6 +6,10 @@
 
 [中文](README_zn.md) | **English**
 
+Fork of [CloudZao/Metalio-E-INK4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) for the 随身 assistant. Official reading, fonts, 4G, and 百问 stay on this tree. This fork adds a fourth cloud provider,「我的 AI」, and a way to leave the page, talk about it, and return to the same page.
+
+The clickable product mock lives in [`sim/`](sim/README.md). Open `sim/index.html` in a browser. It does not build firmware or talk to a device.
+
 **Quick links**
 
 - ESP-IDF docs: [ESP32-S31 Get Started](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s31/get-started/index.html)

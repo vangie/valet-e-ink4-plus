@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>随身 · valet-e-ink4-plus</title>
+<link rel="stylesheet" href="sim.css" />
+<link rel="stylesheet" href="screen.css" />
+</head>
+<body>
+<div class="stage">
+  <header class="top">
+    <div>
+      <p class="kicker">随身 · 假界面 · 不连设备 · 不连网关</p>
+      <h1>valet-e-ink4-plus</h1>
+    </div>
+    <p class="hint">按键可以点，也可以按住。电脑键盘：A 是 AI 唤醒，W / S 是加 / 减音量，P 是电源，M 是菜单，← → 是两颗灰键。</p>
+  </header>
+
+  <div class="layout">
+    <section class="device" aria-label="设备">
+      <div class="shell">
+        <div class="plate"></div>
+        <div class="panel" id="panel"></div>
+        <button class="cap menu" data-key="menu" title="菜单"></button>
+        <button class="cap prev" data-key="prev" title="返回 / 上一页"></button>
+        <button class="cap next" data-key="next" title="前进 / 下一页"></button>
+        <button class="key ai" data-key="ai" title="AI 唤醒"></button>
+        <button class="key up" data-key="vol-up" title="加音量"></button>
+        <button class="key vdown" data-key="vol-down" title="减音量"></button>
+        <button class="key power" data-key="power" title="电源"></button>
+        <span class="tag t-ai">AI 唤醒</span>
+        <span class="tag t-up">加音量</span>
+        <span class="tag t-down">减音量</span>
+        <span class="tag t-power">电源</span>
+      </div>
+      <p class="legend">右侧是三颗键帽、四个功能。中间那根长条是一颗键帽：按上半是加音量，按下半是减音量。位置按关机画面上的按键说明对过。</p>
+      <div class="now" id="now"></div>
+    </section>
+
+    <aside class="notes">
+      <h2>这次在试的路径</h2>
+      <ol>
+        <li>首页点「阅读」，继续阅读，翻到《三国演义》第 2 页。</li>
+        <li>长按 AI 唤醒，带着这一页进入百问。不松手就直接开始听，松开发送。</li>
+        <li>页底切到「通话」。连接不断，只换听和说的方式。</li>
+        <li>按菜单，回到第 2 页。会话关掉，页码没动。</li>
+        <li>设置里换云服务要重启；问答还是通话，改了不用重启。</li>
+      </ol>
+      <h2>还没定、用这页来看的</h2>
+      <ul>
+        <li>正文里短按 AI 唤醒，官方是弹出阅读卡片。要不要留给「我的 AI」？</li>
+        <li>官方百问拿不到正在读的那一页。只有「我的 AI」带上这一页。</li>
+        <li>通话时字幕整页换，底栏写听、说或静音。</li>
+      </ul>
+      <p class="log-title">刚才发生了什么</p>
+      <ol class="log" id="log" reversed></ol>
+    </aside>
+  </div>
+</div>
+<script src="state.js"></script>
+<script src="screens.js"></script>
+<script src="ai.js"></script>
+<script src="nav.js"></script>
+<script src="live.js"></script>
+<script src="keys.js"></script>
+<script src="keys2.js"></script>
+<script src="sim.js"></script>
+<script src="touch.js"></script>
+</body>
+</html>

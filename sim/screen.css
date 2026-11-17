@@ -1,0 +1,88 @@
+/* 屏里的内容。面板 246×438，对应真屏 684×1216。位置按官方正面渲染图量。 */
+.panel { font-family: "PingFang SC", "Avenir Next", sans-serif; }
+.panel .note { margin: 0; font-size: 11px; line-height: 1.45; color: #555; }
+
+.bar { height: 24px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 9px; font-size: 10px; border-bottom: 1px solid #222; }
+.bar span:last-child { text-align: right; }
+.batt { display: inline-block; width: 13px; height: 7px; margin-right: 3px; vertical-align: -1px; border: 1px solid #111; border-radius: 1px; padding: 1px; background: linear-gradient(90deg, #111 70%, transparent 70%) content-box; }
+
+/* 首页时钟 */
+.hero { position: relative; height: 204px; }
+.hero .hh, .hero .mm { position: absolute; font: 200 88px/1 "Avenir Next", "Helvetica Neue", sans-serif; letter-spacing: -3px; }
+.hero .hh { left: 10px; top: 12px; }
+.hero .mm { left: 19px; top: 95px; }
+.hero .slash { position: absolute; left: 22px; top: 105px; width: 93px; border-top: 1.3px solid #111; transform: rotate(-11.2deg); transform-origin: left center; }
+.hero .date { position: absolute; right: 13px; top: 96px; text-align: right; font: 300 17px/23px "Avenir Next", "PingFang SC", sans-serif; }
+.hero .date i { display: block; width: 36px; margin: 0 0 7px auto; border-top: 1px solid #111; }
+.hero .date b { display: block; font: 600 19px/23px "PingFang SC", sans-serif; }
+.hero .date span { display: block; font: 300 17px/23px "PingFang SC", sans-serif; letter-spacing: 2px; margin-right: -2px; }
+
+.tiles { display: block; }
+.tile { cursor: pointer; }
+.tile polygon { fill: transparent; stroke: #111; stroke-width: 1.1; stroke-linejoin: round; }
+.tile text { font: 13px "PingFang SC", sans-serif; fill: #111; }
+.tile.dark polygon { fill: #111; }
+.tile.dark text { fill: #f2f2f1; }
+.tile:hover polygon { stroke-width: 2; }
+
+/* 书的详情 */
+.detail { padding: 18px 20px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.cover { width: 92px; height: 128px; margin: 10px 0 6px; border: 1.5px solid #111; display: flex; align-items: center; justify-content: center; writing-mode: vertical-rl; font: 600 20px "Songti SC", serif; letter-spacing: 6px; }
+.detail h3 { margin: 0; font-size: 16px; }
+.wide { width: 100%; margin-top: 12px; padding: 7px 0; border: 1.5px solid #111; background: #111; color: #f2f2f1; font-size: 13px; }
+
+/* 正文：默认点屏左边上一页、中间开卡片、右边下一页，和固件的点按分区一样 */
+.read { position: relative; height: 100%; display: flex; flex-direction: column; }
+.read-head, .read-foot { display: flex; justify-content: space-between; padding: 7px 14px; font-size: 10px; color: #444; }
+.read-body { flex: 1; padding: 4px 16px; cursor: pointer; font-family: "Songti SC", "Source Han Serif SC", serif; }
+.read-body p { margin: 0 0 8px; font-size: 15.5px; line-height: 1.75; text-indent: 2em; text-align: justify; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 12px 12px; background: #f2f2f1; border-top: 1.5px solid #111; }
+.tabs { display: flex; border: 1px solid #111; margin-bottom: 10px; }
+.tabs span { flex: 1; padding: 4px 0; text-align: center; font-size: 12px; }
+.tabs .on { background: #111; color: #f2f2f1; }
+.row-btns { display: flex; gap: 8px; margin-bottom: 8px; }
+.row-btns button { flex: 1; padding: 5px 0; border: 1px solid #111; background: transparent; font-size: 12px; }
+
+/* 百问 */
+.ai { height: calc(100% - 24px); display: flex; flex-direction: column; }
+.chip { margin: 8px 10px 0; padding: 5px 8px; border: 1px solid #111; font-size: 11px; line-height: 1.4; }
+.chip.dim { border-style: dashed; color: #555; }
+.ai-main { flex: 1; padding: 10px 14px; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+.big { font-size: 22px; text-align: center; margin-bottom: 6px; }
+.ai-main > .note { text-align: center; }
+.idle p { margin: 0 0 6px; text-align: center; font-size: 14px; }
+.qa p { margin: 0 0 10px; font-size: 14.5px; line-height: 1.6; }
+.live .caption { margin: 12px 0; font-size: 17px; line-height: 1.55; text-align: center; }
+.live .note { text-align: center; }
+.wave { height: 34px; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.wave i { width: 3px; height: 5px; background: #111; }
+.wave.on i:nth-child(odd) { height: 24px; }
+.wave.on i:nth-child(3n) { height: 14px; }
+.wave.on i:nth-child(4n) { height: 30px; }
+.foot { height: 38px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; border-top: 1px solid #111; font-size: 12px; }
+.seg { display: inline-flex; border: 1px solid #111; }
+.seg button { padding: 4px 12px; border: 0; background: transparent; font-size: 12px; }
+.seg button.on { background: #111; color: #f2f2f1; }
+.foot > button { padding: 3px 9px; border: 1px solid #111; background: transparent; font-size: 12px; }
+
+/* 设置 */
+.settings { padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.settings h3 { margin: 4px 0 0; font-size: 13px; }
+.choices { display: flex; flex-wrap: wrap; gap: 5px; }
+.choice { padding: 3px 8px; border: 1px solid #111; border-radius: 2px; background: transparent; font-size: 12px; }
+.choice.on { background: #111; color: #f2f2f1; }
+.settings label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+.settings input, .settings select { padding: 3px 5px; border: 1px solid #111; border-radius: 0; background: transparent; font-size: 11px; }
+.settings .wide { margin-top: 4px; }
+
+.simple { padding: 14px 16px; }
+.simple h3 { margin: 0 0 10px; font-size: 17px; }
+.simple p { margin: 0 0 8px; font-size: 13px; line-height: 1.6; }
+.simple code { font-size: 10.5px; word-break: break-all; }
+
+.standby { height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 14px; padding: 0 22px; }
+.standby .hm { font: 200 104px/0.86 "Avenir Next", sans-serif; letter-spacing: -3px; }
+.standby .date { font-size: 13px; }
+.boot { height: 100%; display: flex; align-items: center; justify-content: center; font: 600 24px "Avenir Next", sans-serif; }
+.full { display: block; width: 100%; height: 100%; }
+.toast { position: absolute; left: 50%; top: 34px; transform: translateX(-50%); padding: 5px 12px; border-radius: 2px; background: #111; color: #f2f2f1; font-size: 12px; white-space: nowrap; }
