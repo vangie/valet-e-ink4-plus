@@ -268,6 +268,7 @@ static void ShowTab(int index) {
 
     TearDownActiveTab();
     lv_obj_clean(s_ui.content_page);
+    lv_obj_set_style_pad_row(s_ui.content_page, kSettingsOptionGap, 0);
     s_ui.active_tab = index;
 
     for (int i = 0; i < kTabCount; ++i) {
@@ -299,15 +300,98 @@ static const char* Text(const char* zh, const char* en) {
 }
 static void ShowOverview();
 static void ShowGroup(int group);
-static void AdjustQuick(lv_event_t* event) {
-    const intptr_t action = reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
+// Design sizes are panel pixels measured from sim/ (新设计 → 设置).
+static void DrawLine(lv_layer_t* layer, int x1, int y1, int x2, int y2, int width) {
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = lv_color_black();
+    line.width = width;
+    line.opa = LV_OPA_COVER;
+    line.round_start = line.round_end = 1;
+    line.p1 = {static_cast<lv_value_precise_t>(x1), static_cast<lv_value_precise_t>(y1)};
+    line.p2 = {static_cast<lv_value_precise_t>(x2), static_cast<lv_value_precise_t>(y2)};
+    lv_draw_line(layer, &line);
+}
+// Line icons on the design's 24-unit grid; the UI font pack has no symbol glyphs.
+enum Glyph : intptr_t { kGlyphBack, kGlyphGo, kGlyphSun, kGlyphSpeaker, kGlyphWave, kGlyphNet, kGlyphBook, kGlyphDevice };
+static void DrawGlyph(lv_event_t* e) {
+    auto* layer = lv_event_get_layer(e);
+    lv_area_t a;
+    lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+    const int size = a.x2 - a.x1 + 1;
+    const int w = size >= 44 ? 4 : 3;
+    auto X = [&](int tenths) { return a.x1 + tenths * size / 240; };
+    auto Y = [&](int tenths) { return a.y1 + tenths * size / 240; };
+    auto L = [&](int x1, int y1, int x2, int y2) { DrawLine(layer, X(x1), Y(y1), X(x2), Y(y2), w); };
+    auto Ring = [&](int cx, int cy, int r, int from, int to) {
+        lv_draw_arc_dsc_t arc;
+        lv_draw_arc_dsc_init(&arc);
+        arc.color = lv_color_black();
+        arc.width = w;
+        arc.opa = LV_OPA_COVER;
+        arc.rounded = 1;
+        arc.center = {static_cast<lv_value_precise_t>(X(cx)), static_cast<lv_value_precise_t>(Y(cy))};
+        arc.radius = r * size / 240 + w / 2;
+        arc.start_angle = from;
+        arc.end_angle = to;
+        lv_draw_arc(layer, &arc);
+    };
+    switch (reinterpret_cast<intptr_t>(lv_event_get_user_data(e))) {
+        case kGlyphBack: L(145, 50, 75, 120); L(75, 120, 145, 190); break;
+        case kGlyphGo: L(95, 50, 165, 120); L(165, 120, 95, 190); break;
+        case kGlyphSun:
+            Ring(120, 120, 36, 0, 360);
+            L(120, 28, 120, 52); L(120, 188, 120, 212); L(28, 120, 52, 120); L(188, 120, 212, 120);
+            L(55, 55, 72, 72); L(168, 168, 185, 185); L(55, 185, 72, 168); L(168, 72, 185, 55);
+            break;
+        case kGlyphSpeaker:
+            L(40, 95, 40, 145); L(40, 145, 75, 145); L(75, 145, 125, 185); L(125, 185, 125, 55);
+            L(125, 55, 75, 95); L(75, 95, 40, 95);
+            Ring(130, 120, 42, 315, 45); Ring(130, 120, 78, 320, 40);
+            break;
+        case kGlyphWave: L(35, 100, 35, 140); L(78, 65, 78, 175); L(120, 30, 120, 210); L(163, 65, 163, 175); L(205, 100, 205, 140); break;
+        case kGlyphNet: L(45, 200, 45, 170); L(95, 200, 95, 130); L(145, 200, 145, 90); L(195, 200, 195, 40); break;
+        case kGlyphBook:
+            L(120, 65, 120, 205); L(120, 65, 75, 45); L(75, 45, 30, 45); L(30, 45, 30, 185); L(30, 185, 75, 185);
+            L(75, 185, 120, 205); L(120, 65, 165, 45); L(165, 45, 210, 45); L(210, 45, 210, 185);
+            L(210, 185, 165, 185); L(165, 185, 120, 205);
+            break;
+        case kGlyphDevice: L(65, 25, 175, 25); L(175, 25, 175, 215); L(175, 215, 65, 215); L(65, 215, 65, 25); L(100, 180, 140, 180); break;
+    }
+}
+static lv_obj_t* AddGlyph(lv_obj_t* parent, Glyph glyph, int size) {
+    auto* icon = lv_obj_create(parent);
+    lv_obj_remove_style_all(icon);
+    lv_obj_set_size(icon, size, size);
+    lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(icon, DrawGlyph, LV_EVENT_DRAW_MAIN, reinterpret_cast<void*>(static_cast<intptr_t>(glyph)));
+    return icon;
+}
+static const lv_font_t* SmallFont() {
+    const auto* font = fontpack_lv_font_get(25, 2);
+    return font ? font : fontpack_lv_font_ui();
+}
+static const lv_font_t* StrongFont() {
+    const auto* font = fontpack_lv_font_get(30, 4);
+    return font ? font : fontpack_lv_font_ui();
+}
+
+// Front light and volume: ten blocks each. Tap a block to set that level; tap
+// the block that is already the level to go one lower, so zero is reachable.
+static void SetQuick(lv_event_t* event) {
+    const intptr_t data = reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
+    const bool light = data < 100;
+    const int block = static_cast<int>(data % 100);
     const uint32_t generation = s_settings_generation;
-    if (!Application::GetInstance().Schedule([action, generation]() {
-        if (action == 1 || action == -1) {
-            auto& light = Frontlight::GetInstance();
-            light.SetBrightness(std::clamp<int>(light.target_brightness() + action * 10, 0, 100), true);
+    if (!Application::GetInstance().Schedule([light, block, generation]() {
+        if (light) {
+            auto& front = Frontlight::GetInstance();
+            const int now = (front.target_brightness() + 5) / 10;
+            front.SetBrightness((now == block ? block - 1 : block) * 10, true);
         } else if (auto* codec = Board::GetInstance().GetAudioCodec()) {
-            codec->SetOutputVolume(std::clamp<int>(codec->output_volume() + (action > 0 ? 10 : -10), 0, 100));
+            const int now = (codec->output_volume() + 5) / 10;
+            codec->SetOutputVolume((now == block ? block - 1 : block) * 10);
         }
         auto* expected = new uint32_t(generation);
         if (!ScreenLvAsync([](void* context) {
@@ -320,25 +404,55 @@ static void AdjustQuick(lv_event_t* event) {
         ScreenShowToast(Text("操作繁忙，请重试", "Busy. Try again."));
     }
 }
-static void AddQuick(const char* name, int value, intptr_t action) {
-    auto* row = lv_obj_create(s_ui.content_page);
+static void AddLevel(lv_obj_t* box, Glyph glyph, const char* name, int value, bool light) {
+    auto* row = lv_obj_create(box);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, lv_pct(100), UiSy(40));
+    lv_obj_set_size(row, lv_pct(100), 72);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(AddGlyph(row, glyph, 36), LV_ALIGN_LEFT_MID, 0, 0);
     auto* label = lv_label_create(row);
-    lv_label_set_text_fmt(label, "%s  %d", name, value);
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
-    for (int i = 0; i < 2; ++i) {
-        auto* button = lv_button_create(row);
-        lv_obj_set_size(button, UiSx(48), UiSy(38));
-        lv_obj_align(button, LV_ALIGN_RIGHT_MID, -UiSx(i == 0 ? 58 : 0), 0);
-        auto* symbol = lv_label_create(button);
-        lv_label_set_text(symbol, i == 0 ? "-" : "+");
-        lv_obj_center(symbol);
-        SettingsStyleSelectable(button, symbol, false);
-        lv_obj_add_event_cb(button, AdjustQuick, LV_EVENT_CLICKED,
-            reinterpret_cast<void*>(i == 0 ? -action : action));
+    lv_label_set_text(label, name);
+    lv_obj_set_style_text_font(label, SmallFont(), 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 52, 0);
+    const int filled = (std::clamp(value, 0, 100) + 5) / 10;
+    constexpr int kBlockW = 32, kBlockGap = 5, kBlocksX = 130;
+    for (int i = 0; i < 10; ++i) {
+        // The touch target is the full row height; the drawn block is the centre of it.
+        auto* hit = lv_obj_create(row);
+        lv_obj_remove_style_all(hit);
+        lv_obj_set_size(hit, kBlockW + kBlockGap, 72);
+        lv_obj_set_pos(hit, kBlocksX + i * (kBlockW + kBlockGap), 0);
+        lv_obj_clear_flag(hit, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(hit, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(hit, SetQuick, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>((light ? 0 : 100) + i + 1)));
+        auto* block = lv_obj_create(hit);
+        lv_obj_remove_style_all(block);
+        lv_obj_set_size(block, kBlockW, 38);
+        lv_obj_align(block, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_set_style_border_width(block, 2, 0);
+        lv_obj_set_style_border_color(block, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(block, i < filled ? lv_color_black() : lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(block, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(block, LV_OBJ_FLAG_CLICKABLE);
     }
+    auto* number = lv_label_create(row);
+    lv_label_set_text_fmt(number, "%d", value);
+    lv_obj_set_style_text_font(number, SmallFont(), 0);
+    lv_obj_align(number, LV_ALIGN_RIGHT_MID, 0, 0);
+}
+static lv_obj_t* AddQuickBox() {
+    auto* box = lv_obj_create(s_ui.content_page);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_size(box, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_border_width(box, 3, 0);
+    lv_obj_set_style_border_color(box, lv_color_black(), 0);
+    lv_obj_set_style_pad_hor(box, 22, 0);
+    lv_obj_set_style_pad_ver(box, 7, 0);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    return box;
 }
 static void OpenTab(lv_event_t* e) {
     ShowTab(TabIndexOf(static_cast<SettingsTab>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)))));
@@ -349,34 +463,43 @@ static void OpenGroup(lv_event_t* e) {
     ShowGroup(static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e))));
 }
 static void OpenReading(lv_event_t*) { ScreenNavigateTo(BookScreen::Create); }
-static void AddRow(const char* title, const char* detail, lv_event_cb_t callback, intptr_t data) {
-    auto* row = SettingsCreateSelectableOption(s_ui.content_page, title, callback, data);
-    lv_obj_set_height(row, UiSy(detail && *detail ? 76 : 52));
-    lv_obj_set_style_border_width(row, 0, 0);
+static void AddRow(const char* title, const char* detail, lv_event_cb_t callback, intptr_t data,
+                   int glyph = -1) {
+    const bool two = detail && *detail;
+    auto* row = lv_obj_create(s_ui.content_page);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), glyph >= 0 ? 134 : two ? 112 : 84);
+    lv_obj_set_style_border_width(row, 2, 0);
     lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
-    lv_obj_set_style_border_width(row, UiSx(1), 0);
-    lv_obj_set_style_radius(row, 0, 0);
-    auto* label = lv_obj_get_child(row, 0);
-    // The shared option re-centres its label whenever the row is resized, which
-    // put the title on top of the detail line. These rows place it themselves.
-    // The fit callback is a header inline with one copy per source file, so it
-    // is found by the label it was registered with, not by its address.
-    for (uint32_t i = lv_obj_get_event_count(row); i-- > 0;) {
-        if (lv_event_dsc_get_user_data(lv_obj_get_event_dsc(row, i)) == label) lv_obj_remove_event(row, i);
+    lv_obj_set_style_border_color(row, lv_color_black(), 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    HapticAttachClick(row);
+    lv_obj_add_event_cb(row, callback, LV_EVENT_CLICKED, reinterpret_cast<void*>(data));
+    int left = 4;
+    if (glyph >= 0) {
+        lv_obj_align(AddGlyph(row, static_cast<Glyph>(glyph), 50), LV_ALIGN_LEFT_MID, 6, 0);
+        left = 84;
     }
-    lv_obj_set_width(label, lv_pct(92));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_align(label, detail && *detail ? LV_ALIGN_TOP_LEFT : LV_ALIGN_LEFT_MID, 0, 0);
-    if (detail && *detail) {
+    auto* name = lv_label_create(row);
+    lv_label_set_text(name, title);
+    lv_obj_set_style_text_font(name, StrongFont(), 0);
+    lv_obj_set_width(name, lv_pct(100));
+    lv_obj_set_style_pad_right(name, left + 48, 0);
+    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    lv_obj_align(name, LV_ALIGN_LEFT_MID, left, two ? -20 : 0);
+    lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
+    if (two) {
         auto* sub = lv_label_create(row);
         lv_label_set_text(sub, detail);
-        lv_obj_set_width(sub, lv_pct(92));
+        lv_obj_set_style_text_font(sub, SmallFont(), 0);
+        lv_obj_set_width(sub, lv_pct(100));
+        lv_obj_set_style_pad_right(sub, left + 48, 0);
         lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
-        lv_obj_set_style_text_font(sub, fontpack_lv_font_ui(), 0);
-        lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_align(sub, LV_ALIGN_LEFT_MID, left, 22);
         lv_obj_clear_flag(sub, LV_OBJ_FLAG_CLICKABLE);
     }
+    lv_obj_align(AddGlyph(row, kGlyphGo, 26), LV_ALIGN_RIGHT_MID, -2, 0);
 }
 static void AddTab(SettingsTab tab, const char* detail = nullptr) {
     AddRow(kTabs[TabIndexOf(tab)].name(), detail, OpenTab, static_cast<intptr_t>(tab));
@@ -385,6 +508,7 @@ static void ClearContent() {
     TearDownActiveTab();
     // 分组列表自身也有控件（不归旧页签生命周期管理）。
     lv_obj_clean(s_ui.content_page);
+    lv_obj_set_style_pad_row(s_ui.content_page, 0, 0);
     s_ui.active_tab = -1;
     lv_obj_scroll_to_y(s_ui.content_page, 0, LV_ANIM_OFF);
     VkKey_SetScreenFactory(kScreenId, SettingsScreen::Create);
@@ -416,8 +540,17 @@ static void ShowOverview() {
     ClearContent();
     s_ui.group = -1;
     lv_label_set_text(s_ui.heading, Text("设置", "Settings"));
-    AddQuick(Text("前光", "Light"), Frontlight::GetInstance().target_brightness(), 1);
-    if (auto* codec = Board::GetInstance().GetAudioCodec()) AddQuick(Text("音量", "Volume"), codec->output_volume(), 2);
+    auto* quick = AddQuickBox();
+    AddLevel(quick, kGlyphSun, Text("前光", "Light"), Frontlight::GetInstance().target_brightness(), true);
+    if (auto* codec = Board::GetInstance().GetAudioCodec())
+        AddLevel(quick, kGlyphSpeaker, Text("音量", "Volume"), codec->output_volume(), false);
+    // A rule over the first row, as in the design.
+    auto* rule = lv_obj_create(s_ui.content_page);
+    lv_obj_remove_style_all(rule);
+    lv_obj_set_size(rule, lv_pct(100), 3);
+    lv_obj_set_style_bg_color(rule, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
+    lv_obj_set_style_margin_top(rule, 16, 0);
     const auto provider = chat_cloud::ActiveProvider();
     const char* service = provider == chat_cloud::Provider::Custom ? Text("自建", "Custom") :
         provider == chat_cloud::Provider::Baiwen ? Text("百问", "Baiwen") :
@@ -428,7 +561,8 @@ static void ShowOverview() {
         Text("声音输出、耳机与翻页器", "Audio, headphones and page turners"),
         Text("语言、电量与设备管理", "Language, power and device management"),
     };
-    for (int i = 0; i < 6; ++i) AddRow(Text(kGroups[i].zh, kGroups[i].en), descriptions[i], OpenGroup, i);
+    static constexpr Glyph kGroupGlyphs[] = {kGlyphWave, kGlyphNet, kGlyphSun, kGlyphBook, kGlyphSpeaker, kGlyphDevice};
+    for (int i = 0; i < 6; ++i) AddRow(Text(kGroups[i].zh, kGroups[i].en), descriptions[i], OpenGroup, i, kGroupGlyphs[i]);
 }
 static bool NavigateUp() {
     if (s_ui.content_built) { ShowGroup(s_ui.group < 0 ? 5 : s_ui.group); return true; }
@@ -510,30 +644,40 @@ static lv_obj_t* CreateInternal() {
     lv_obj_clear_flag(body, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(body, 0, 0);
+    lv_obj_set_style_pad_row(body, 0, 0);
     auto* header = lv_obj_create(body);
     lv_obj_remove_style_all(header);
-    lv_obj_set_size(header, lv_pct(100), UiSy(48));
+    lv_obj_set_size(header, lv_pct(100), 94);
+    lv_obj_set_style_border_width(header, 3, 0);
+    lv_obj_set_style_border_side(header, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(header, lv_color_black(), 0);
     lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
-    auto* back = lv_button_create(header);
-    lv_obj_set_size(back, UiSx(64), UiSy(44));
+    auto* back = lv_obj_create(header);
+    lv_obj_remove_style_all(back);
+    lv_obj_set_size(back, 96, 90);
+    lv_obj_clear_flag(back, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
+    HapticAttachClick(back);
     lv_obj_add_event_cb(back, BackClicked, LV_EVENT_CLICKED, nullptr);
-    auto* back_label = lv_label_create(back);
-    lv_label_set_text(back_label, "<"); // the UI font pack carries no LVGL symbol glyphs
-    lv_obj_center(back_label);
-    SettingsStyleSelectable(back, back_label, false);
+    lv_obj_align(AddGlyph(back, kGlyphBack, 44), LV_ALIGN_LEFT_MID, 28, 0);
     s_ui.heading = lv_label_create(header);
-    lv_obj_set_width(s_ui.heading, LV_HOR_RES - UiSx(110));
-    lv_obj_align(s_ui.heading, LV_ALIGN_LEFT_MID, UiSx(78), 0);
+    lv_obj_set_style_text_font(s_ui.heading, StrongFont(), 0);
+    lv_obj_set_width(s_ui.heading, LV_HOR_RES - 140);
+    lv_label_set_long_mode(s_ui.heading, LV_LABEL_LONG_DOT);
+    lv_obj_align(s_ui.heading, LV_ALIGN_LEFT_MID, 96, 0);
 
     lv_obj_t* content = lv_obj_create(body);
     lv_obj_remove_style_all(content);
     lv_obj_set_width(content, lv_pct(100));
     lv_obj_set_flex_grow(content, 1);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_pad_all(content, kSettingsContentPad, 0);
+    lv_obj_set_style_pad_hor(content, 33, 0);
+    lv_obj_set_style_pad_top(content, 26, 0);
+    lv_obj_set_style_pad_bottom(content, 16, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(content, kSettingsOptionGap, 0);
+    lv_obj_set_style_pad_row(content, 0, 0);
     lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLL_ELASTIC);
     lv_obj_set_scroll_dir(content, LV_DIR_VER);

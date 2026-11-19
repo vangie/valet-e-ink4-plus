@@ -275,6 +275,14 @@ void DrawChoice(lv_event_t* e) {
 }
 void BuildPair(lv_obj_t* root) {
     auto* pair = Box(root, kSide, kPairY, kWidth, kPairH);
+    // Say on the block itself why a call cannot start, instead of only after the tap.
+    const char* call_note = Text("要用「自建」", "Needs Custom");
+    if (chat_cloud::IsCustom()) {
+        const auto profiles = valet::LoadAssistantProfiles();
+        const auto* active = profiles.Active();
+        call_note = !active ? Text("还没配对", "Not paired") :
+            active->live ? Text("接通就聊", "Just talk") : Text("还没配置通话", "Call not set up");
+    }
     for (int i = 0; i < 2; ++i) {
         const bool ask = i == 0;
         // Each half owns its side of the cut; the art is drawn over the whole pair.
@@ -283,7 +291,7 @@ void BuildPair(lv_obj_t* root) {
         auto* hit = Box(pair, ask ? 0 : kWidth / 2 + 8, 0, kWidth / 2 - 8, kPairH, ask ? Ask : Call);
         auto* title = Label(hit, ask ? Text("提问", "Ask") : Text("通话", "Call"), &kValetTitleFont, ask);
         lv_obj_set_style_text_letter_space(title, 4, 0);
-        auto* note = Label(hit, ask ? Text("按住，说一句", "Hold and say it") : Text("接通就聊", "Just talk"), Small(), ask);
+        auto* note = Label(hit, ask ? Text("按住，说一句", "Hold and say it") : call_note, Small(), ask);
         if (ask) {
             lv_obj_align(title, LV_ALIGN_BOTTOM_LEFT, 36, -70);
             lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, 36, -30);
@@ -519,6 +527,8 @@ void BuildAppCell(lv_obj_t* root, int slot, const AppEntry& entry, int style) {
     HapticAttachClick(cell);
     lv_obj_set_user_data(cell, const_cast<AppEntry*>(&entry));
     lv_obj_add_event_cb(cell, Home_OnAppClicked, LV_EVENT_CLICKED, const_cast<AppEntry*>(&entry));
+    // The slanted tiles of the 斜切 style are not drawn on this grid yet; use the outline until they are.
+    if (style == HomeScreen::kCardStyleSlash) style = HomeScreen::kCardStyleBorder;
     Home_ApplyCardStyle(cell, style);
     if (style == HomeScreen::kCardStyleBorder) lv_obj_set_style_border_width(cell, 3, 0);
     // Built-in icons are 120 px, stored compressed in strips that cannot be
