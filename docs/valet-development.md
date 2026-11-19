@@ -117,3 +117,17 @@ Ask final在显示文字后可自动请求 `valet.speech.start`，只传sessionK
 ## 代码审查与空间优化
 
 本轮修复、尺寸对比、回归与待实机验证项目见 [valet-code-review.md](valet-code-review.md)。共享网关仍固定v0.2.0；没有刷机或修改生产服务。
+
+## 官方云服务（百问、待办、天气、推送、应用商店、WorkBuddy）
+
+公开源码的 `main/cloudzao_endpoints.c` 把服务地址全部留空。官方烧录平台上的整片镜像是完整构建，地址都在里面。本地生成一份填好地址的副本：
+
+```sh
+python3 tools/official/extract_endpoints.py <官方整片镜像.bin>
+```
+
+脚本写出 `main/cloudzao_endpoints.local.c`（已 git-ignore，不提交），构建时优先用它，配置日志会打印 `Cloud endpoints: cloudzao_endpoints.local.c`。只填国内版；国际版分支保持空白。官方构建本身也空着的 7 项保持空白。布局变了脚本会报错退出，不会写错地址。
+
+这只解决地址。百问的账号由服务器按设备身份（MAC、NVS 里的 UUID、eFuse 序列号与 HMAC）识别，所以刷机时只写应用分区，不要擦 NVS。官方订阅是否允许第三方固件使用，需以官方说明为准。
+
+设备测试构建关闭触摸芯片自动升级：临时改 `sdkconfig` 后用独立目录 `idf.py -B build-devtest build`，构建完恢复 `sdkconfig`。

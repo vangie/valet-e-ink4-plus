@@ -11,6 +11,7 @@ components/*
 managed_components/
 build/
 build-valet/
+build-devtest/
 .vscode/
 .cursor/
 .devcontainer/
@@ -53,3 +54,6 @@ tools/elf_app/*/assets.bin
 
 # Distributed separately: exceeds the Git hosting file limit.
 /tools/fontpack/fonts/Extended-Fonts/metalio/e-ink/fonts/extended-fonts.fontpack
+
+# Official cloud endpoints extracted from an official image (tools/official)
+main/cloudzao_endpoints.local.c

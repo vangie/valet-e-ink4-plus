@@ -125,6 +125,17 @@ elseif(CONFIG_USE_CUSTOM_WAKE_WORD)
     list(APPEND WAKE_WORD_SRCS "audio/wake_words/custom_wake_word.cc")
 endif()
 
+# Official cloud endpoints. The committed file leaves every address blank;
+# tools/official/extract_endpoints.py writes a git-ignored local copy filled
+# from an official image, which is used when present.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cloudzao_endpoints.local.c")
+    set(VALET_ENDPOINTS_SOURCE "cloudzao_endpoints.local.c")
+    message(STATUS "Cloud endpoints: cloudzao_endpoints.local.c")
+else()
+    set(VALET_ENDPOINTS_SOURCE "cloudzao_endpoints.c")
+    message(STATUS "Cloud endpoints: blank (official cloud features disabled)")
+endif()
+
 idf_component_register(
     SRCS
         "app_main.cc"
@@ -150,7 +161,7 @@ idf_component_register(
         "ota_ignore.cc"
         "mcp_server.cc"
         "system_info.cc"
-        "cloudzao_endpoints.c"
+        "${VALET_ENDPOINTS_SOURCE}"
         "device_state_event.cc"
         "display/display.cc"
         "display/display_orient.cc"
