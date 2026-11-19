@@ -86,6 +86,8 @@ const state = {
   idleMhz: 320,
   netGrace: 30,
   refresh: "fast",
+  shakeTurn: false,
+  shakeLevel: 3,
   logOn: false,
   usb: false,
   taskTab: "todo",

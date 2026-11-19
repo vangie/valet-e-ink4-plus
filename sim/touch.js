@@ -202,6 +202,10 @@ panel.addEventListener("click", (e) => {
   if (setPick("[data-spacing]", "spacing")) return;
   if (setPick("[data-para]", "para")) return;
   if (setPick("[data-turnstyle]", "turnStyle")) return;
+  const shake = t.closest("[data-shake-turn]");
+  if (shake) { state.shakeTurn = shake.dataset.shakeTurn === "on"; return render(); }
+  const shakeLevel = t.closest("[data-shake-level]");
+  if (shakeLevel) { state.shakeLevel = Number(shakeLevel.dataset.shakeLevel); return render(); }
   if (setPick("[data-writing]", "writing")) return;
   if (setPick("[data-standby]", "standbyStyle")) return;
   if (t.closest("[data-pconn]")) {

@@ -20,6 +20,14 @@ const assert=require('node:assert/strict');
   assert.equal(await page.locator('[data-black-depth]').count(),3);
   await page.locator('[data-black-depth="deep"]').click();
   assert.equal(await page.evaluate(()=>state.blackDepth),'deep');
+  if (design === 'v2') {
+   await page.evaluate(()=>{state.settingsScreen='read';state.settingsTab='read';render()});
+   assert.equal(await page.locator('[data-shake-turn="on"]').count(),1);
+   await page.locator('[data-shake-turn="on"]').click();
+   await page.locator('[data-shake-level="5"]').click();
+   assert.equal(await page.evaluate(()=>state.shakeTurn),true);
+   assert.equal(await page.evaluate(()=>state.shakeLevel),5);
+  }
   await page.evaluate(()=>{state.settingsScreen='diag';state.settingsTab='test';render()});
   await page.locator('[data-diagnostic="auto"]').click();
   assert.match(await page.locator('#panel').innerText(),/蓝牙芯片版本/);

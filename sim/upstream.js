@@ -15,6 +15,12 @@ function prototypeVersionLabel() {
   return L(`原型 ${UPSTREAM.prototypeVersion} · 源码 ${UPSTREAM.sourceVersion}`,
     `Prototype ${UPSTREAM.prototypeVersion} · source ${UPSTREAM.sourceVersion}`);
 }
+function shakeSettings(options, field) {
+  return field(L("晃动翻页", "Shake to turn"), options(
+    [["off", L("关", "Off")], ["on", L("开", "On")]], state.shakeTurn ? "on" : "off", "data-shake-turn")) +
+    field(L("晃动灵敏度", "Shake sensitivity"), options(
+      ["1", "2", "3", "4", "5"].map(level => [level, level]), String(state.shakeLevel), "data-shake-level"));
+}
 function calibrationControls() {
   if (state.vcomRead) return `<section class="calibration"><h3>VCOM</h3><p class="note">${L("已读取屏幕校准值", "Panel calibration loaded")} · ${state.vcom} mV</p></section>`;
   return `<section class="calibration"><h3>${L("黑色深度", "Black depth")}</h3>${opts([["light", L("浅", "Light")], ["standard", L("标准", "Standard")], ["deep", L("深", "Deep")]], state.blackDepth, "data-black-depth")}<p class="note">${L("未读取到 VCOM，使用黑色深度档位。", "VCOM unavailable; choose a black depth preset.")}</p></section>`;

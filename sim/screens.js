@@ -209,6 +209,7 @@ function sheetBody() {
     <p class="note">${t("spacing")}</p>${pick(gaps, state.spacing, "data-spacing")}
     <p class="note">${state.lang === "en" ? "Paragraph gap" : "段距"}</p>${pick(gaps, state.para, "data-para")}
     <p class="note">${t("turn")}</p>${pick([["slide", t("slide")], ["wipe", t("wipe")]], state.turnStyle, "data-turnstyle")}
+    ${shakeSettings(pick, (label, body) => `<p class="note">${label}</p>${body}`)}
     <p class="note">${t("layout")}</p>${pick([["horizontal", t("horizontal")], ["vertical", t("vertical")]], state.writing, "data-writing")}`;
 }
 

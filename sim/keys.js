@@ -1,4 +1,4 @@
-// 按键行为照官方固件 2.0.80：boot_key_handler.cc、lv_adapter_epdiy.cc、book_vk.cc、assistant_screen.cc。
+// 按键行为照官方固件 2.0.82：boot_key_handler.cc、lv_adapter_epdiy.cc、book_vk.cc、assistant_screen.cc。
 const LONG_MS = 500; // TOUCH_VK_LONG_MS、kBootLongPressMs
 const POWER_LONG_MS = 3000; // POWER_LONG_PRESS_MS
 

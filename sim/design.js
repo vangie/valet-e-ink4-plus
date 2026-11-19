@@ -554,11 +554,13 @@ function v2SettingsPane(id) {
       ${v2Fld(L("应用页样式", "App grid style"), v2Seg(themes, state.theme === "pixel" ? "slash" : state.theme, "data-theme"))}`;
   }
   if (id === "read") {
+    const shakeOptions = shakeSettings(v2Seg, v2Fld);
     return `<div class="v-card${state.fontpack ? "" : " bad"}">${ic(state.fontpack ? "check" : "x")}<span><b>${L("扩展字库", "Extended fonts")} · ${state.fontpack ? L("已安装", "installed") : L("未安装", "not installed")}</b>
         <em>${state.fontpack ? L("十万多个汉字，生僻字能显示", "100k+ characters available") : L("机内字库没有的字会画成方框", "Missing characters show as boxes")}</em></span></div>
       <p class="v-tip">${L("这不是屏的限制，是缺字形。把 extended-fonts.fontpack（约 255 MB）传到 SD 卡，再重新打开书。", "Not a screen limit. Copy extended-fonts.fontpack (about 255 MB) to the SD card.")}</p>
       <div class="v-two"><button class="v-line" data-go="transfer">${L("去传输页上传", "Open Transfer")}</button><button class="v-line dashed" data-fontpack>${state.fontpack ? L("假的：当作没装", "Fake: remove") : L("假的：当作已装好", "Fake: installed")}</button></div>
       ${v2Fld(L("正文字号", "Text size"), `<div class="v-step"><button data-size="-">A−</button><b>${state.fontSize}</b><button data-size="+">A+</button></div>`, L("字体、边距、行距在正文里点屏幕中间改。", "Font, margins and spacing are in the reading card."))}
+      ${shakeOptions}
       <nav class="v-rows"><button class="v-row" data-go="pager"><span><b>${L("翻页器", "Page turner")}</b><em>${state.pagerOn ? "PageTurner-A · " + L("已连接", "connected") : L("没连。正文里加 / 减音量键也能翻页", "Not connected. Volume keys also turn pages")}</em></span>${ic("go", "chev")}</button></nav>`;
   }
   if (id === "sound") {

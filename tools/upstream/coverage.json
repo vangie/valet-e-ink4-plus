@@ -12,6 +12,9 @@
     {"id":"shelf-refresh", "change":"书架翻页先出旧画面", "firmware":"merged-2.0.82", "classic":"source-verified", "valet":"hardware-validation-required"},
     {"id":"boot-refresh", "change":"开机概率两次推白", "firmware":"merged-2.0.82", "classic":"source-verified", "valet":"hardware-validation-required"},
     {"id":"wallpaper-rotation", "change":"横屏待机/关机透明壁纸方向", "firmware":"merged-2.0.82", "classic":"source-verified", "valet":"hardware-validation-required"},
-    {"id":"ttf-resume", "change":"快速进出待机后TTF/OTF右侧文字缺失", "firmware":"merged-2.0.82", "classic":"source-verified", "valet":"hardware-validation-required"}
+    {"id":"ttf-resume", "change":"快速进出待机后TTF/OTF右侧文字缺失", "firmware":"merged-2.0.82", "classic":"source-verified", "valet":"hardware-validation-required"},
+    {"id":"shake-turn", "change":"阅读设置增加晃动翻页开关和1至5级灵敏度", "firmware":"merged-2.0.82", "classic":"source-verified", "valet":"source-verified"},
+    {"id":"elf-host-capabilities", "change":"ELF 应用增加绘图、加速度、震动、音频播放和录音宿主接口", "firmware":"merged-2.0.82", "classic":"source-verified", "valet":"hardware-validation-required"},
+    {"id":"sd-robustness", "change":"SD 卡初始化降频重试、DMA 错误与容量状态改进", "firmware":"merged-2.0.82", "classic":"source-verified", "valet":"hardware-validation-required"}
   ]
 }
