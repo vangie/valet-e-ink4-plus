@@ -17,10 +17,10 @@
 
 ## 本机编译
 
-ESP-IDF v6.1 安装于 `/Users/duwan/esp/valet-idf-v6.1`，不覆盖原有 5.5 环境。资源生成还需要 IDF Python 环境中的 `Pillow` 和 `qoi-conv`。
+ESP-IDF v6.1 安装于 `~/esp/valet-idf-v6.1`，不覆盖原有 5.5 环境。资源生成还需要 IDF Python 环境中的 `Pillow` 和 `qoi-conv`。
 
 ```sh
-. /Users/duwan/esp/valet-idf-v6.1/export.sh
+. ~/esp/valet-idf-v6.1/export.sh
 idf.py -B build-valet build
 ```
 
@@ -51,7 +51,7 @@ clang++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
 POST 返回任务已接收，网页继续查询设备结果；NVS 写入均走内部 RAM 的 Storage 任务。二维码解析与地址绑定通过真实 Mbed TLS base64 主机测试；Chrome / WebKit 手机测试使用模拟 API 验证网页操作，不能替代 ESP HTTP 服务和设备 NVS 的实机验收。
 
 ```sh
-IDF_PATH=/Users/duwan/esp/valet-idf-v6.1 sh tools/tests/run_valet_pairing_test.sh
+IDF_PATH=~/esp/valet-idf-v6.1 sh tools/tests/run_valet_pairing_test.sh
 ```
 
 ## 共享网关与联调（2026-11-18）
@@ -70,7 +70,7 @@ IDF_PATH=/Users/duwan/esp/valet-idf-v6.1 sh tools/tests/run_valet_pairing_test.s
 可复现 C++ 签名与真实 Adapter 互操作测试：
 
 ```sh
-IDF_PATH=/Users/duwan/esp/valet-idf-v6.1 \
+IDF_PATH=~/esp/valet-idf-v6.1 \
 PASSPORT_SOURCE=/path/to/existing/ai-passport-agent \
 VALET_TEST_PYTHON=/path/to/python-with-aiohttp-and-cryptography \
 sh tools/tests/run_valet_wire_test.sh

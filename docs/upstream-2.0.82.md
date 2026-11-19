@@ -14,6 +14,6 @@
 - `python3 tools/upstream/validate.py`
 - `python3 -m unittest discover -s tools/tests -p 'test_upstream_sync.py'`
 - `NODE_PATH=/tmp/valet-browser/node_modules VALET_CHROME=... node tools/tests/sim_upstream.cjs`
-- `IDF_PATH=/Users/duwan/esp/valet-idf-v6.1 idf.py -B build-valet build`
+- `IDF_PATH=~/esp/valet-idf-v6.1 idf.py -B build-valet build`
 
 构建结果：`Metalio-E-Ink4-Plus.bin` 为 `0x4f9630` 字节，最小应用分区剩余 `0x69d0` 字节。该版本尚未刷机、部署或推送远端。
