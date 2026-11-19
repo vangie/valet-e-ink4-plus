@@ -311,6 +311,12 @@ if(TARGET freetype)
     # Keep font parsing/format drivers size-optimized. Only the reading hot paths
     # need -O2; this avoids applying speed optimization to the entire font library.
     target_compile_options(freetype PRIVATE -Os -fjump-tables -ftree-switch-conversion)
+    # Register only the TTF/OTF modules and drop the Adobe glyph list (see
+    # display/font/freetype_config); unused drivers are then dropped by --gc-sections.
+    target_include_directories(freetype PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/display/font/freetype_config")
+    target_compile_definitions(freetype PRIVATE
+        "FT_CONFIG_MODULES_H=<valet_ftmodule.h>"
+        "FT_CONFIG_OPTIONS_H=<valet_ftoption.h>")
     get_target_property(_ft_sources freetype SOURCES)
     get_target_property(_ft_source_dir freetype SOURCE_DIR)
     foreach(_ft_source IN LISTS _ft_sources)

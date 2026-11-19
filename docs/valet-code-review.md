@@ -57,3 +57,20 @@ idf.py -B build-valet build
 所有审查修复计入后，镜像净减少 **54,096 bytes（52.83 KiB）**。链接报告DIRAM静态贡献增加12 bytes，外部RAM静态贡献不变；动态音频/模型内存需要实机测量。
 
 最终app SHA256：`534d3c891f215dedd2275e68ccd88b8b9bceeee439a432f3e721aaf7ce9c85e0`。未刷写设备。
+
+## 第二轮空间优化：FreeType 只留 TTF/OTF（2026-11-19，基于 2.0.82 合并）
+
+阅读器只打开 `.ttf` / `.otf`（`book_font_runtime.cc`），渲染用 `FT_RENDER_MODE_NORMAL`。上游 FreeType 默认注册全部驱动，链接器无法丢弃。`main/display/font/freetype_config/` 通过 FreeType 自带的 `FT_CONFIG_MODULES_H` / `FT_CONFIG_OPTIONS_H` 钩子替换配置，不改 `managed_components`：
+
+- 模块只留 truetype、sfnt、cff、psaux、pshinter、psnames、autofit、smooth；去掉 Type 1、CID、PFR、Type 42、FNT、PCF、BDF、单色光栅、SDF、SVG。
+- 关闭 Adobe Glyph List（约 57 KB）。它只给 Type 1 / 裸 CFF 合成 Unicode cmap，TTF/OTF 自带 cmap。
+
+验证：主机上分别编译完整与裁剪后的同版本 FreeType，用设备的加载参数（`FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL`、`FT_Get_Advance` 快速路径）在 20/30/45 px 渲染 14 个码点（含「蟠」「蠠」等生僻字、标点、emoji），对比位图和度量哈希。仓库 `tools/ttf-fonts` 的 18 个字体与系统的 Arial、Songti.ttc、两款 SF OTF（CFF）共 22 个，全部逐字节一致。实机翻页耗时未测。
+
+| 指标 | 2.0.82 合并后 | 本轮后 |
+| --- | ---: | ---: |
+| app.bin | 0x4f9660 | 0x4d82c0（5079744 bytes） |
+| 5 MiB 应用分区余量 | 27,040 bytes（26.4 KiB） | 163136 bytes（159 KiB） |
+| FreeType 链接贡献 | 365,293 bytes | 231283 bytes |
+
+app SHA256：`02784090167b6581f68a7528aac032b4ae0321d53d9e5f8bab992017f51057f9`。未刷写设备。
