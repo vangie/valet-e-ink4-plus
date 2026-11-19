@@ -11,6 +11,7 @@
 #include "cloud_screen/cloud_screen.h"
 #include "screen_common.h"
 #include "cx25601n.h"
+#include "driver/usb_serial_jtag.h"
 #include <wifi_station.h>
 
 #include <esp_log.h>
@@ -145,20 +146,30 @@ bool IsProvisioningStateLocked()
 }  // namespace
 
 namespace pwr {
-// Valet: external power plugged in (USB, adapter). Read from the charger's
-// VBUS status; cached for 2 s because the 1 s policy tick asks every time.
-// OTG (7) is the device powering others, not external power.
+// Valet: external power plugged in. True when the charger reports an input
+// (adapter, USB), or when a USB host is talking to the device: a computer
+// that keeps the USB link alive also powers it, and on a full battery the
+// charger may report no input. Cached for 2 s because the 1 s policy tick
+// asks every time. OTG (7) is the device powering others, not external power.
 bool ExternalPowerPresent()
 {
     static int64_t checked_us = 0;
     static bool present = false;
+    static bool checked_once = false;
     const int64_t now = esp_timer_get_time();
     if (checked_us != 0 && now - checked_us < 2 * 1000 * 1000) return present;
     checked_us = now;
     uint8_t vbus = 0;
     const bool was = present;
-    present = cx25601n_is_ready() && cx25601n_get_vbus_stat(&vbus) == ESP_OK && vbus != 0 && vbus != 7;
-    if (present != was) ESP_LOGI(TAG, "external power %s", present ? "connected" : "removed");
+    const bool charger_input =
+        cx25601n_is_ready() && cx25601n_get_vbus_stat(&vbus) == ESP_OK && vbus != 0 && vbus != 7;
+    const bool usb_host = usb_serial_jtag_is_connected();
+    present = charger_input || usb_host;
+    if (present != was || checked_once == false) {
+        ESP_LOGI(TAG, "external power %s (vbus=%u usb_host=%d)", present ? "connected" : "absent",
+                 vbus, usb_host ? 1 : 0);
+        checked_once = true;
+    }
     return present;
 }
 }  // namespace pwr
@@ -718,6 +729,7 @@ void PowerPolicy::Init(Board* board)
     ESP_ERROR_CHECK(power_hw_sleep_init());
     LoadPowerPrefsFromNvs();
     SelfCheckThresholdsOnce();
+    pwr::ExternalPowerPresent();
     pwr::board = board;
     // 首次读取 Wi-Fi NVS 必须早于使用 PSRAM 栈的外设任务启动。
     if (IsWifiBoard()) WifiStation::GetInstance();

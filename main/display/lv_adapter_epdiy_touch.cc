@@ -106,6 +106,10 @@ static void OnTouchSample(uint8_t count, int raw_x, int raw_y, int lx, int ly) {
     PowerPolicy::GetInstance().NotifyUserActivity();
 
     const char* vk = HitCoverKey(raw_x, raw_y);
+    // Valet diagnostics: a touch near the cover keys that misses every key zone.
+    if (vk == nullptr && raw_y > TOUCH_VK_Y - 150 && s_vk_hold_name == nullptr && !s_ui_finger_down) {
+        ESP_LOGI(TAG, "cover area touch missed keys raw=(%d,%d)", raw_x, raw_y);
+    }
     if (vk != nullptr) {
         metalio_touch_set_ui_suppress(true);
         s_ui_finger_down = false;
