@@ -2,6 +2,7 @@
 
 #include "book_screen/book_screen.h"
 #include "book_screen/book_screen_priv.h"
+#include "book_screen/shelf/book_bookshelf.h"
 #include "book_screen/book_font_runtime.h"
 #include "book_screen/book_geom.h"
 #include "book_screen/shelf/book_home.h"
@@ -223,6 +224,11 @@ lv_obj_t* BookScreen::Create() {
 
 lv_obj_t* BookScreen::CreateLatest() {
     return CreateBookHome(true);
+}
+
+lv_obj_t* BookScreen::CreateShelf() {
+    Book_State().shelf.list_page = 0;
+    return CreateBookshelfScreen();
 }
 
 bool BookScreen::LoadBootResume() {

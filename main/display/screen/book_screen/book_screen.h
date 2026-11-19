@@ -26,6 +26,8 @@ public:
 
     /** @brief 直接续读最近书籍，无有效记录时返回阅读首页 */
     static lv_obj_t* CreateLatest();
+    /** @brief 直接打开「我的书架」首页（Valet 应用页入口） */
+    static lv_obj_t* CreateShelf();
 
     /** @brief 在内部 RAM 栈的启动线程读取并消费关机续读记录 */
     static bool LoadBootResume();

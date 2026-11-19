@@ -95,6 +95,21 @@ void Home_OnAppNameDraw(lv_event_t* e)
         #endif
     };
 
+    // Valet app pages, in the order of the design: the assistant is not listed
+    // because Ask and Call are the first page; the shelf gets its own entry.
+    static const char* Home_AppNameShelf() { return std::strcmp(Lang::Current(), "zh-CN") == 0 ? "书架" : "Shelf"; }
+    static lv_obj_t* Home_CreateShelf() { return BookScreen::CreateShelf(); }
+    const AppEntry kBuiltinValetApps[] = {
+        {"A:ic_app_home_book.spng", Home_AppNameBook, BookScreen::Create},
+        {kHomeValetShelfIcon, Home_AppNameShelf, Home_CreateShelf},
+        {"A:ic_app_home_task.spng", Home_AppNameTask, TaskScreen::Create},
+        {"A:ic_app_home_cloud.spng", Home_AppNameCloud, CloudScreen::Create},
+        #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+        {"A:ic_app_home_workbuddy.spng", Home_AppNameWorkBuddy, WorkBuddyScreen::Create},
+        #endif
+        {"A:ic_app_home_wallpaper.spng", Home_AppNameWallpaper, WallpaperScreen::Create},
+    };
+    std::vector<AppEntry> kValetApps;
     // 每页六个应用，新增应用自动进入后续页。
     std::vector<AppEntry> kApps;
     std::vector<AppEntry> kSlashApps;
@@ -121,11 +136,15 @@ void Home_OnAppNameDraw(lv_event_t* e)
         const AppEntry store = {"A:ic_app_home_cloud.spng", Home_AppNameStore, AppStoreScreen::Create};
         kApps.push_back(store);
         kSlashApps.push_back(store);
+        kValetApps.assign(std::begin(kBuiltinValetApps), std::end(kBuiltinValetApps));
+        kValetApps.push_back(store);
+        kValetApps.push_back({"A:ic_app_home_setting.spng", Home_AppNameSettings, SettingsScreen::Create});
         s_home_installed = std::move(items);
         for (const auto& item : s_home_installed) {
             const AppEntry entry = {"A:ic_app_home_task.spng", nullptr, nullptr, item.app_id, item.name, item.name_en};
             kApps.push_back(entry);
             kSlashApps.push_back(entry);
+            kValetApps.push_back(entry);
         }
         kTotalApps = static_cast<int>(kApps.size());
         kSlashAppCount = static_cast<int>(kSlashApps.size());
@@ -178,6 +197,9 @@ lv_coord_t Home_slash_apps_h = 0;
 
 int Home_PageCount()
     {
+        // The pixel theme draws six apps a page; every other style uses the Valet grid of eight.
+        if (Home_card_style != HomeScreen::kCardStylePixel)
+            return 1 + (static_cast<int>(kValetApps.size()) + kHomeValetAppsPerPage - 1) / kHomeValetAppsPerPage;
         return 1 + (kTotalApps + kAppsPerPage - 1) / kAppsPerPage;
     }
 
@@ -281,8 +303,13 @@ static void Home_ApplyStorageApps(std::vector<AppStore::Item> items) {
             lv_obj_align(Home_apps, LV_ALIGN_BOTTOM_MID, 0, -bottom_inset);
         }
     }
-    // 仅更新应用区，不重新进入首页，也不请求切页推白。
-    Home_FillAppsPage();
+    // The Valet app pages have no separate app container; rebuild the page.
+    if (Home_page > 0 && Home_card_style != HomeScreen::kCardStylePixel && Home_apps == nullptr) {
+        if (ScreenIsHome()) ScreenNavigateTo(HomeScreen::Create);
+    } else {
+        // 仅更新应用区，不重新进入首页，也不请求切页推白。
+        Home_FillAppsPage();
+    }
     ESP_LOGI(TAG, "installed apps loaded in place count=%u", static_cast<unsigned>(s_home_installed.size()));
 }
 
@@ -556,6 +583,21 @@ lv_obj_t *HomeScreen::Create()
         Home_page_lbl = nullptr;
         HomePixel_Build(scr, status.height);
         Home_CreatePageIndicator(scr);
+        lv_obj_add_event_cb(scr, Home_OnHomeDeleted, LV_EVENT_DELETE, nullptr);
+        ScreenSetIsHome(true);
+        VkKey_AttachScreen(scr, kScreenId,
+                           VkKeyScreenDesc{HomeScreen::Create, Home_OnVkKey, nullptr, Home_OnBootLongPress,
+                                           nullptr, nullptr, Home_OnVkKeyLongPress, Home_OnVkKeyPressUp});
+        return scr;
+    }
+
+    {
+        // App pages: the Valet grid, drawn in the card style chosen in settings.
+        HomeHero_Teardown();
+        Home_slash_layout = false;
+        Home_apps = nullptr;
+        Home_page_lbl = nullptr;
+        HomeValet_BuildApps(scr, status.height, card_style);
         lv_obj_add_event_cb(scr, Home_OnHomeDeleted, LV_EVENT_DELETE, nullptr);
         ScreenSetIsHome(true);
         VkKey_AttachScreen(scr, kScreenId,

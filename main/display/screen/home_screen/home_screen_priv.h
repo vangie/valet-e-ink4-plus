@@ -73,6 +73,7 @@ extern lv_image_dsc_t Home_gray_dither_img;
 extern bool Home_gray_dither_ready;
 extern std::vector<AppEntry> kApps;
 extern std::vector<AppEntry> kSlashApps;
+extern std::vector<AppEntry> kValetApps; // Valet app pages (all styles except pixel)
 extern int kTotalApps;
 extern int kSlashAppCount;
 /** @brief 按当前语言获取内置或已安装应用名 */
