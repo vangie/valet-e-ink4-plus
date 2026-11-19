@@ -1,0 +1,8 @@
+# Overrides for the on-desk test build (tools/dev/build.sh). Applied on top of
+# the committed sdkconfig; never used for a release image.
+
+# Leave the touch controller's own firmware alone while testing.
+# CONFIG_METALIO_TOUCH_UPGRADE_ON_BOOT is not set
+
+# "@DEV" commands on the USB console: screenshots and injected input.
+CONFIG_VALET_DEV_LINK=y

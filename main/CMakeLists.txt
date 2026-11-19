@@ -152,6 +152,7 @@ idf_component_register(
         "valet_crypto/monocypher.c"
         "valet_crypto/monocypher-ed25519.c"
         "protocols/valet_protocol.cc"
+        "valet_dev/dev_link.cc"
         "protocols/valet_wire.cc"
         "haptic_feedback.cc"
         "assets/lang_home.cc"

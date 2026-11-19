@@ -162,9 +162,74 @@ static void publish_ui(bool pressed, int lx, int ly, int raw_x, int raw_y) {
     portEXIT_CRITICAL(&s_mux);
 }
 
+#if CONFIG_VALET_DEV_LINK
+// Valet dev link: an injected finger replaces chip sampling until it is released.
+// The feed task consumes it like chip registers, so cover keys, haptics, replay
+// and suppression all run through the normal path.
+enum { DEV_NONE = 0, DEV_DOWN, DEV_DOWN_THEN_UP, DEV_UP };
+static int s_dev_inject = DEV_NONE;
+static bool s_dev_sampled = false; // the current press reached the feed task
+static int s_dev_raw_x = 0;
+static int s_dev_raw_y = 0;
+
+static bool dev_inject_fill(uint8_t* buf) {
+    bool down = false;
+    int x = 0, y = 0;
+    portENTER_CRITICAL(&s_mux);
+    const int mode = s_dev_inject;
+    if (mode == DEV_DOWN || mode == DEV_DOWN_THEN_UP) {
+        down = true;
+        x = s_dev_raw_x;
+        y = s_dev_raw_y;
+        s_dev_sampled = true;
+        if (mode == DEV_DOWN_THEN_UP) {
+            s_dev_inject = DEV_UP;
+        }
+    } else if (mode == DEV_UP) {
+        s_dev_inject = DEV_NONE;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    if (mode == DEV_NONE) {
+        return false;
+    }
+    if (down) {
+        buf[0] = 1;
+        buf[1] = (uint8_t)((FT_EVENT_CONTACT << 6) | ((x >> 8) & 0x0F));
+        buf[2] = (uint8_t)(x & 0xFF);
+        buf[3] = (uint8_t)((y >> 8) & 0x0F);
+        buf[4] = (uint8_t)(y & 0xFF);
+    } // else buf stays zero: no touch points
+    return true;
+}
+
+void metalio_touch_dev_inject(bool down, int raw_x, int raw_y) {
+    portENTER_CRITICAL(&s_mux);
+    if (down) {
+        if (s_dev_inject == DEV_NONE || s_dev_inject == DEV_UP) {
+            s_dev_sampled = false;
+        }
+        s_dev_raw_x = raw_x;
+        s_dev_raw_y = raw_y;
+        s_dev_inject = DEV_DOWN;
+    } else if (s_dev_inject == DEV_DOWN) {
+        // A press shorter than one sampling period must still be seen once.
+        s_dev_inject = s_dev_sampled ? DEV_UP : DEV_DOWN_THEN_UP;
+    }
+    portEXIT_CRITICAL(&s_mux);
+    if (s_irq_sem != NULL) {
+        xSemaphoreGive(s_irq_sem);
+    }
+}
+#else
+static inline bool dev_inject_fill(uint8_t* buf) {
+    (void)buf;
+    return false;
+}
+#endif
+
 static void feed_one_sample(void) {
     uint8_t buf[6] = {0};
-    esp_err_t read_result = ft_read(FT_REG_TD_STATUS, buf, sizeof(buf));
+    esp_err_t read_result = dev_inject_fill(buf) ? ESP_OK : ft_read(FT_REG_TD_STATUS, buf, sizeof(buf));
     if (read_result == ESP_ERR_INVALID_STATE) {
         return; // Paused intentionally, not a touch-chip read failure.
     }

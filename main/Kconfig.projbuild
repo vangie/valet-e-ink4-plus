@@ -65,4 +65,13 @@ config USE_AUDIO_DEBUGGER
     bool "Audio debugger"
     default n
 
+config VALET_DEV_LINK
+    bool "Valet dev link over USB serial (development builds only)"
+    default n
+    help
+        Adds "@DEV" commands to the USB serial console: read the frame the
+        UI drew, inject touches and key presses, report the active screen.
+        Anyone with the USB cable can drive the device, so keep this off in
+        builds that leave the desk. Driven by tools/dev/valetdev.py.
+
 endmenu

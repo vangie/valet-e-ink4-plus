@@ -265,11 +265,32 @@ extern "C" bool MetalioKeys_TakeEdge(void) {
     return xQueueReceive(g_evt_q, &one, 0) == pdTRUE;
 }
 
+#if CONFIG_VALET_DEV_LINK
+// Valet dev link: keys held down by the host tool (bit = key index).
+static std::atomic<uint8_t> g_dev_down{0};
+
+extern "C" void MetalioKeys_DevSetDown(int index, bool down) {
+    if (index < kBoot || index > kVolDown) return;
+    const uint8_t bit = static_cast<uint8_t>(1u << index);
+    if (down) g_dev_down.fetch_or(bit);
+    else g_dev_down.fetch_and(static_cast<uint8_t>(~bit));
+}
+
+extern "C" void MetalioKeys_DevPowerClick(void) {
+    g_power_click.store(true, std::memory_order_release);
+}
+#endif
+
 extern "C" bool MetalioKeys_IsDown(int index) {
     std::lock_guard<std::mutex> lock(g_sample_mu);
     if (index < 0 || index >= kCount || !g_ready) {
         return false;
     }
+#if CONFIG_VALET_DEV_LINK
+    if (g_dev_down.load() & (1u << index)) {
+        return true;
+    }
+#endif
     // 待机量时长等路径要现读，勿只信边沿缓存
     if (g_keys[index].io >= 0) {
         refresh_p1();

@@ -130,4 +130,21 @@ python3 tools/official/extract_endpoints.py <官方整片镜像.bin>
 
 这只解决地址。百问的账号由服务器按设备身份（MAC、NVS 里的 UUID、eFuse 序列号与 HMAC）识别，所以刷机时只写应用分区，不要擦 NVS。官方订阅是否允许第三方固件使用，需以官方说明为准。
 
-设备测试构建关闭触摸芯片自动升级：临时改 `sdkconfig` 后用独立目录 `idf.py -B build-devtest build`，构建完恢复 `sdkconfig`。
+## 桌面测试构建与开发链路
+
+`tools/dev/build.sh` 把测试固件编到 `build-devtest/`：源码和 `sdkconfig` 与正式构建相同，再叠加 `sdkconfig.devtest`（关闭触摸芯片自动升级，打开 `CONFIG_VALET_DEV_LINK`）。仓库里的 `sdkconfig` 不会被改动。
+
+`CONFIG_VALET_DEV_LINK` 在 USB 串口上增加 `@DEV` 命令：读出界面画好的那一帧、注入触摸和按键、报告当前页面。拿到 USB 线的人就能操作设备，所以正式构建保持关闭。电脑端用 `tools/dev/valetdev.py`（需要 pyserial，IDF 的 Python 环境里有）：
+
+```sh
+tools/dev/valetdev.py serve &        # 占住串口并记日志，其他命令都经过它
+tools/dev/valetdev.py shot home.png  # 截图，竖屏 684×1216
+tools/dev/valetdev.py tap 342 600    # 坐标与截图像素一致
+tools/dev/valetdev.py key home       # home / prev / next / ai / vol_up / vol_down / power
+tools/dev/valetdev.py flash          # 只写 ota_0 应用槽，写完重新连上
+```
+
+- 截图是固件要求面板显示的内容；墨水屏上的灰度、残影和局部刷新效果不在里面，仍要看真机。
+- 注入的触摸从触摸驱动的采样入口进入，之后与真手指走同一条路径（盖板键识别、震动、短按回放）；但它绕过了触摸芯片，芯片上报坐标的问题测不出来。
+- 这台设备的串口在 RTS=1、DTR=0 时会复位芯片，macOS 打开串口时默认两根线都拉高再各自放下，所以普通的打开方式会让设备重启。`valetdev.py` 先放 RTS、后放 DTR，打开时不复位。
+- 复位后约 2 秒设备会在 USB 上重新枚举一次，在那之前打开的串口会失效；`flash` 会等过这一段再连。设备进待机或关机后串口同样失效，需要手动 `attach`。

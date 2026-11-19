@@ -7,6 +7,7 @@
 #include "metalio_audio.h"
 #include "power_policy.h"
 #include "simple_uart.hpp"
+#include "valet_dev/dev_link.h"
 #include <cJSON.h>
 #include <driver/usb_serial_jtag.h>
 #include <esp_heap_caps.h>
@@ -215,6 +216,9 @@ static void Reply(uint32_t id, const char* code, const char* stage) {
 }
 
 static void HandleLine(const char* line) {
+#if CONFIG_VALET_DEV_LINK
+    if (!strncmp(line, "@DEV ", 5)) { ValetDevLinkHandle(line + 5); return; }
+#endif
     if (strncmp(line, "@VCOM ", 6)) return;
     // 请求字段均为标量，拒绝嵌套，限制外部输入引起的解析栈占用。
     bool quoted = false, escaped = false;

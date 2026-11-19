@@ -52,6 +52,11 @@ bool MetalioKeys_TakeShutdownPulse(void);
 bool MetalioKeys_TakePowerClick(void);
 bool MetalioKeys_HasPowerClick(void);
 
+/** @brief Valet dev link (CONFIG_VALET_DEV_LINK): 让 BOOT / 音量键读作按下 */
+void MetalioKeys_DevSetDown(int index, bool down);
+/** @brief Valet dev link (CONFIG_VALET_DEV_LINK): 锁存一次电源键短按 */
+void MetalioKeys_DevPowerClick(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -68,6 +68,12 @@ void metalio_touch_set_feed_paused(bool paused);
  */
 bool metalio_touch_ok(void);
 
+/**
+ * @brief Valet dev link (CONFIG_VALET_DEV_LINK): 用注入的触点替代芯片采样，直到松开
+ * @note 坐标为芯片原始坐标；盖板键在 raw_y = TOUCH_VK_Y
+ */
+void metalio_touch_dev_inject(bool down, int raw_x, int raw_y);
+
 #ifdef __cplusplus
 }
 #endif
