@@ -2,6 +2,7 @@
 #define PROTOCOL_H
 
 #include <cJSON.h>
+#include <atomic>
 #include <string>
 #include <functional>
 #include <chrono>
@@ -10,6 +11,7 @@
 struct AudioStreamPacket {
     int sample_rate = 0;
     int frame_duration = 0;
+    bool pcm = false; // Valet realtime PCM16; existing providers remain Opus.
     uint32_t timestamp = 0;
     std::vector<uint8_t> payload;
 };
@@ -55,7 +57,7 @@ public:
         return session_id_;
     }
 
-    void OnIncomingAudio(std::function<void(std::unique_ptr<AudioStreamPacket> packet)> callback);
+    void OnIncomingAudio(std::function<bool(std::unique_ptr<AudioStreamPacket> packet)> callback);
     void OnIncomingJson(std::function<void(const cJSON* root)> callback);
     void OnAudioChannelOpened(std::function<void()> callback);
     void OnAudioChannelClosed(std::function<void()> callback);
@@ -78,7 +80,7 @@ public:
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;
-    std::function<void(std::unique_ptr<AudioStreamPacket> packet)> on_incoming_audio_;
+    std::function<bool(std::unique_ptr<AudioStreamPacket> packet)> on_incoming_audio_;
     std::function<void()> on_audio_channel_opened_;
     std::function<void()> on_audio_channel_closed_;
     std::function<void(const std::string& message)> on_network_error_;
@@ -87,7 +89,7 @@ protected:
 
     int server_sample_rate_ = 24000;
     int server_frame_duration_ = 60;
-    bool error_occurred_ = false;
+    std::atomic<bool> error_occurred_{false};
     std::string session_id_;
     std::chrono::time_point<std::chrono::steady_clock> last_incoming_time_;
 

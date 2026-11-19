@@ -1,6 +1,7 @@
 #include "book_screen/reader/book_page_work.h"
 #include "assets/lang_reader.h"
 #include "epd_content_policy.h"
+#include "valet_reading_context.h"
 #include "epd_refresh.h"
 #pragma GCC optimize("O1")
 
@@ -233,6 +234,7 @@ void RenderReaderPage() {
         AttachReadBodyInput(st.reader.content);
     }
     if (page == nullptr) {
+        valet::PublishReadingPage({}, {}, {}, 0, {});
         FinishReaderFirstPaintGate();
         Book_ShowMessage(st.reader.content, Lang::Strings::BOOK_PAGE_LOAD_FAILED);
         if (settings_overlay) {
@@ -241,6 +243,16 @@ void RenderReaderPage() {
         }
         return;
     }
+
+    std::string context_text;
+    for (const auto& item : page->items) {
+        if (item.kind == reader::ContentKind::kText && !item.text.empty()) {
+            context_text += item.text; context_text += '\n';
+            if (context_text.size() > 12000) break;
+        }
+    }
+    valet::PublishReadingPage(st.reader.session->Info().path, st.reader.session->Title(),
+        st.reader.session->CurrentTocTitle(), st.reader.session->BookCurrentPage() + 1, context_text);
 
     if (prepared->direction != 0) {
         const int effect = BookReaderPrefsPageTurn();

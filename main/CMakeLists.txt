@@ -133,6 +133,15 @@ idf_component_register(
         "yunxin_binding/yunxin_binding.cc"
         "ask_ai_boot_stubs.cc"
         "settings.cc"
+        "assistant_profiles.cc"
+        "valet_reading_context.cc"
+        "assistant_profiles_model.cc"
+        "valet_setup/pairing.cc"
+        "valet_setup/server.cc"
+        "valet_crypto/monocypher.c"
+        "valet_crypto/monocypher-ed25519.c"
+        "protocols/valet_protocol.cc"
+        "protocols/valet_wire.cc"
         "haptic_feedback.cc"
         "assets/lang_home.cc"
         "assets.cc"
@@ -299,8 +308,18 @@ target_link_libraries(${COMPONENT_LIB} PRIVATE
     idf::espressif__esp_new_jpeg
 )
 if(TARGET freetype)
-    # FreeType 在普通任务中执行；字形解释和栅格化可使用跳转表。
-    target_compile_options(freetype PRIVATE -O2 -fjump-tables -ftree-switch-conversion)
+    # Keep font parsing/format drivers size-optimized. Only the reading hot paths
+    # need -O2; this avoids applying speed optimization to the entire font library.
+    target_compile_options(freetype PRIVATE -Os -fjump-tables -ftree-switch-conversion)
+    get_target_property(_ft_sources freetype SOURCES)
+    get_target_property(_ft_source_dir freetype SOURCE_DIR)
+    foreach(_ft_source IN LISTS _ft_sources)
+        if(_ft_source MATCHES "/(truetype|smooth|raster)/")
+            get_filename_component(_ft_absolute "${_ft_source}" ABSOLUTE BASE_DIR "${_ft_source_dir}")
+            set_property(SOURCE "${_ft_absolute}" TARGET_DIRECTORY freetype
+                APPEND PROPERTY COMPILE_OPTIONS -O2)
+        endif()
+    endforeach()
 endif()
 # 设置页模拟 U 盘（TinyUSB MSC）；IDF 6.1/S31 无独立 idf::usb，依赖由 esp_tinyusb 带入
 if(TARGET idf::espressif__esp_tinyusb)
@@ -464,3 +483,13 @@ target_add_binary_data(${COMPONENT_LIB} "${AP_FILEMAN_EN_GZ}" BINARY)
 
 # 中英文页面共用同一份标识图片。
 target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_SOURCE_DIR}/display/screen/cloud_screen/ap/cloudzao-logo.png" BINARY)
+
+# Valet local pairing page shares the firmware version and needs no external CDN.
+set(VALET_SETUP_GZ "${CMAKE_CURRENT_BINARY_DIR}/valet_setup.html.gz")
+add_custom_command(OUTPUT "${VALET_SETUP_GZ}"
+    COMMAND "${PYTHON}" "${PROJECT_DIR}/tools/assets/pack_valet_setup.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/valet_setup/valet_setup.html" "${VALET_SETUP_GZ}"
+    DEPENDS "${PROJECT_DIR}/tools/assets/pack_valet_setup.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/valet_setup/valet_setup.html"
+    VERBATIM)
+target_add_binary_data(${COMPONENT_LIB} "${VALET_SETUP_GZ}" BINARY)

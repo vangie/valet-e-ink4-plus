@@ -205,6 +205,7 @@ bool WebSocket::Send(const std::string& data) {
 }
 
 bool WebSocket::Send(const void* data, size_t len, bool binary, bool fin) {
+    std::lock_guard<std::mutex> lock(send_mutex_);
     if (len > 65535) {
         ESP_LOGE(TAG, "Data too large, maximum supported size is 65535 bytes");
         return false;
@@ -248,8 +249,7 @@ bool WebSocket::Send(const void* data, size_t len, bool binary, bool fin) {
     // 更新continuation_状态
     continuation_ = !fin;
 
-    // 发送帧
-    std::lock_guard<std::mutex> lock(send_mutex_);
+    // 发送帧（锁同时保护 continuation_ 和帧构造）。
     const int sent = tcp_->Send(frame);
     if (sent != static_cast<int>(frame.size())) {
         ESP_LOGE(TAG, "WebSocket data frame write incomplete: expected_bytes=%u sent_bytes=%d",
@@ -336,9 +336,9 @@ void WebSocket::OnTcpData(const std::string& data) {
     }
     
     // 处理WebSocket帧
-    static std::vector<char> current_message;
-    static bool is_fragmented = false;
-    static bool is_binary = false;
+    auto& current_message = current_message_;
+    auto& is_fragmented = is_fragmented_;
+    auto& is_binary = is_binary_;
     
     size_t buffer_offset = 0;
     const char* buffer = receive_buffer_.c_str();
@@ -355,13 +355,13 @@ void WebSocket::OnTcpData(const std::string& data) {
         size_t header_length = 2;
         if (payload_length == 126) {
             if (buffer_size - buffer_offset < 4) break; // 需要更多数据
-            payload_length = (buffer[buffer_offset + 2] << 8) | buffer[buffer_offset + 3];
+            payload_length = (static_cast<uint8_t>(buffer[buffer_offset + 2]) << 8) | static_cast<uint8_t>(buffer[buffer_offset + 3]);
             header_length += 2;
         } else if (payload_length == 127) {
             if (buffer_size - buffer_offset < 10) break; // 需要更多数据
             payload_length = 0;
             for (int i = 0; i < 8; ++i) {
-                payload_length = (payload_length << 8) | buffer[buffer_offset + 2 + i];
+                payload_length = (payload_length << 8) | static_cast<uint8_t>(buffer[buffer_offset + 2 + i]);
             }
             header_length += 8;
         }
@@ -408,6 +408,11 @@ void WebSocket::OnTcpData(const std::string& data) {
                     is_fragmented = !fin;
                     is_binary = (opcode == 0x2);
                     current_message.clear();
+                }
+                if (current_message.size() + payload.size() > max_rx) {
+                    connected_ = false;
+                    if (on_error_) on_error_(-1);
+                    return;
                 }
                 current_message.insert(current_message.end(), payload.begin(), payload.end());
                 if (fin) {
@@ -473,8 +478,7 @@ bool WebSocket::SendControlFrame(uint8_t opcode, const void* data, size_t len) {
         frame.push_back(static_cast<char>(payload[i] ^ mask[i % 4]));
     }
 
-    // 发送帧
-    std::lock_guard<std::mutex> lock(send_mutex_);
+    // 发送帧（锁同时保护 continuation_ 和帧构造）。
     const int sent = tcp_->Send(frame);
     if (sent != static_cast<int>(frame.size())) {
         ESP_LOGE(TAG, "WebSocket control frame write incomplete: expected_bytes=%u sent_bytes=%d",

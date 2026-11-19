@@ -9,6 +9,7 @@
 #include "metalio_audio.h"
 #include "websocket_protocol.h"
 #include "mqtt_protocol.h"
+#include "valet_protocol.h"
 #include "assets/lang_config.h"
 #include "assets/lang_bluetooth.h"
 #include "mcp_server.h"
@@ -289,6 +290,11 @@ void Application::EnsureVoiceModelsReady() {
 
 void Application::CheckChatActivation() {
     auto& board = Board::GetInstance();
+    if (chat_cloud::IsCustom()) {
+        chat_activation_pending_ = false;
+        chat_config_ready_ = chat_cloud::Available();
+        return;
+    }
     if (chat_config_loading_ || !chat_cloud::Available() || !board.IsNetworkReady() ||
         board.IsWifiConfigMode() || activation_paused_.load(std::memory_order_acquire)) {
         return;
@@ -405,6 +411,10 @@ void Application::EnsureProtocolReady() {
         protocol_.reset();
         return;
     }
+    if (chat_cloud::IsCustom()) {
+        chat_config_ready_ = true;
+        chat_activation_pending_ = false;
+    }
     if (protocol_ready_ && protocol_) {
         return;
     }
@@ -424,7 +434,9 @@ void Application::EnsureProtocolReady() {
 
     Settings ws(chat_cloud::WebsocketNamespace());
     Settings mqtt(chat_cloud::MqttNamespace());
-    if (!chat_cloud::IsYunxin() && ws.GetString("url").empty() &&
+    if (chat_cloud::IsCustom()) {
+        protocol_ = std::make_unique<ValetProtocol>();
+    } else if (!chat_cloud::IsYunxin() && ws.GetString("url").empty() &&
         !mqtt.GetString("endpoint").empty()) {
         protocol_ = std::make_unique<MqttProtocol>();
     } else {
@@ -449,9 +461,13 @@ void Application::EnsureProtocolReady() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
     protocol_->OnIncomingAudio([this, current_session](std::unique_ptr<AudioStreamPacket> packet) {
-        if (current_session() && device_state_ == kDeviceStateSpeaking && chat_cloud::SpeechPlaybackEnabled()) {
-            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+        if (chat_cloud::IsCustom() && current_session() && chat_cloud::SpeechPlaybackEnabled()) {
+            return audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
+        if (current_session() && device_state_ == kDeviceStateSpeaking && chat_cloud::SpeechPlaybackEnabled()) {
+            return audio_service_.PushPacketToDecodeQueue(std::move(packet));
+        }
+        return true; // An inactive session intentionally discards late packets.
     });
     protocol_->OnAudioChannelOpened([this]() {
         FirmwareMemoryCheckpoint("chat-channel-open");
@@ -478,6 +494,7 @@ void Application::EnsureProtocolReady() {
         if (!current_session()) return;
         auto display = Board::GetInstance().GetDisplay();
         auto type = cJSON_GetObjectItem(root, "type");
+        if (!cJSON_IsString(type)) return;
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
@@ -971,6 +988,10 @@ void Application::StartXiaozhiVoiceOnTask(bool enter_listening, uint32_t generat
         ApplyIdleStatusBar();
     }
 
+    if (chat_cloud::IsCustom() && ValetProtocol::Live() && still_needed() && protocol_ && protocol_->IsAudioChannelOpened()) {
+        SetListeningMode(kListeningModeRealtime);
+        return;
+    }
     // 预连接期间的长按在通道就绪后兑现，松手或离页不补录音。
     if (still_needed() && pending_xiaozhi_listen_.exchange(false, std::memory_order_acq_rel) &&
         AssistantScreen::IsActive() && AssistantScreen::IsPttHeld() &&
@@ -1504,7 +1525,7 @@ void Application::StartListening() {
             }
 
             // 百问页长按臂听：开通道期间已松手则回待命（BOOT ∪ 屏触 PTT）
-            if (AssistantScreen::IsActive() && !AssistantScreen::IsPttHeld()) {
+            if (AssistantScreen::IsActive() && !AssistantScreen::IsPttHeld() && !(chat_cloud::IsCustom() && ValetProtocol::Live())) {
                 ESP_LOGI(TAG, "StartListening aborted: PTT released before listen");
                 SetDeviceState(kDeviceStateIdle);
                 ApplyIdleStatusBar();
@@ -1512,7 +1533,7 @@ void Application::StartListening() {
                 return;
             }
 
-            SetListeningMode(kListeningModeManualStop);
+            SetListeningMode(chat_cloud::IsCustom() && ValetProtocol::Live() ? kListeningModeRealtime : kListeningModeManualStop);
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this, still_needed]() {
@@ -1524,7 +1545,7 @@ void Application::StartListening() {
             }
             AbortSpeaking(kAbortReasonNone);
             // 长按打断并开听；若已松手则只落到待命，不进聆听中
-            if (AssistantScreen::IsActive() && !AssistantScreen::IsPttHeld()) {
+            if (AssistantScreen::IsActive() && !AssistantScreen::IsPttHeld() && !(chat_cloud::IsCustom() && ValetProtocol::Live())) {
                 ESP_LOGI(TAG, "StartListening from speaking aborted: PTT released -> Idle");
                 if (audio_running_) {
                     audio_service_.ResetDecoder();
@@ -1533,7 +1554,7 @@ void Application::StartListening() {
                 AssistantScreen::SyncPttOverlay();
                 return;
             }
-            SetListeningMode(kListeningModeManualStop);
+            SetListeningMode(chat_cloud::IsCustom() && ValetProtocol::Live() ? kListeningModeRealtime : kListeningModeManualStop);
         });
     }
 }
@@ -1562,6 +1583,7 @@ void Application::StopListening() {
         return;
     }
 
+    if (chat_cloud::IsCustom() && ValetProtocol::Live()) return;
     if (device_state_ == kDeviceStateListening && protocol_) {
         if (chat_cloud::ActiveProvider() == chat_cloud::Provider::Baiwen) {
             SetDeviceState(kDeviceStateIdle);
@@ -1572,6 +1594,10 @@ void Application::StopListening() {
                 ESP_LOGE(TAG, "photo listening stop dispatch failed");
             }
         } else {
+            if (chat_cloud::IsCustom()) {
+                audio_service_.EnableVoiceProcessing(false);
+                while (auto tail = audio_service_.PopPacketFromSendQueue()) protocol_->SendAudio(std::move(tail));
+            }
             protocol_->SendStopListening();
             SetDeviceState(kDeviceStateIdle);
         }
@@ -1701,6 +1727,7 @@ void Application::BootStandbyCheckpoint() {
 void Application::Start() {
     BootStandbyCheckpoint();
     chat_cloud::InitializeFromNvs();
+    if (!ValetProtocol::InitializeIdentity()) ESP_LOGE(TAG, "Valet identity initialization failed");
     // UI 语言优先读取 NVS ui/language，无记录时使用板型默认语言。
     Lang::InitFromNvs();
 
@@ -2144,7 +2171,7 @@ void Application::SetDeviceState(DeviceState state) {
                 }
                 // 会话内不启用唤醒词打断；Realtime 模式靠 AEC 全双工
                 audio_service_.EnableWakeWordDetection(false);
-                audio_service_.ResetDecoder();
+                if (!chat_cloud::IsCustom()) audio_service_.ResetDecoder();
             }
             break;
         default:
@@ -2164,7 +2191,8 @@ void Application::SetDeviceState(DeviceState state) {
 
 void Application::SetLocalChatTtsEnabled(bool enabled) {
     chat_cloud::SaveLocalTtsEnabled(enabled);
-    if (chat_cloud::UsesXiaozhiProtocol() && !enabled && audio_running_) {
+    if (chat_cloud::IsCustom() && !ValetProtocol::Live() && !enabled && protocol_) protocol_->SendAbortSpeaking(kAbortReasonNone);
+    if ((chat_cloud::UsesXiaozhiProtocol() || (chat_cloud::IsCustom() && !ValetProtocol::Live())) && !enabled && audio_running_) {
         audio_service_.ResetDecoder();
         if (device_state_ == kDeviceStateSpeaking) {
             SetDeviceState(kDeviceStateIdle);
@@ -2374,4 +2402,13 @@ void Application::SetAecMode(AecMode mode) {
 bool Application::IsActivationPollingBusy() {
     std::lock_guard<std::mutex> lock(activation_poll_mutex_);
     return activation_poll_busy_;
+}
+
+void Application::InterruptCustomLive() {
+    Schedule([this] {
+        if (!chat_cloud::IsCustom() || !ValetProtocol::Live() || !protocol_) return;
+        protocol_->SendAbortSpeaking(kAbortReasonNone);
+        audio_service_.ResetDecoder();
+        SetListeningMode(kListeningModeRealtime);
+    });
 }

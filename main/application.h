@@ -65,6 +65,7 @@ public:
     void AbortSpeaking(AbortReason reason);
     // 百问 AI BOOT 页内分工：StartListening/StopListening/AbortSpeakingToIdle。
     void StartListening();
+    void InterruptCustomLive();
     void StopListening();
     enum class ImageQuestionResult {
         Sent, // 已提交本轮问题。

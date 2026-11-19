@@ -98,6 +98,7 @@ public:
     const std::string& GetLastWakeWord() const;
     bool IsVoiceDetected() const { return voice_detected_; }
     bool IsIdle();
+    bool IsPlaybackIdle();
     bool IsWakeWordRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_WAKE_WORD_RUNNING; }
     bool IsStarted() const { return !service_stopped_; }
     bool IsAudioProcessorRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING; }
@@ -155,6 +156,9 @@ private:
     OpusResampler input_resampler_;
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
+    std::atomic<bool> playback_active_{false};
+    std::atomic<bool> decoding_active_{false};
+    bool pcm_resampler_ready_ = false; // owned by the codec task
     DebugStatistics debug_statistics_;
     srmodel_list_t* models_list_ = nullptr;
 
@@ -168,6 +172,7 @@ private:
     StaticTask_t* opus_codec_tcb_ = nullptr;
     std::mutex audio_queue_mutex_;
     uint32_t send_generation_ = 0; // 由 audio_queue_mutex_ 保护。
+    uint32_t playback_generation_ = 0; // 清队列后丢弃迟到解码结果及等待入队的旧包。
     std::condition_variable audio_queue_cv_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_decode_queue_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_send_queue_;

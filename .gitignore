@@ -10,6 +10,7 @@ components/*
 !components/epdiy/**
 managed_components/
 build/
+build-valet/
 .vscode/
 .cursor/
 .devcontainer/

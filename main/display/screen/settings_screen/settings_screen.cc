@@ -23,6 +23,14 @@
 #include "settings_log_tab.h"
 #include "settings_log_upload.h"
 #include "vk_key_handler.h"
+#include "book_screen/book_screen.h"
+#include "home_screen/home_screen.h"
+#include "chat_cloud.h"
+#include "board.h"
+#include "audio_codec.h"
+#include "frontlight.h"
+#include "application.h"
+#include "valet_setup/server.h"
 
 #include <esp_log.h>
 #include <cstring>
@@ -109,11 +117,15 @@ struct SettingsShellUi {
     lv_obj_t* content_page = nullptr;
     int active_tab = -1;
     bool content_built = false;
+    lv_obj_t* heading = nullptr;
+    int group = -1;
 };
 
 static SettingsShellUi s_ui;
 static SettingsTab s_pending_tab = SettingsTab::kNetwork;
+static bool s_open_overview = true;
 static lv_obj_t* s_settings_scr = nullptr;
+static uint32_t s_settings_generation = 0;
 
 static int TabIndexOf(SettingsTab id) {
     for (int i = 0; i < kTabCount; ++i) {
@@ -255,6 +267,7 @@ static void ShowTab(int index) {
     }
 
     TearDownActiveTab();
+    lv_obj_clean(s_ui.content_page);
     s_ui.active_tab = index;
 
     for (int i = 0; i < kTabCount; ++i) {
@@ -275,32 +288,148 @@ static void ShowTab(int index) {
     VkKey_SetScreenFactory(kScreenId, FactoryForTab(id));
 }
 
-static void OnTabClicked(lv_event_t* e) {
-    const int index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
-    ShowTab(index);
+// 页面内下钻保留同一个 Screen，旧页签的建页/销毁逻辑继续负责各自资源。
+struct GroupEntry { const char* zh; const char* en; };
+static constexpr GroupEntry kGroups[] = {
+    {"助手", "Assistant"}, {"网络", "Network"}, {"显示", "Display"},
+    {"阅读与字库", "Reading & fonts"}, {"声音与蓝牙", "Sound & Bluetooth"}, {"设备", "Device"},
+};
+static const char* Text(const char* zh, const char* en) {
+    return std::strcmp(Lang::Current(), "zh-CN") == 0 ? zh : en;
 }
-
-static lv_obj_t* CreateTabButton(lv_obj_t* parent, const SettingsTabEntry& entry, int index) {
-    lv_obj_t* btn = lv_obj_create(parent);
-    lv_obj_remove_style_all(btn);
-    lv_obj_set_size(btn, kSettingsTabW, kSettingsTabH);
-    lv_obj_set_style_pad_all(btn, 0, 0);
-    lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-    HapticAttachClick(btn);
-    lv_obj_add_event_cb(btn, OnTabClicked, LV_EVENT_CLICKED,
-                        reinterpret_cast<void*>(static_cast<intptr_t>(index)));
-
-    lv_obj_t* lbl = lv_label_create(btn);
-    lv_label_set_text(lbl, entry.name());
-    lv_obj_set_style_text_font(lbl, fontpack_lv_font_ui(), 0);
-    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_center(lbl);
-    lv_obj_clear_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_add_event_cb(btn, ScreenFitButtonLabelOnSize, LV_EVENT_SIZE_CHANGED, lbl);
-    SettingsStyleSelectable(btn, lbl, false);
-    return btn;
+static void ShowOverview();
+static void ShowGroup(int group);
+static void AdjustQuick(lv_event_t* event) {
+    const intptr_t action = reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
+    const uint32_t generation = s_settings_generation;
+    if (!Application::GetInstance().Schedule([action, generation]() {
+        if (action == 1 || action == -1) {
+            auto& light = Frontlight::GetInstance();
+            light.SetBrightness(std::clamp<int>(light.target_brightness() + action * 10, 0, 100), true);
+        } else if (auto* codec = Board::GetInstance().GetAudioCodec()) {
+            codec->SetOutputVolume(std::clamp<int>(codec->output_volume() + (action > 0 ? 10 : -10), 0, 100));
+        }
+        auto* expected = new uint32_t(generation);
+        if (!ScreenLvAsync([](void* context) {
+            const uint32_t expected = *static_cast<uint32_t*>(context);
+            delete static_cast<uint32_t*>(context);
+            if (s_settings_scr && expected == s_settings_generation &&
+                s_ui.group == -1 && !s_ui.content_built) ShowOverview();
+        }, expected)) delete expected;
+    }, Application::TaskDomain::Storage)) {
+        ScreenShowToast(Text("操作繁忙，请重试", "Busy. Try again."));
+    }
+}
+static void AddQuick(const char* name, int value, intptr_t action) {
+    auto* row = lv_obj_create(s_ui.content_page);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), UiSy(40));
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    auto* label = lv_label_create(row);
+    lv_label_set_text_fmt(label, "%s  %d", name, value);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
+    for (int i = 0; i < 2; ++i) {
+        auto* button = lv_button_create(row);
+        lv_obj_set_size(button, UiSx(48), UiSy(38));
+        lv_obj_align(button, LV_ALIGN_RIGHT_MID, -UiSx(i == 0 ? 58 : 0), 0);
+        auto* symbol = lv_label_create(button);
+        lv_label_set_text(symbol, i == 0 ? "-" : "+");
+        lv_obj_center(symbol);
+        SettingsStyleSelectable(button, symbol, false);
+        lv_obj_add_event_cb(button, AdjustQuick, LV_EVENT_CLICKED,
+            reinterpret_cast<void*>(i == 0 ? -action : action));
+    }
+}
+static void OpenTab(lv_event_t* e) {
+    ShowTab(TabIndexOf(static_cast<SettingsTab>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)))));
+    lv_label_set_text(s_ui.heading, kTabs[s_ui.active_tab].name());
+    lv_obj_scroll_to_y(s_ui.content_page, 0, LV_ANIM_OFF);
+}
+static void OpenGroup(lv_event_t* e) {
+    ShowGroup(static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e))));
+}
+static void OpenReading(lv_event_t*) { ScreenNavigateTo(BookScreen::Create); }
+static void AddRow(const char* title, const char* detail, lv_event_cb_t callback, intptr_t data) {
+    auto* row = SettingsCreateSelectableOption(s_ui.content_page, title, callback, data);
+    lv_obj_set_height(row, UiSy(detail && *detail ? 76 : 52));
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(row, UiSx(1), 0);
+    lv_obj_set_style_radius(row, 0, 0);
+    auto* label = lv_obj_get_child(row, 0);
+    lv_obj_set_width(label, lv_pct(92));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_align(label, detail && *detail ? LV_ALIGN_TOP_LEFT : LV_ALIGN_LEFT_MID, 0, 0);
+    if (detail && *detail) {
+        auto* sub = lv_label_create(row);
+        lv_label_set_text(sub, detail);
+        lv_obj_set_width(sub, lv_pct(92));
+        lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(sub, fontpack_lv_font_ui(), 0);
+        lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_clear_flag(sub, LV_OBJ_FLAG_CLICKABLE);
+    }
+}
+static void AddTab(SettingsTab tab, const char* detail = nullptr) {
+    AddRow(kTabs[TabIndexOf(tab)].name(), detail, OpenTab, static_cast<intptr_t>(tab));
+}
+static void ClearContent() {
+    TearDownActiveTab();
+    // 分组列表自身也有控件（不归旧页签生命周期管理）。
+    lv_obj_clean(s_ui.content_page);
+    s_ui.active_tab = -1;
+    lv_obj_scroll_to_y(s_ui.content_page, 0, LV_ANIM_OFF);
+    VkKey_SetScreenFactory(kScreenId, SettingsScreen::Create);
+}
+static void ShowGroup(int group) {
+    if (group < 0 || group >= 6) return;
+    ClearContent();
+    s_ui.group = group;
+    lv_label_set_text(s_ui.heading, Text(kGroups[group].zh, kGroups[group].en));
+    switch (group) {
+        case 0: AddTab(SettingsTab::kConversation, Text("选择服务，管理自建助理", "Service and custom assistants")); break;
+        case 1: AddTab(SettingsTab::kNetwork); break;
+        case 2: AddTab(SettingsTab::kFrontlight); AddTab(SettingsTab::kTheme); break;
+        case 3: {
+            auto* note = lv_label_create(s_ui.content_page);
+            lv_label_set_text(note, Text("字号、字体、边距与行距在阅读中的排版菜单设置。扩展字库放入 SD 卡 metalio/e-ink/fonts/。", "Adjust font, size and spacing in the reader. Extended fonts belong in metalio/e-ink/fonts/ on the SD card."));
+            lv_obj_set_width(note, lv_pct(100));
+            lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+            AddRow(Text("打开阅读", "Open reading"), nullptr, OpenReading, 0);
+            break;
+        }
+        case 4: AddTab(SettingsTab::kBluetooth); AddTab(SettingsTab::kPager); AddTab(SettingsTab::kHaptic); break;
+        case 5:
+            AddTab(SettingsTab::kLanguage); AddTab(SettingsTab::kPower); AddTab(SettingsTab::kCharging);
+            AddTab(SettingsTab::kLog); AddTab(SettingsTab::kTest); AddTab(SettingsTab::kAbout); break;
+    }
+}
+static void ShowOverview() {
+    ClearContent();
+    s_ui.group = -1;
+    lv_label_set_text(s_ui.heading, Text("设置", "Settings"));
+    AddQuick(Text("前光", "Light"), Frontlight::GetInstance().target_brightness(), 1);
+    if (auto* codec = Board::GetInstance().GetAudioCodec()) AddQuick(Text("音量", "Volume"), codec->output_volume(), 2);
+    const auto provider = chat_cloud::ActiveProvider();
+    const char* service = provider == chat_cloud::Provider::Custom ? Text("自建", "Custom") :
+        provider == chat_cloud::Provider::Baiwen ? Text("百问", "Baiwen") :
+        provider == chat_cloud::Provider::Xiaozhi ? Text("小智", "Xiaozhi") : Text("网易", "NetEase");
+    const char* descriptions[] = {
+        service, SettingsNetworkTab_CurrentName(), Text("前光、刷新与主题", "Light, refresh and theme"),
+        Text("字体、排版与缺字", "Fonts, layout and missing glyphs"),
+        Text("声音输出、耳机与翻页器", "Audio, headphones and page turners"),
+        Text("语言、电量与设备管理", "Language, power and device management"),
+    };
+    for (int i = 0; i < 6; ++i) AddRow(Text(kGroups[i].zh, kGroups[i].en), descriptions[i], OpenGroup, i);
+}
+static bool NavigateUp() {
+    if (s_ui.content_built) { ShowGroup(s_ui.group < 0 ? 5 : s_ui.group); return true; }
+    if (s_ui.group >= 0) { ShowOverview(); return true; }
+    return false;
+}
+static void BackClicked(lv_event_t*) {
+    if (!NavigateUp()) ScreenRequestBack();
 }
 
 static void OnScreenDeleted(lv_event_t* e) {
@@ -315,7 +444,19 @@ static void OnScreenDeleted(lv_event_t* e) {
 
 static bool OnSettingsKey(const char* key) {
     if (key && strcmp(key, "vk_home") == 0 && BluetoothScreen::DismissOverlay()) return true;
-    return SettingsLogUpload_OnVkKey(key);
+    if (SettingsLogUpload_OnVkKey(key)) return true;
+    if (!key) return false;
+    if (std::strcmp(key, "vk_home") == 0) return NavigateUp();
+    if (std::strcmp(key, "vk_prev") == 0 || std::strcmp(key, "vk_next") == 0) {
+        auto* page = s_ui.content_page;
+        const bool previous = std::strcmp(key, "vk_prev") == 0;
+        const int y = lv_obj_get_scroll_y(page);
+        if (previous && y == 0) return NavigateUp();
+        const int delta = lv_obj_get_height(page) * 3 / 4;
+        lv_obj_scroll_by(page, 0, previous ? delta : -delta, LV_ANIM_OFF);
+        return true;
+    }
+    return false;
 }
 static bool OnSettingsLongKey(const char* key) {
     if (key && strcmp(key, "vk_home") == 0 && BluetoothScreen::DismissOverlay()) return true;
@@ -326,6 +467,11 @@ static bool OnSettingsLongKey(const char* key) {
 }
 
 static lv_obj_t* CreateInternal() {
+    ++s_settings_generation;
+    if (s_settings_scr) {
+        SettingsLogUpload_Teardown();
+        TearDownActiveTab();
+    }
     s_ui = {};
 
     lv_obj_t* scr = lv_obj_create(nullptr);
@@ -352,36 +498,25 @@ static lv_obj_t* CreateInternal() {
     lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(body, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t* tab_col = lv_obj_create(body);
-    lv_obj_remove_style_all(tab_col);
-    lv_obj_set_size(tab_col, kSettingsTabW, body_h - kSettingsBodyPad * 2);
-    lv_obj_set_style_bg_opa(tab_col, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(tab_col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(tab_col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    const lv_coord_t available = body_h - kSettingsBodyPad * 2;
-    const lv_coord_t tab_gap = std::min<lv_coord_t>(kSettingsTabGap, available / (kTabCount * 6));
-    lv_obj_set_style_pad_row(tab_col, tab_gap, 0);
-    lv_obj_clear_flag(tab_col, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(tab_col, LV_OBJ_FLAG_CLICKABLE);
-
-    const lv_coord_t tab_height = std::min<lv_coord_t>(
-        kSettingsTabH, (available - tab_gap * (kTabCount - 1)) / kTabCount);
-    for (int i = 0; i < kTabCount; ++i) {
-        s_ui.tab_btns[i] = CreateTabButton(tab_col, kTabs[i], i);
-        lv_obj_set_height(s_ui.tab_btns[i], tab_height);
-    }
-
-    lv_obj_t* split = lv_obj_create(body);
-    lv_obj_remove_style_all(split);
-    lv_obj_set_size(split, kSettingsSplitLineW, body_h - kSettingsBodyPad * 2);
-    lv_obj_set_style_bg_color(split, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(split, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(split, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(split, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    auto* header = lv_obj_create(body);
+    lv_obj_remove_style_all(header);
+    lv_obj_set_size(header, lv_pct(100), UiSy(48));
+    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
+    auto* back = lv_button_create(header);
+    lv_obj_set_size(back, UiSx(64), UiSy(44));
+    lv_obj_add_event_cb(back, BackClicked, LV_EVENT_CLICKED, nullptr);
+    auto* back_label = lv_label_create(back);
+    lv_label_set_text(back_label, LV_SYMBOL_LEFT);
+    lv_obj_center(back_label);
+    SettingsStyleSelectable(back, back_label, false);
+    s_ui.heading = lv_label_create(header);
+    lv_obj_set_width(s_ui.heading, LV_HOR_RES - UiSx(110));
+    lv_obj_align(s_ui.heading, LV_ALIGN_LEFT_MID, UiSx(78), 0);
 
     lv_obj_t* content = lv_obj_create(body);
     lv_obj_remove_style_all(content);
-    lv_obj_set_height(content, body_h - kSettingsBodyPad * 2);
+    lv_obj_set_width(content, lv_pct(100));
     lv_obj_set_flex_grow(content, 1);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(content, kSettingsContentPad, 0);
@@ -403,7 +538,14 @@ static lv_obj_t* CreateInternal() {
     keys.on_key = OnSettingsKey;
     keys.on_key_long_press = OnSettingsLongKey;
     VkKey_AttachScreen(scr, kScreenId, keys);
-    ShowTab(TabIndexOf(open_tab));
+    if (s_open_overview) ShowOverview();
+    else {
+        s_ui.group = open_tab == SettingsTab::kConversation ? 0 : open_tab == SettingsTab::kNetwork ? 1 :
+            (open_tab == SettingsTab::kBluetooth || open_tab == SettingsTab::kPager) ? 4 : 5;
+        ShowTab(TabIndexOf(open_tab));
+        lv_label_set_text(s_ui.heading, kTabs[s_ui.active_tab].name());
+    }
+    s_open_overview = true;
     ESP_LOGI(TAG, "settings ready tabs=%d open=%d haptic=%d", kTabCount, (int)open_tab,
              HapticIsEnabled() ? 1 : 0);
     return scr;
@@ -411,34 +553,47 @@ static lv_obj_t* CreateInternal() {
 
 lv_obj_t* SettingsScreen::Create() {
     s_pending_tab = SettingsTab::kNetwork;
+    s_open_overview = true;
+    return CreateInternal();
+}
+
+lv_obj_t* SettingsScreen::CreateAssistant() {
+    s_open_overview = false;
+    s_pending_tab = SettingsTab::kConversation;
     return CreateInternal();
 }
 
 lv_obj_t* SettingsScreen::CreateNetwork() {
+    s_open_overview = false;
     s_pending_tab = SettingsTab::kNetwork;
     return CreateInternal();
 }
 
 lv_obj_t* SettingsScreen::CreatePager() {
+    s_open_overview = false;
     s_pending_tab = SettingsTab::kPager;
     return CreateInternal();
 }
 
 lv_obj_t* SettingsScreen::CreateBluetooth() {
+    s_open_overview = false;
     s_pending_tab = SettingsTab::kBluetooth;
     return CreateInternal();
 }
 lv_obj_t* SettingsScreen::CreateTest() {
+    s_open_overview = false;
     s_pending_tab = SettingsTab::kTest;
     return CreateInternal();
 }
 
 void SettingsScreen::ReloadAfterLanguageChange() {
     s_pending_tab = SettingsTab::kLanguage;
+    s_open_overview = false;
     ScreenLoadReplace(CreateInternal());
 }
 
 void SettingsScreen_OnEnterStandby() {
+    valet::CloseSetupSession();
     SettingsLogUpload_Teardown();
 }
 

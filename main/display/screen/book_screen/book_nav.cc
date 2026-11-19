@@ -42,6 +42,9 @@
 #include "book_screen/book_screen.h"
 #include "display_orient.h"
 #include "haptic_feedback.h"
+#include "valet_reading_context.h"
+#include "chat_cloud.h"
+#include "valet_protocol.h"
 #include "lv_adapter_display.h"
 #include "screen_common.h"
 #include "vk_key_handler.h"
@@ -646,6 +649,11 @@ void OpenAssistantFromReaderAsync(void* /*user_data*/) {
     if (AssistantScreen::IsActive()) {
         ESP_LOGI(TAG, "assistant from reader: already active");
         return;
+    }
+    if (chat_cloud::IsCustom()) {
+        if (Book_State().reader.opening || ReaderPageWorkPending()) { ScreenShowToast("请等待正文翻页完成"); return; }
+        if (!valet::SelectBookContext()) { ScreenShowToast("当前页没有可提问的正文，请等待页面加载"); return; }
+        ValetProtocol::SetLive(false);
     }
     HapticPulseIfEnabled();
     ESP_LOGI(TAG, "assistant from reader -> ScreenNavigateTo (resume via .pos)");

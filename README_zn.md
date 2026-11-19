@@ -6,7 +6,9 @@
 
 **中文** | [English](README.md)
 
-这是 [CloudZao/Metalio-E-INK4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) 的 fork，给随身助手用。官方阅读、字库、4G 和百问留在这棵树上。随身加的是设置里的第四个云服务「我的 AI」，以及读书时离开正文、谈这一页、再回到原页。
+这是 [CloudZao/Metalio-E-INK4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) 的 fork，用于 Valet 随行助手。官方阅读、字库、4G 和百问留在这棵树上。Valet 随行加的是设置里的第四个云服务「自建」，以及读书时离开正文、谈这一页、再回到原页。
+
+共享网关插件通过 `integrations/valet-gateway` submodule 固定版本。克隆后执行 `git submodule update --init --recursive`。已实现能力和验证边界见[开发记录](docs/valet-development.md)。
 
 产品讨论用的假界面在 [`sim/`](sim/README.md)。用浏览器打开 `sim/index.html`，不编译、不连设备。
 
@@ -805,3 +807,5 @@ Plus 是 **S31 + 并行 4.7 寸 + FT6336 + 前光**。397 是 **S3 + SPI 3.97 �
 ---
 
 _本文档随固件演进更新。引脚与行为以源码为准；若文档与硬件不符请提 Issue。_
+
+上游采用完整合并策略，在官方能力上叠加 Valet；固件与模拟器两个 Tab 一起跟进：[同步流程](docs/upstream-sync.md)。

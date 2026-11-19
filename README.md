@@ -6,7 +6,9 @@
 
 [中文](README_zn.md) | **English**
 
-Fork of [CloudZao/Metalio-E-INK4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) for the 随身 assistant. Official reading, fonts, 4G, and 百问 stay on this tree. This fork adds a fourth cloud provider,「我的 AI」, and a way to leave the page, talk about it, and return to the same page.
+Fork of [CloudZao/Metalio-E-INK4-Plus](https://github.com/CloudZao/Metalio-E-INK4-Plus) for Valet 随行. Official reading, fonts, 4G, and 百问 stay on this tree. This fork adds a fourth cloud provider,「自建」, and a way to leave the page, talk about it, and return to the same page.
+
+Shared gateway adapters are pinned in `integrations/valet-gateway`. After cloning, run `git submodule update --init --recursive`. See [implementation status](docs/valet-development.md) for verified capabilities and remaining device tests.
 
 The clickable product mock lives in [`sim/`](sim/README.md). Open `sim/index.html` in a browser. It does not build firmware or talk to a device.
 
@@ -799,3 +801,5 @@ In Pixel Vision, recent-reading filenames stay on one line, with middle ellipsis
 WorkBuddy supports QR binding to the desktop local assistant, rebinding, hold-to-talk commands, automatic reply polling and message synchronization. User and assistant messages use separate plain-text bubbles, with screen pagination and ten-page repeats when a page key is held. History evicts older messages according to actual PSRAM allocation. Standby stops recording and polling; wake restores the connection without resending accepted commands.
 
 The service requires WorkBuddy local-assistant mode, realtime ASR and WebSocket forwarding. The desktop assistant must remain online under the authorized account. Configure the dedicated service in `main/cloudzao_endpoints.c`. See the [WorkBuddy module guide](main/workbuddy/README.md) for operation, interfaces, history scope and memory budgets.
+
+Upstream integration follows a full-merge policy, with both simulator tabs tracked alongside firmware: [workflow](docs/upstream-sync.md).

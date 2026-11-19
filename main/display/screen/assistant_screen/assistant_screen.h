@@ -8,6 +8,7 @@ class AssistantScreen {
 public:
     /** @brief 创建百问页 */
     static lv_obj_t* Create();
+    static void RequestLive();
 
     /** @brief 当前服务的应用名称；首页使用 compact 英文缩写 */
     static const char* DisplayName(bool compact = false);

@@ -260,6 +260,7 @@ IngestResult Assistant_IngestA2uiMessage(cJSON* msg, FlowList& out) {
 
 void Assistant_PersistTurnJson(cJSON* msg)
 {
+    if (chat_cloud::IsCustom()) return; // custom conversations have separate RAM histories, never replay into official chat
     if (Assistant_State().layout.replaying_history || msg == nullptr) {
         return;
     }
@@ -365,7 +366,7 @@ void AssistantScreen::AddMessage(const char* role, const char* content) {
     if (chat_cloud::IsYunxin() && (is_a2ui || (role != nullptr && std::strcmp(role, "user") == 0))) {
         FinishYunxinSpeech();
     }
-    if (!is_a2ui && chat_cloud::UsesXiaozhiProtocol() && role != nullptr &&
+    if (!is_a2ui && (chat_cloud::UsesXiaozhiProtocol() || chat_cloud::IsCustom()) && role != nullptr &&
         (std::strcmp(role, "user") == 0 || std::strcmp(role, "assistant") == 0)) {
         // Standard Xiaozhi STT/TTS text must enter the same pagination/history path.
         // Build JSON structurally so quotes, newlines and JSON-looking speech stay text.

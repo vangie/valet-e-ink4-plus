@@ -121,6 +121,8 @@ void Rule(lv_obj_t* parent, int x, int y, int width, int height) {
 const char* AssistantScreen::DisplayName(bool compact) {
     const bool en = IsEnglish();
     switch (chat_cloud::ActiveProvider()) {
+        case chat_cloud::Provider::Custom:
+            return en ? "Custom assistant" : "自建助理";
         case chat_cloud::Provider::Xiaozhi:
             return en ? (compact ? "XZ AI" : "Xiaozhi AI") : "小智AI";
         case chat_cloud::Provider::Yunxin:

@@ -5,6 +5,7 @@
 #include <string>
 #include <map>
 #include <thread>
+#include <vector>
 #include <mutex>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -40,6 +41,9 @@ private:
     int connect_id_;
     std::unique_ptr<Tcp> tcp_;
     bool continuation_ = false;
+    std::vector<char> current_message_;
+    bool is_fragmented_ = false;
+    bool is_binary_ = false;
     size_t receive_buffer_size_ = 2048;
     std::string receive_buffer_;
     bool handshake_completed_ = false;

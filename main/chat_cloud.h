@@ -3,11 +3,13 @@
 #include "settings.h"
 #include "api_endpoints.h"
 #include "sdkconfig.h"
+#include "custom_chat_config.h"
+#include "assistant_profiles.h"
 #include <atomic>
 
 namespace chat_cloud {
-enum class Provider { Baiwen = 0, Xiaozhi = 1, Yunxin = 2 };
-inline constexpr int kProviderCount = 3;
+enum class Provider { Baiwen = 0, Xiaozhi = 1, Yunxin = 2, Custom = 3 };
+inline constexpr int kProviderCount = 4;
 #if CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
 inline constexpr Provider kDefaultProvider = Provider::Yunxin;
 #else
@@ -23,13 +25,14 @@ inline std::atomic<bool> local_tts{true};
 // Call once on the internal-RAM startup task, before UI/network workers exist.
 // NVS reads also disable Flash caches; never lazily load from a UI accessor.
 inline void InitializeFromNvs() {
+    valet::InitializeAssistantProfiles();
     Settings settings("chat_cloud");
     const int stored = settings.GetInt("provider", static_cast<int>(kDefaultProvider));
     const auto provider = stored >= 0 && stored < kProviderCount
         ? static_cast<Provider>(stored) : kDefaultProvider;
     detail::active = provider;
     detail::saved.store(provider, std::memory_order_release);
-    detail::local_tts.store(settings.GetBool(provider == Provider::Yunxin ? "yx_tts" : "xz_tts", true), std::memory_order_release);
+    detail::local_tts.store(settings.GetBool(provider == Provider::Custom ? "agent_tts" : provider == Provider::Yunxin ? "yx_tts" : "xz_tts", true), std::memory_order_release);
 }
 
 inline Provider SavedProvider() { return detail::saved.load(std::memory_order_acquire); }
@@ -48,20 +51,46 @@ inline void SaveProvider(Provider provider) {
 
 inline bool IsXiaozhi() { return ActiveProvider() == Provider::Xiaozhi; }
 inline bool IsYunxin() { return ActiveProvider() == Provider::Yunxin; }
+inline bool IsCustom() { return ActiveProvider() == Provider::Custom; }
 inline bool UsesXiaozhiProtocol() { return IsXiaozhi() || IsYunxin(); }
+inline custom_chat::Config CustomConfig() {
+    const auto profiles = valet::LoadAssistantProfiles();
+    if (const auto* active = profiles.Active()) return active->connection;
+    return {};
+}
+inline std::string CustomUrl() {
+    return CustomConfig().url;
+}
+inline std::string CustomCode() {
+    return CustomConfig().code;
+}
+inline bool SaveCustomConfig(const custom_chat::Config& config) {
+    if (custom_chat::Validate(config) != custom_chat::ConfigError::None) return false;
+    auto profiles = valet::LoadAssistantProfiles();
+    valet::AssistantProfile profile;
+    if (const auto* active = profiles.Active()) profile = *active;
+    else { profile.id = "legacy"; profile.name = "Imported assistant"; }
+    profile.connection = config;
+    return profiles.Upsert(profile) && valet::SaveAssistantProfiles(profiles);
+}
 inline bool LocalTtsEnabled() { return detail::local_tts.load(std::memory_order_acquire); }
-inline bool SpeechPlaybackEnabled() { return !UsesXiaozhiProtocol() || LocalTtsEnabled(); }
+inline bool SpeechPlaybackEnabled() { return IsCustom() ? true : !UsesXiaozhiProtocol() || LocalTtsEnabled(); }
 
 // Internal-RAM task only, just like SaveProvider. Baiwen's preference stays remote.
 inline void SaveLocalTtsEnabled(bool enabled) {
     {
         Settings settings("chat_cloud", true);
-        settings.SetBool(IsYunxin() ? "yx_tts" : "xz_tts", enabled);
+        settings.SetBool(IsCustom() ? "agent_tts" : IsYunxin() ? "yx_tts" : "xz_tts", enabled);
     }
     detail::local_tts.store(enabled, std::memory_order_release);
 }
 
-inline bool Available() { return UsesXiaozhiProtocol() || api::HasHost(); }
+inline bool CustomConfigured() {
+    const auto profiles = valet::LoadAssistantProfiles();
+    const auto* active = profiles.Active();
+    return active && valet::ValidProfile(*active);
+}
+inline bool Available() { return IsCustom() ? CustomConfigured() : UsesXiaozhiProtocol() || api::HasHost(); }
 inline const char* WebsocketNamespace() { return IsYunxin() ? "yx_websocket" : IsXiaozhi() ? "xz_websocket" : "websocket"; }
 inline const char* MqttNamespace() { return IsYunxin() ? "yx_mqtt" : IsXiaozhi() ? "xz_mqtt" : "mqtt"; }
 inline std::string YunxinWebsocketUrl(const std::string& mac) {

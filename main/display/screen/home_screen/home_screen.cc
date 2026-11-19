@@ -8,6 +8,7 @@
 #include "assets/lang_app_store.h"
 #include "home_screen_ui.h"
 #include "home_apps_slash.h"
+#include "home_valet.h"
 #include "home_icon_source.h"
 #include "home_card_style.h"
 #include "pixel/home_pixel.h"
@@ -29,6 +30,7 @@
 #include "sdkconfig.h"
 
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -168,7 +170,7 @@ lv_coord_t Home_slash_apps_h = 0;
 
 int Home_PageCount()
     {
-        return (kTotalApps + kAppsPerPage - 1) / kAppsPerPage;
+        return 1 + (kTotalApps + kAppsPerPage - 1) / kAppsPerPage;
     }
 
     void Home_FillAppsPage()
@@ -204,7 +206,7 @@ int Home_PageCount()
 
         lv_obj_clean(Home_apps);
         const int card_style = HomeScreen::LoadCardStyle();
-        const int start = Home_page * kAppsPerPage;
+        const int start = std::max(0, Home_page - 1) * kAppsPerPage;
         int end = start + kAppsPerPage;
         if (end > kTotalApps)
         {
@@ -275,7 +277,7 @@ bool HomeScreen::GoToFirstPage() {
         const bool changed = Home_page != 0;
         Home_page = 0;
         if (ScreenIsHome()) {
-            if (changed) Home_RequestFillAppsPage();
+            if (changed) ScreenNavigateTo(HomeScreen::Create);
         } else ScreenRequestHome();
     };
     if (ScreenLvAsyncUrgent(go) || ScreenLvAsync(go)) return true;
@@ -290,7 +292,7 @@ bool HomeScreen::GoToFirstPage() {
         // 长按调度传入阅读器的十页步长，首页只取方向逐页循环。
         const int next = (Home_page + (page_delta > 0 ? 1 : pages - 1)) % pages;
         Home_page = next;
-        Home_RequestFillAppsPage();
+        ScreenNavigateTo(HomeScreen::Create);
         return true;
     }
 
@@ -500,6 +502,17 @@ lv_obj_t *HomeScreen::Create()
     // 与其它 App 共用 ScreenCreateStatusBar 高度，勿再强制 HOME 专用高度（图标会相对上移）
     EpdStatusBar status = ScreenCreateStatusBar(scr);
 
+    if (Home_page == 0) {
+        Home_apps = nullptr;
+        Home_page_lbl = nullptr;
+        HomeValet_Build(scr, status.height);
+        lv_obj_add_event_cb(scr, Home_OnHomeDeleted, LV_EVENT_DELETE, nullptr);
+        ScreenSetIsHome(true);
+        VkKey_AttachScreen(scr, kScreenId,
+            VkKeyScreenDesc{HomeScreen::Create, Home_OnVkKey, nullptr, Home_OnBootLongPress,
+                nullptr, nullptr, Home_OnVkKeyLongPress, Home_OnVkKeyPressUp});
+        return scr;
+    }
     const int card_style = LoadCardStyle();
     Home_slash_layout = (card_style == kCardStyleSlash);
     const int pages = Home_PageCount();

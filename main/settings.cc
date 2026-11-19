@@ -31,22 +31,43 @@ std::string Settings::GetString(const std::string& key, const std::string& defau
     }
     std::string value;
     value.resize(length);
-    nvs_get_str(nvs_handle_, key.c_str(), value.data(), &length);
+    if (nvs_get_str(nvs_handle_, key.c_str(), value.data(), &length) != ESP_OK)
+        return default_value;
     while (!value.empty() && value.back() == '\0') {
         value.pop_back();
     }
     return value;
 }
 
-void Settings::SetString(const std::string& key, const std::string& value) {
+bool Settings::SetString(const std::string& key, const std::string& value) {
     if (read_write_) {
-        if (nvs_handle_ == 0) return;
+        if (nvs_handle_ == 0) return false;
         const esp_err_t result = nvs_set_str(nvs_handle_, key.c_str(), value.c_str());
         if (result == ESP_OK) dirty_ = true;
         else ESP_LOGE(TAG, "preference write failed type=string code=0x%x", static_cast<unsigned>(result));
+        return result == ESP_OK;
     } else {
         ESP_LOGE(TAG, "preference write rejected: read-only");
     }
+    return false;
+}
+
+std::string Settings::GetBlob(const char* key, size_t max_length) {
+    size_t length = 0;
+    if (nvs_handle_ == 0 || nvs_get_blob(nvs_handle_, key, nullptr, &length) != ESP_OK ||
+        length == 0 || length > max_length) return {};
+    std::string result(length, '\0');
+    if (nvs_get_blob(nvs_handle_, key, result.data(), &length) != ESP_OK) return {};
+    result.resize(length);
+    return result;
+}
+
+bool Settings::SetBlob(const char* key, const std::string& value) {
+    if (!read_write_ || nvs_handle_ == 0) return false;
+    const esp_err_t result = nvs_set_blob(nvs_handle_, key, value.data(), value.size());
+    if (result == ESP_OK) dirty_ = true;
+    else ESP_LOGE(TAG, "preference write failed type=blob code=0x%x", static_cast<unsigned>(result));
+    return result == ESP_OK;
 }
 
 int32_t Settings::GetInt(const std::string& key, int32_t default_value) {

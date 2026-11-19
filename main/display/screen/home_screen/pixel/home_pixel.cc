@@ -258,7 +258,7 @@ void HomePixel_FillAppsPage() {
     const int columns[] = {64, 334, 605};
     const int edge = X(160);
     const int row_step = edge + (Y(251) - edge) * 2 / 3;
-    const int start = Home_page * kAppsPerPage;
+    const int start = (Home_page > 0 ? Home_page - 1 : 0) * kAppsPerPage;
     for (int i = 0; i < kAppsPerPage && start + i < kSlashAppCount; ++i) {
         const int app = start + i;
         const bool is_buddy = kSlashApps[app].create == WorkBuddyScreen::Create;

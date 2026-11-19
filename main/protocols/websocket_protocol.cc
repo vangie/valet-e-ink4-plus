@@ -1,3 +1,4 @@
+#include "websocket_audio.h"
 #include "websocket_protocol.h"
 #include "board.h"
 #include "system_info.h"
@@ -84,6 +85,11 @@ void WebsocketProtocol::CloseAudioChannel() {
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
+    if (chat_cloud::IsCustom()) {
+        ESP_LOGW(TAG, "custom gateway is configured but Passport protocol adapter is not built yet");
+        SetError(Lang::Strings::SERVER_NOT_CONNECTED);
+        return false;
+    }
     if (!chat_cloud::Available()) {
         ESP_LOGI(TAG, "websocket skipped: blank cloud endpoints");
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
@@ -129,43 +135,14 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
             if (on_incoming_audio_ != nullptr) {
-                if (version_ == 2) {
-                    BinaryProtocol2* bp2 = (BinaryProtocol2*)data;
-                    bp2->version = ntohs(bp2->version);
-                    bp2->type = ntohs(bp2->type);
-                    bp2->timestamp = ntohl(bp2->timestamp);
-                    bp2->payload_size = ntohl(bp2->payload_size);
-                    auto payload = (uint8_t*)bp2->payload;
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                        .sample_rate = server_sample_rate_,
-                        .frame_duration = server_frame_duration_,
-                        .timestamp = bp2->timestamp,
-                        .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)
-                    }));
-                } else if (version_ == 3) {
-                    BinaryProtocol3* bp3 = (BinaryProtocol3*)data;
-                    bp3->type = bp3->type;
-                    bp3->payload_size = ntohs(bp3->payload_size);
-                    auto payload = (uint8_t*)bp3->payload;
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                        .sample_rate = server_sample_rate_,
-                        .frame_duration = server_frame_duration_,
-                        .timestamp = 0,
-                        .payload = std::vector<uint8_t>(payload, payload + bp3->payload_size)
-                    }));
-                } else {
-                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
-                        .sample_rate = server_sample_rate_,
-                        .frame_duration = server_frame_duration_,
-                        .timestamp = 0,
-                        .payload = std::vector<uint8_t>((uint8_t*)data, (uint8_t*)data + len)
-                    }));
-                }
+                auto packet = DecodeWebsocketAudio(data, len, version_, server_sample_rate_, server_frame_duration_);
+                if (packet) on_incoming_audio_(std::move(packet));
+                else ESP_LOGW(TAG, "Discarding malformed WebSocket audio frame");
             }
         } else {
             // Parse JSON data
             // ;
-            auto root = cJSON_Parse(data);
+            auto root = cJSON_ParseWithLength(data, len);
             auto type = cJSON_GetObjectItem(root, "type");
             if (cJSON_IsString(type)) {
                 if (strcmp(type->valuestring, "hello") == 0) {

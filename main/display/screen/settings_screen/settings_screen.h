@@ -5,10 +5,11 @@
 // 设置主壳：网络 / 主题 / 语言 / 震动 / 前光 / 对话 / 蓝牙 / 测试 / 关于
 class SettingsScreen {
 public:
-    /** @brief 创建设置主页面（默认网络 Tab） */
+    /** @brief 创建设置总览（六组入口） */
     static lv_obj_t* Create();
     /** @brief 创建设置→网络子页入口 */
     static lv_obj_t* CreateNetwork();
+    static lv_obj_t* CreateAssistant();
     /** @brief 创建设置→翻页器子页入口 */
     static lv_obj_t* CreatePager();
     /** @brief 创建设置→蓝牙子页入口 */

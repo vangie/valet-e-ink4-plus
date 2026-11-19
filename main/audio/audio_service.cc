@@ -234,6 +234,7 @@ void AudioService::Stop() {
 
     {
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        ++playback_generation_;
         audio_encode_queue_.clear();
         audio_decode_queue_.clear();
         audio_playback_queue_.clear();
@@ -465,6 +466,7 @@ void AudioService::AudioOutputTask() {
             break;
         }
 
+        playback_active_ = true;
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
         audio_queue_cv_.notify_all();
@@ -476,6 +478,7 @@ void AudioService::AudioOutputTask() {
             codec_->EnableOutput(true);
         }
         codec_->OutputData(task->pcm);
+        playback_active_ = false;
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
@@ -509,6 +512,8 @@ void AudioService::OpusCodecTask() {
 
         /* Decode the audio from decode queue */
         if (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) {
+            decoding_active_ = true;
+            const auto playback_generation = playback_generation_;
             auto packet = std::move(audio_decode_queue_.front());
             audio_decode_queue_.pop_front();
             audio_queue_cv_.notify_all();
@@ -518,10 +523,28 @@ void AudioService::OpusCodecTask() {
             task->type = kAudioTaskTypeDecodeToPlaybackQueue;
             task->timestamp = packet->timestamp;
 
-            SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
-            if (opus_decoder_->Decode(std::move(packet->payload), task->pcm)) {
+            bool decoded = false;
+            if (packet->pcm && packet->payload.size() % 2 == 0) {
+                task->pcm.resize(packet->payload.size() / 2);
+                std::memcpy(task->pcm.data(), packet->payload.data(), packet->payload.size());
+                if (packet->sample_rate != codec_->output_sample_rate()) {
+                    if (!pcm_resampler_ready_ || output_resampler_.input_sample_rate() != packet->sample_rate || output_resampler_.output_sample_rate() != codec_->output_sample_rate()) {
+                        output_resampler_.Configure(packet->sample_rate, codec_->output_sample_rate());
+                        pcm_resampler_ready_ = true;
+                    }
+                    std::vector<int16_t> resampled(output_resampler_.GetOutputSamples(task->pcm.size()));
+                    output_resampler_.Process(task->pcm.data(), task->pcm.size(), resampled.data());
+                    task->pcm = std::move(resampled);
+                }
+                decoded = true;
+            } else {
+                pcm_resampler_ready_ = false;
+                SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
+                decoded = opus_decoder_->Decode(std::move(packet->payload), task->pcm);
+            }
+            if (decoded) {
                 // Resample if the sample rate is different
-                if (opus_decoder_->sample_rate() != codec_->output_sample_rate()) {
+                if (!packet->pcm && opus_decoder_->sample_rate() != codec_->output_sample_rate()) {
                     int target_size = output_resampler_.GetOutputSamples(task->pcm.size());
                     std::vector<int16_t> resampled(target_size);
                     output_resampler_.Process(task->pcm.data(), task->pcm.size(), resampled.data());
@@ -529,12 +552,14 @@ void AudioService::OpusCodecTask() {
                 }
 
                 lock.lock();
-                audio_playback_queue_.push_back(std::move(task));
+                if (!service_stopped_ && playback_generation == playback_generation_)
+                    audio_playback_queue_.push_back(std::move(task));
                 audio_queue_cv_.notify_all();
             } else {
                 ESP_LOGE(TAG, "Failed to decode audio");
                 lock.lock();
             }
+            decoding_active_ = false;
             debug_statistics_.decode_count++;
         }
         
@@ -657,16 +682,19 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
 bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait) {
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
     if (!packet || service_stopped_) return false;
+    const auto generation = playback_generation_;
     if (audio_decode_queue_.size() >= MAX_DECODE_PACKETS_IN_QUEUE) {
         if (wait) {
-            audio_queue_cv_.wait(lock, [this]() {
-                return service_stopped_ || audio_decode_queue_.size() < MAX_DECODE_PACKETS_IN_QUEUE;
-            });
+            // Never hold a protocol receiver indefinitely while output is stalled.
+            if (!audio_queue_cv_.wait_for(lock, std::chrono::milliseconds(500), [this, generation]() {
+                return service_stopped_ || generation != playback_generation_ ||
+                    audio_decode_queue_.size() < MAX_DECODE_PACKETS_IN_QUEUE;
+            })) return false;
         } else {
             return false;
         }
     }
-    if (service_stopped_) return false;
+    if (service_stopped_ || generation != playback_generation_) return false;
     audio_decode_queue_.push_back(std::move(packet));
     audio_queue_cv_.notify_all();
     return true;
@@ -876,6 +904,7 @@ bool AudioService::IsIdle() {
 
 void AudioService::ResetDecoder() {
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    ++playback_generation_;
     if (opus_decoder_) {
         opus_decoder_->ResetState();
     }
@@ -892,6 +921,7 @@ void AudioService::FlushQueues() {
         [](const auto& task) { return task->type == kAudioTaskTypeEncodeToCapture; });
     const uint32_t capture_generation = opus_capture_generation_.load();
     ++send_generation_;
+    ++playback_generation_;
     audio_encode_queue_.clear();
     audio_send_queue_.clear();
     audio_decode_queue_.clear();
@@ -930,4 +960,9 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
 
 bool AudioService::IsAfeWakeWord() {
     return false;
+}
+
+bool AudioService::IsPlaybackIdle() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    return audio_decode_queue_.empty() && audio_playback_queue_.empty() && !playback_active_ && !decoding_active_;
 }

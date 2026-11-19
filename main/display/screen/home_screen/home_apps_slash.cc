@@ -50,7 +50,7 @@
             lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
             lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
 
-            const int base = Home_page * kAppsPerPage + r * 2;
+            const int base = (Home_page > 0 ? Home_page - 1 : 0) * kAppsPerPage + r * 2;
             if (base < kSlashAppCount)
             {
                 Home_CreateSlashAppCell(row, kSlashApps[base], r, 0, row_h, cell_w);

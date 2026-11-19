@@ -17,6 +17,9 @@
 #include "assets/lang_screen.h"
 #include "fontpack_lvgl.h"
 #include "chat_cloud.h"
+#include "valet_protocol.h"
+#include "valet_reading_context.h"
+#include <map>
 #include "yunxin_binding/yunxin_binding.h"
 #include "board.h"
 #include "boot_key_handler.h"
@@ -197,7 +200,8 @@ bool Assistant_OnBootClick() {
         return true;
     }
     ESP_LOGD(TAG, "boot short -> AbortSpeakingToIdle (no listen)");
-    Application::GetInstance().AbortSpeakingToIdle();
+    if (chat_cloud::IsCustom() && ValetProtocol::Live()) Application::GetInstance().InterruptCustomLive();
+    else Application::GetInstance().AbortSpeakingToIdle();
     return true;
 }
 
@@ -258,7 +262,14 @@ void AssistantScreen::SyncPttOverlay() {
     Assistant_RequestSyncPttOverlay();
 }
 
+void AssistantScreen::RequestLive() {
+    if (!chat_cloud::IsCustom()) { ScreenShowToast("通话需先选择自建助理"); return; }
+    ValetProtocol::SetLive(true);
+    RequestOpen();
+}
+
 void AssistantScreen::RequestOpen() {
+    if (chat_cloud::IsCustom() && !AssistantScreen::IsActive()) valet::SelectStandaloneContext();
     auto* adapter = LvAdapterEpdiy::Instance();
     if (adapter == nullptr || !adapter->IsReady()) {
         return;
@@ -285,7 +296,60 @@ void AssistantScreen::SetEmotion(const char* emotion) {
     Assistant_ShowIdleHint();
 }
 
+namespace {
+std::map<std::string, FlowList> context_histories;
+std::string displayed_context_key;
+void RestoreContextHistory() {
+    const auto profiles = valet::LoadAssistantProfiles();
+    const std::string key = chat_cloud::IsCustom() ? valet::ContextStorageKey(profiles.active_id) :
+        "official:" + std::to_string(static_cast<int>(chat_cloud::ActiveProvider()));
+    if (key == displayed_context_key) return;
+    auto& layout = Assistant_State().layout;
+    std::lock_guard<std::mutex> lock(Assistant_State().stream.session_mu);
+    if (!displayed_context_key.empty()) {
+        // Bound retained histories; backend remains the source of durable conversation history.
+        if (layout.flow.size() > 600) layout.flow.erase(layout.flow.begin(), layout.flow.end() - 600);
+        context_histories[displayed_context_key] = std::move(layout.flow);
+    }
+    layout.flow.clear();
+    auto found = context_histories.find(key);
+    if (found != context_histories.end()) { layout.flow = std::move(found->second); context_histories.erase(found); }
+    while (context_histories.size() > 6) context_histories.erase(context_histories.begin());
+    layout.pages.clear(); layout.flow_first_page.clear(); layout.page_flow_begin.clear();
+    layout.open_page_flow_begin = static_cast<size_t>(-1); layout.page_index = 0;
+    layout.pin_flow_idx = -1; layout.has_a2ui_content = !layout.flow.empty();
+    Assistant_State().stream.coalesce_buf.clear();
+    displayed_context_key = key;
+}
+void ChangeTalkMode(lv_event_t*) {
+    if (!ScreenLvAsync([](void*) {
+        if (!AssistantScreen::IsActive()) return;
+        const bool next = !ValetProtocol::Live();
+        Application::GetInstance().StopXiaozhiVoice();
+        ValetProtocol::SetLive(next);
+        ScreenLoadReplace(lv_obj_create(nullptr));
+        ScreenLoadReplace(AssistantScreen::Create());
+    })) ScreenShowToast("操作繁忙，请重试");
+}
+void ChangeReadingContext(lv_event_t*) {
+    auto* context = new bool(valet::SelectedReadingContext().Valid());
+    if (!ScreenLvAsync([](void* ptr) {
+        const bool was_book = *static_cast<bool*>(ptr); delete static_cast<bool*>(ptr);
+        if (!AssistantScreen::IsActive()) return;
+        if (was_book) valet::SelectStandaloneContext();
+        else if (!valet::SelectBookContext()) { ScreenShowToast("请先打开一本书，等待正文显示"); return; }
+        // Close the previous protocol; the new screen gets a new voice generation and session key.
+        Application::GetInstance().StopXiaozhiVoice();
+        ValetProtocol::SetLive(false);
+        auto* transition = lv_obj_create(nullptr);
+        ScreenLoadReplace(transition); // complete old screen unload before populating new global UI pointers
+        ScreenLoadReplace(AssistantScreen::Create());
+    }, context)) delete context;
+}
+}
+
 lv_obj_t* AssistantScreen::Create() {
+    RestoreContextHistory();
     ESP_LOGI(TAG, "launch AssistantScreen");
     const lv_font_t* ui_font = Assistant_UiFont();
     Assistant_UiFontBold();
@@ -299,7 +363,26 @@ lv_obj_t* AssistantScreen::Create() {
 
     // 顶栏与其它 App 共用 ScreenCreateStatusBar（25@2），勿用会话 30px 字
     EpdStatusBar status = ScreenCreateStatusBar(scr);
-    const lv_coord_t header_h = status.height;
+    lv_coord_t header_h = status.height;
+    lv_obj_t* context_header = nullptr;
+    if (chat_cloud::IsCustom()) {
+        const auto reading = valet::SelectedReadingContext();
+        auto* header = lv_button_create(scr);
+        context_header = header;
+        lv_obj_remove_style_all(header);
+        lv_obj_set_size(header, LV_HOR_RES, UiSy(52));
+        lv_obj_set_pos(header, 0, header_h);
+        lv_obj_set_style_border_width(header, 1, 0);
+        lv_obj_set_style_border_side(header, LV_BORDER_SIDE_BOTTOM, 0);
+        auto* label = lv_label_create(header);
+        lv_obj_set_width(label, LV_HOR_RES - UiSx(32));
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+        if (reading.Valid()) lv_label_set_text_fmt(label, "%s · %s · 第 %d 页%s · 点击切换", reading.title.c_str(), reading.chapter.c_str(), reading.page, reading.truncated ? "（节选）" : "");
+        else lv_label_set_text(label, "随口问 · 不带书本上下文（点击切换）");
+        lv_obj_center(label); lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(header, ChangeReadingContext, LV_EVENT_CLICKED, nullptr);
+        header_h += UiSy(52);
+    }
     const lv_coord_t body_h = LV_VER_RES - header_h - kFooterH - kPageIndicatorH;
     Assistant_State().layout.viewport_w = LV_HOR_RES - kContentPadX * 2;
     Assistant_State().layout.viewport_h = body_h - kContentPadY * 2;
@@ -370,6 +453,22 @@ lv_obj_t* AssistantScreen::Create() {
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(bar, 2, 0);
     Assistant_DisableScroll(bar);
+    const bool custom_live = chat_cloud::IsCustom() && ValetProtocol::Live();
+    if (custom_live) {
+        for (int i = 0; i < 2; ++i) {
+            auto* button = lv_button_create(bar);
+            lv_obj_set_size(button, (LV_HOR_RES - kFooterInset * 2) / 2, kFooterH - UiSy(8));
+            lv_obj_align(button, i == 0 ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0, 0);
+            auto* label = lv_label_create(button);
+            lv_label_set_text(label, i == 0 ? "静音 / 恢复" : "返回提问"); lv_obj_center(label);
+            lv_obj_set_style_bg_color(button, i == 0 ? lv_color_white() : lv_color_black(), 0);
+            lv_obj_set_style_text_color(button, i == 0 ? lv_color_black() : lv_color_white(), 0);
+            lv_obj_add_event_cb(button, [](lv_event_t* e) {
+                if (lv_event_get_user_data(e)) { ChangeTalkMode(nullptr); }
+                else { ValetProtocol::SetMuted(!ValetProtocol::Muted()); ScreenShowToast(ValetProtocol::Muted() ? "麦克风已静音" : "麦克风已恢复"); }
+            }, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
+        }
+    }
     const bool baiwen = chat_cloud::ActiveProvider() == chat_cloud::Provider::Baiwen;
     const bool camera_available = baiwen && Board::GetInstance().GetCamera() != nullptr;
     // 百问固定预留拍照入口，检测完成只显示图标，不移动录音区域。
@@ -451,12 +550,20 @@ lv_obj_t* AssistantScreen::Create() {
         lv_draw_rect(lv_event_get_layer(event), &ink, &pad);
     }, LV_EVENT_DRAW_MAIN, nullptr);
     lv_obj_add_event_cb(action, [](lv_event_t*) { AssistantPhoto_Send(); }, LV_EVENT_CLICKED, nullptr);
+    if (custom_live) { lv_obj_add_flag(touch_ptt_hit, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(action, LV_OBJ_FLAG_HIDDEN); }
     auto* action_label = lv_label_create(action);
     lv_label_set_text(action_label, Lang::Strings::ASSISTANT_SEND);
     lv_obj_set_style_text_font(action_label, fontpack_lv_font_ui(), 0);
     lv_obj_set_style_text_color(action_label, lv_color_white(), 0);
     lv_obj_center(action_label);
     lv_obj_add_flag(action_label, LV_OBJ_FLAG_HIDDEN);
+    if (chat_cloud::IsCustom() && !custom_live) {
+        lv_obj_add_flag(action, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(action, ChangeTalkMode, LV_EVENT_CLICKED, nullptr);
+        lv_obj_add_flag(action_label, LV_OBJ_FLAG_HIDDEN);
+        auto* call_label = lv_label_create(action); lv_label_set_text(call_label, "通话"); lv_obj_center(call_label);
+        lv_obj_clear_flag(call_label, LV_OBJ_FLAG_CLICKABLE);
+    }
     auto* footer = lv_label_create(scr);
     lv_obj_set_size(footer, LV_HOR_RES, kPageIndicatorH);
     lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -kFooterH);
@@ -474,6 +581,7 @@ lv_obj_t* AssistantScreen::Create() {
     Assistant_State().chrome.status_label = status.status_label;
     Assistant_State().chrome.notification_label = status.notification_label;
     Assistant_State().ptt.ptt_wave = ptt_wave;
+    if (custom_live) lv_obj_add_flag(touch_ptt_hit, LV_OBJ_FLAG_HIDDEN);
     Assistant_State().ptt.touch_ptt_hit = touch_ptt_hit;
     Assistant_State().ptt.ptt_wave_visible = false;
     if (camera_available) AssistantPhoto_Create(scr);
@@ -513,7 +621,7 @@ lv_obj_t* AssistantScreen::Create() {
             Assistant_ShowIdleHint();
         }
     } else {
-        Assistant_ReplayHistoryFromStore();
+        if (!chat_cloud::IsCustom()) Assistant_ReplayHistoryFromStore();
         if (Assistant_State().layout.has_a2ui_content || !Assistant_State().layout.flow.empty()) {
             Assistant_HideIdleHint();
         } else {
@@ -526,6 +634,7 @@ lv_obj_t* AssistantScreen::Create() {
         disp->UpdateStatusBar(true);
     }
 
+    if (context_header) lv_obj_move_foreground(context_header);
     ScreenSetIsHome(false);
     {
         VkKeyScreenDesc desc{};
