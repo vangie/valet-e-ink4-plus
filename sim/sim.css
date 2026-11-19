@@ -61,12 +61,19 @@ h1 { margin: 0; font-size: 32px; font-weight: 650; letter-spacing: -0.03em; }
 
 /* 屏下：左边橙点是菜单，右边两颗灰键是返回/上一页、前进/下一页。 */
 .cap { position: absolute; border: 0; padding: 0; color: transparent; }
+/* 实体按键自行处理短按 / 长按，手指轻微移动不能交给浏览器滚屏。 */
+.cap, .key { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .cap.menu { left: 27px; top: 477px; width: 25px; height: 25px; border-radius: 50%; background: #e28a06; }
 .cap.prev, .cap.next { top: 480px; width: 51px; height: 20px; border-radius: 999px; background: #a9a7ab; }
 .cap.prev { left: 159px; }
 .cap.next { left: 222px; }
 .cap:hover { filter: brightness(1.06); }
 .cap.down, .cap:active { transform: translateY(1px); filter: brightness(0.9); }
+@media (pointer: coarse) {
+  /* 不改键帽外观，只把可触摸高度扩大到至少 44px。 */
+  .cap::before { content: ""; position: absolute; inset: -12px -4px; }
+  .cap.menu::before { inset: -10px; }
+}
 
 /* 右侧三颗键帽、四个功能（按关机画面上的按键说明对位）：
    上面短的是 AI 唤醒；中间长条一颗键帽，上半加音量、下半减音量；下面短的是电源。 */
@@ -131,3 +138,8 @@ h1 { margin: 0; font-size: 32px; font-weight: 650; letter-spacing: -0.03em; }
   .layout { grid-template-columns: 1fr; }
   .top { flex-direction: column; align-items: start; }
 }
+
+.edition-select { font-size: 12px; display:flex; gap:6px; align-items:center; }
+.edition-select select { font:inherit; background:white; color:#222; border:1px solid #bbb; border-radius:6px; padding:5px; }
+.diagnostic-detail { border:1px solid currentColor; padding:12px; margin-bottom:12px; }
+@media(max-width:600px) { .edition-select { width:100%; justify-content:center; } }

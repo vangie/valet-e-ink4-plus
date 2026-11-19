@@ -1,0 +1,17 @@
+{
+  "release": "2.0.81",
+  "sourceAvailable": false,
+  "defaultDecision": "accept-all-when-source-available",
+  "items": [
+    {"id":"diagnostics", "change":"自动测试VCOM查询、蓝牙版本、SD容量、UI测试、Wi-Fi弹窗返回", "firmware":"awaiting-source", "classic":"release-notes-prototype", "valet":"release-notes-prototype"},
+    {"id":"power-actions", "change":"测试页关机、重启", "firmware":"awaiting-source", "classic":"release-notes-prototype", "valet":"release-notes-prototype"},
+    {"id":"regional-providers", "change":"按国内/国际固件隐藏官方云入口，Valet保留自建", "firmware":"awaiting-source", "classic":"release-notes-prototype", "valet":"release-notes-prototype"},
+    {"id":"black-depth", "change":"VCOM读取失败时提供黑色深度档位", "firmware":"awaiting-source", "classic":"release-notes-prototype", "valet":"release-notes-prototype"},
+    {"id":"recent-progress", "change":"像素主题启动后显示已有阅读进度", "firmware":"awaiting-source", "classic":"existing-demo-only", "valet":"existing-demo-only"},
+    {"id":"image-refresh", "change":"封面及图片加载期间反复刷新", "firmware":"awaiting-source", "classic":"hardware-validation-required", "valet":"hardware-validation-required"},
+    {"id":"shelf-refresh", "change":"书架翻页先出旧画面", "firmware":"awaiting-source", "classic":"hardware-validation-required", "valet":"hardware-validation-required"},
+    {"id":"boot-refresh", "change":"开机概率两次推白", "firmware":"awaiting-source", "classic":"hardware-validation-required", "valet":"hardware-validation-required"},
+    {"id":"wallpaper-rotation", "change":"横屏待机/关机透明壁纸方向", "firmware":"awaiting-source", "classic":"hardware-validation-required", "valet":"hardware-validation-required"},
+    {"id":"ttf-resume", "change":"快速进出待机后TTF/OTF右侧文字缺失", "firmware":"awaiting-source", "classic":"hardware-validation-required", "valet":"hardware-validation-required"}
+  ]
+}

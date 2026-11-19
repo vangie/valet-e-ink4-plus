@@ -14,7 +14,7 @@ function turnPage(delta, repeating = false) {
   const next = state.page + delta;
   if (next < 0) {
     if (!repeating) {
-      log("第一页再往前：回到书的详情。");
+      log("第一页再往前：返回上一级。");
       back();
     }
     return false;
@@ -53,7 +53,7 @@ function aiClick() {
     return render();
   }
   if (state.screen === "ai") return state.live ? interruptLive() : abortSpeaking();
-  log(`短按 AI 唤醒：${NAMES[state.screen]}不处理短按。`);
+  log(`短按 AI 唤醒：${names()[state.screen]}不处理短按。`);
 }
 
 function aiLong() {
@@ -70,8 +70,9 @@ function aiLong() {
     log("长按 AI 唤醒：聆听中，松开发送。");
     return startListening();
   }
-  if (!fromStandby && !["home", "detail", "reader"].includes(state.screen)) {
-    return log(`长按 AI 唤醒：${NAMES[state.screen]}不进百问。`);
+  // 新设计：任何一屏长按 AI 唤醒都能问。官方只有首页、阅读首页和正文。
+  if (!fromStandby && !isV2() && !["home", "detail", "reader"].includes(state.screen)) {
+    return log(`长按 AI 唤醒：${names()[state.screen]}不进百问。`);
   }
   if (fromStandby) log("待机时长按 AI 唤醒：醒来直接进百问。");
   go("ai");
@@ -91,10 +92,12 @@ function volume(dir) {
   if (readingActive()) return void turnPage(-dir);
   state.volume = Math.max(0, Math.min(100, state.volume + dir * 10));
   toast(`音量 ${state.volume}`);
+  render();
 }
 function volumeLong(dir) {
   if (asleep() || state.standby) return;
   if (readingActive()) return startRepeat(-dir);
   state.volume = dir > 0 ? 100 : 0;
+  render();
   toast(dir > 0 ? "最大音量" : "已静音");
 }

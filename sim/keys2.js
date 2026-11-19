@@ -5,7 +5,13 @@ function blocked() {
 
 function menuClick() {
   if (blocked()) return;
-  if (state.screen === "home") return log("菜单：已经在首页。");
+  if (state.screen === "home") {
+    if (state.homePage === 0) return log("菜单：已经在首页。");
+    state.homePage = 0;
+    flash();
+    log("菜单：回到首页第一页。");
+    return render();
+  }
   if (state.screen === "reader" && state.sheet) {
     state.sheet = false;
     log("菜单：收起阅读卡片。");
@@ -24,6 +30,14 @@ function menuLong() {
 function chin(dir) {
   if (blocked()) return;
   const s = state.screen;
+  if (s === "settings" && dir < 0 && closeDiagnosticOverlay()) return;
+  if (isV2() && v2Chin(dir)) return;
+  if (s === "home") {
+    const pages = Math.ceil(tiles().length / 6);
+    state.homePage = Math.min(pages - 1, Math.max(0, state.homePage + dir));
+    log(`首页第 ${state.homePage + 1} / ${pages} 页。`);
+    return render();
+  }
   if (s === "reader") {
     if (!state.sheet) return void turnPage(dir);
     if (dir < 0) {
@@ -45,6 +59,7 @@ function chin(dir) {
     if (dir < 0) back();
     return;
   }
+  if (s === "settings" && scrollSettings(dir)) return;
   if (s === "home") return log("首页只有这一屏，不翻。");
   if (dir < 0) back();
 }
@@ -80,6 +95,7 @@ function powerLong() {
   leave(state.screen);
   stack.length = 0;
   state.standby = false;
+  state.homePage = 0;
   state.off = true;
   log(`长按电源 3 秒：关机。屏上留着按键说明。${state.bootTo === "reader" ? `记住第 ${state.page + 1} 页。` : ""}`);
   render();
@@ -92,17 +108,19 @@ function powerOn() {
   later("boot", 900, () => {
     state.booting = false;
     state.screen = state.bootTo;
-    if (state.screen === "reader") stack.push("home", "detail");
+    if (state.screen === "reader") stack.push(...(isV2() ? ["home"] : ["home", "detail"]));
     log(state.screen === "reader" ? `开机，回到第 ${state.page + 1} 页。` : "开机，回到首页。");
     flash();
     render();
   });
 }
 
-function reboot() {
-  state.provider = state.pendingProvider;
+function reboot(applyProvider = true) {
+  leave(state.screen);
+  if (applyProvider) state.provider = state.pendingProvider;
   stack.length = 0;
   state.screen = "home";
+  state.homePage = 0;
   state.booting = true;
   render();
   later("boot", 900, () => {

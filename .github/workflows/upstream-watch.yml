@@ -1,0 +1,68 @@
+name: Upstream watch
+on:
+  schedule:
+    - cron: '19 */12 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - tools/upstream/**
+      - sim/**
+      - tools/tests/sim_upstream.cjs
+      - tools/tests/test_upstream_sync.py
+      - .github/workflows/upstream-watch.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tools/tests -p test_upstream_sync.py
+      - run: python tools/upstream/validate.py
+      - run: python tools/upstream/sync.py check --output upstream-status.json
+      - name: Summarize status
+        run: |
+          python - <<'PY'
+          import json, os
+          d=json.load(open('upstream-status.json'))
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write(f"Source: {d['sourceVersion']} @ {d['sourceCommit']}\n\n")
+              f.write(f"New source to merge: {d['sourceUpdate']}\n\n")
+              f.write(f"Public firmware: {d.get('release',{}).get('version','unknown')}\n\n")
+              f.write(f"Simulator review required: {d['uiReviewRequired']}\n\n")
+              if d.get('registryError'): f.write(d['registryError'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-status
+          path: upstream-status.json
+      - name: Require source synchronization
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('upstream-status.json'))
+          if d['sourceUpdate']: raise SystemExit('New upstream source available: prepare and validate full merge')
+          if d.get('registryError'): raise SystemExit('Cannot verify public firmware status')
+          config=json.load(open('tools/upstream/baseline.json'))
+          if d.get('release',{}).get('version') != config['reviewedRelease']:
+              raise SystemExit('New public firmware: review release notes and simulator coverage')
+          PY
+
+  prototype:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated browser test dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/valet-browser" playwright@1.65.1
+          "$RUNNER_TEMP/valet-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Verify both prototype tabs
+        run: NODE_PATH="$RUNNER_TEMP/valet-browser/node_modules" node tools/tests/sim_upstream.cjs
