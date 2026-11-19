@@ -357,6 +357,13 @@ static void AddRow(const char* title, const char* detail, lv_event_cb_t callback
     lv_obj_set_style_border_width(row, UiSx(1), 0);
     lv_obj_set_style_radius(row, 0, 0);
     auto* label = lv_obj_get_child(row, 0);
+    // The shared option re-centres its label whenever the row is resized, which
+    // put the title on top of the detail line. These rows place it themselves.
+    // The fit callback is a header inline with one copy per source file, so it
+    // is found by the label it was registered with, not by its address.
+    for (uint32_t i = lv_obj_get_event_count(row); i-- > 0;) {
+        if (lv_event_dsc_get_user_data(lv_obj_get_event_dsc(row, i)) == label) lv_obj_remove_event(row, i);
+    }
     lv_obj_set_width(label, lv_pct(92));
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
@@ -452,8 +459,12 @@ static bool OnSettingsKey(const char* key) {
         const bool previous = std::strcmp(key, "vk_prev") == 0;
         const int y = lv_obj_get_scroll_y(page);
         if (previous && y == 0) return NavigateUp();
-        const int delta = lv_obj_get_height(page) * 3 / 4;
-        lv_obj_scroll_by(page, 0, previous ? delta : -delta, LV_ANIM_OFF);
+        // Scroll only as far as there is content: an unclamped step pushed a
+        // list that already fit the page off the top, leaving it blank.
+        lv_obj_update_layout(page);
+        const int room = previous ? y : lv_obj_get_scroll_bottom(page);
+        const int delta = std::min<int>(lv_obj_get_height(page) * 3 / 4, std::max(room, 0));
+        if (delta > 0) lv_obj_scroll_by(page, 0, previous ? delta : -delta, LV_ANIM_OFF);
         return true;
     }
     return false;
@@ -507,7 +518,7 @@ static lv_obj_t* CreateInternal() {
     lv_obj_set_size(back, UiSx(64), UiSy(44));
     lv_obj_add_event_cb(back, BackClicked, LV_EVENT_CLICKED, nullptr);
     auto* back_label = lv_label_create(back);
-    lv_label_set_text(back_label, LV_SYMBOL_LEFT);
+    lv_label_set_text(back_label, "<"); // the UI font pack carries no LVGL symbol glyphs
     lv_obj_center(back_label);
     SettingsStyleSelectable(back, back_label, false);
     s_ui.heading = lv_label_create(header);
