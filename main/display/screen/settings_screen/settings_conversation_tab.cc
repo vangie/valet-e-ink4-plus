@@ -584,6 +584,7 @@ void SettingsConversationTab_Build(lv_obj_t* page) {
         {"网易AI", "NetEase AI"}, {"自建", "Custom"},
     };
     for (int i = 0; i < chat_cloud::kProviderCount; ++i) {
+        if (static_cast<chat_cloud::Provider>(i) != chat_cloud::kDefaultProvider) continue;
         s_ui.cloud_btns[i] = SettingsCreateSelectableOption(page,
             CloudText(kCloudNames[i][0], kCloudNames[i][1]), OnCloudClicked, i);
     }

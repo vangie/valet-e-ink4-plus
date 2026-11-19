@@ -1,10 +1,10 @@
 // Generated baseline identity is checked by tools/upstream/validate.py.
 const UPSTREAM = Object.freeze({
-  sourceVersion: "2.0.80",
-  sourceCommit: "2e8501095eaf1980be0d6d8b7005d0ffeae505f7",
+  sourceVersion: "2.0.82",
+  sourceCommit: "fd3fa033a61e52dea6326e80724b218d00979767",
   releaseVersion: "2.0.81",
-  prototypeVersion: "2.0.81",
-  prototypeBasis: "release-notes",
+  prototypeVersion: "2.0.82",
+  prototypeBasis: "source-verified",
 });
 function providerChoices() {
   // Edition is a hardware/firmware build choice, independent of UI language.

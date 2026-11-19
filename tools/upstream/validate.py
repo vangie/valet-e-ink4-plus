@@ -22,7 +22,8 @@ def validate(root=ROOT):
     assert coverage['defaultDecision'] == 'accept-all-when-source-available'
     assert coverage['items'], 'No release items tracked'
     prototype = re.search(r'prototypeVersion: "([^"]+)"', js)[1]
-    assert prototype == config['reviewedRelease'], 'Prototype release identity is stale'
+    expected_prototype = config['sourceVersion'] if coverage['sourceAvailable'] else config['reviewedRelease']
+    assert prototype == expected_prototype, 'Prototype identity is stale'
     if not coverage['sourceAvailable']:
         assert 'prototypeBasis: "release-notes"' in js, 'Do not label notes-based layout as source verified'
         assert all(x['firmware'] == 'awaiting-source' for x in coverage['items']), 'Unpublished source cannot be marked merged'

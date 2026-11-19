@@ -55,7 +55,7 @@ const ABOUT = {
     "设置按要做的事分六项，每一项直接写着现在的值。前光和音量在最上面。",
     "第 2 页的「蟠」当作机内字库没有的字（假数据），画成方框，页脚会提示。设置 → 阅读与字库里装上扩展字库就能显示。",
   ]],
-  classic: [`原始设计 · 官方 ${UPSTREAM.prototypeVersion} 原型`, "源码基线 2.0.80；2.0.81 新增界面按官方更新说明补齐，布局待源码复核。保留自建扩展。", [
+  classic: [`原始设计 · 官方 ${UPSTREAM.prototypeVersion} 原型`, "源码基线已同步到 2.0.82；2.0.81 的界面变化已结合公开源码复核。保留自建扩展。", [
     "首页是斜切时钟和六格应用，灰键翻到第二屏。",
     "百问按住说话，回答分页。云服务选「自建」时，页底可以切到通话。",
     "正文里短按 AI 唤醒键出阅读卡片，长按才进百问。官方百问拿不到正在读的那一页。",
@@ -65,7 +65,7 @@ const ABOUT = {
 const JUMPS = [["home", "首页"], ["reader", "正文"], ["ask", "提问"], ["call", "通话"], ["settings", "设置"], ["standby", "待机"]];
 
 function renderAbout() {
-  document.querySelector("#upstream-status").textContent = `公开源码 ${UPSTREAM.sourceVersion} · 官方固件 ${UPSTREAM.releaseVersion} · 原型 ${UPSTREAM.prototypeVersion}（新增项依据更新说明，底层修复不由模拟器验证）`;
+  document.querySelector("#upstream-status").textContent = `公开源码 ${UPSTREAM.sourceVersion} · 官方固件 ${UPSTREAM.releaseVersion} · 原型 ${UPSTREAM.prototypeVersion}（界面已按源码复核，底层硬件行为仍需实机验证）`;
   const [title, lede, points] = ABOUT[state.design];
   aboutEl.innerHTML = `<h2>${title}</h2><p class="lede">${lede}</p><ul class="points">${points.map((p) => `<li>${p}</li>`).join("")}</ul>`;
   jumpEl.innerHTML = JUMPS.map(([id, name]) => `<button data-jump="${id}">${id === "ask" && !isV2() ? "百问" : name}</button>`).join("");
