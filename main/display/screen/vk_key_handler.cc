@@ -318,11 +318,11 @@ void VkKey_Dispatch(const char* key_name) {
         return;
     }
     if (OtaUpgradeScreen::IsActive() || OtaConfirmDialog::IsActive()) {
-        ESP_LOGD(TAG, "%s blocked (ota upgrade active)", key_name);
+        ESP_LOGI(TAG, "%s blocked (ota upgrade active)", key_name);
         return;
     }
     if (StandbyScreen::IsActive()) {
-        ESP_LOGD(TAG, "%s blocked (standby overlay active)", key_name);
+        ESP_LOGI(TAG, "%s blocked (standby overlay active)", key_name);
         return;
     }
     if (std::strcmp(key_name, "vk_home") == 0) ScreenCommon_CancelPendingNavigation();
@@ -340,7 +340,7 @@ void VkKey_Dispatch(const char* key_name) {
         if (e->on_key != nullptr) {
             const bool consumed = e->on_key(key_name);
             const int us = static_cast<int>(esp_timer_get_time() - t0);
-            ESP_LOGD(TAG, "%s handler %s in %d us (screen=%s)", key_name,
+            ESP_LOGI(TAG, "%s handler %s in %d us (screen=%s)", key_name,
                      consumed ? "consumed" : "fallthrough", us, screen);
             if (us > 20000) {
                 ESP_LOGW(TAG, "%s UI handler slow %d us", key_name,

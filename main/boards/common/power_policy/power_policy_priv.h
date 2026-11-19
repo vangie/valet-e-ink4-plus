@@ -29,6 +29,7 @@ inline constexpr int kNetGraceSecDefault = 30;                  // 断网前暂�
 inline constexpr uint64_t kLightSleepSliceUs = 60ULL * 1000 * 1000; // 单次浅睡切片上限
 inline constexpr bool kStandbyLpUseLightSleep = true; // true=浅睡；false=vTaskDelay（串口排查）
 
+bool ExternalPowerPresent();                 // Valet: charger reports external input
 extern Board* board;                         // 当前板实例
 extern SemaphoreHandle_t mu;                 // 策略互斥锁
 extern uint8_t need_ref[static_cast<int>(PowerNeed::kCount)]; // PowerNeed 重入计数

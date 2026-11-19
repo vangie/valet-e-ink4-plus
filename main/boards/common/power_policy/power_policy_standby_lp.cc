@@ -358,7 +358,7 @@ bool RunStandbyLpMainLoop()
             return false;
         }
         xSemaphoreTake(pwr::mu, portMAX_DELAY);
-        if (pwr::StandbyUiLongEnoughLocked()) {
+        if (pwr::StandbyUiLongEnoughLocked() && !pwr::ExternalPowerPresent()) {
             pwr::RequestShutdownLocked();
             xSemaphoreGive(pwr::mu);
             return false;

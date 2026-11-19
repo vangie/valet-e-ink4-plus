@@ -92,7 +92,7 @@ static void BeginCoverHold(const char* vk, int raw_x, int raw_y) {
     s_vk_hold_long = false;
     HapticBeginPress();
     VkKey_PostTouch(VkTouchPhase::kDown, vk);
-    ESP_LOGD(TAG, "cover key [%s] down raw=(%d,%d)", vk, raw_x, raw_y);
+    ESP_LOGI(TAG, "cover key [%s] down raw=(%d,%d)", vk, raw_x, raw_y);
 }
 
 static void OnTouchSample(uint8_t count, int raw_x, int raw_y, int lx, int ly) {
