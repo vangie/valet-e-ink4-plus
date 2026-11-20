@@ -6,6 +6,8 @@
 #include "haptic_feedback.h"
 #include "settings_common.h"
 
+#include <cstring>
+
 struct SettingsHapticOption {
     bool enabled; // 是否开启震动
     const char* (*title)(); // 选项标题
@@ -49,6 +51,7 @@ struct SettingsHapticUi {
     lv_obj_t* intensity_btns[kIntensityOptionCount] = {}; // 强度选项按钮
     lv_obj_t* current_lbl = nullptr; // 当前开关文案
     lv_obj_t* intensity_lbl = nullptr; // 当前强度文案
+    lv_obj_t* valet_seg = nullptr; // Valet layout: off / weak / medium / strong in one control
 };
 
 static SettingsHapticUi s_ui;
@@ -72,6 +75,10 @@ static const char* IntensityCurrentText(int intensity) {
 }
 
 static void RefreshOptions() {
+    if (s_ui.valet_seg) {
+        SettingsValetSelect(s_ui.valet_seg, HapticIsEnabled() ? 1 + HapticGetIntensity() : 0);
+        return;
+    }
     const bool enabled = HapticIsEnabled();
     for (int i = 0; i < kOptionCount; ++i) {
         if (s_ui.btns[i] != nullptr) {
@@ -115,6 +122,30 @@ static void OnIntensityClicked(lv_event_t* e) {
         return;
     }
     HapticSetIntensity(intensity);
+    RefreshOptions();
+}
+
+// One control for both settings: off, or on at a strength.
+static void OnValetHaptic(lv_event_t* e) {
+    const int choice = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+    const bool was = HapticIsEnabled();
+    if (choice == 0) {
+        if (was) HapticSetEnabled(false);
+    } else {
+        if (HapticGetIntensity() != choice - 1) HapticSetIntensity(choice - 1);
+        if (!was) HapticSetEnabled(true);
+        // The pulse attached to the tap read the old setting; give the new one.
+        HapticPulseIfEnabled();
+    }
+    RefreshOptions();
+}
+void SettingsHapticTab_BuildValet(lv_obj_t* page) {
+    const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+    SettingsValetLabel(page, Lang::Strings::SETTINGS_HAPTIC_TITLE);
+    const char* const names[] = {zh ? "关" : "Off", Lang::Strings::SETTINGS_HAPTIC_WEAK,
+        Lang::Strings::SETTINGS_HAPTIC_MEDIUM, Lang::Strings::SETTINGS_HAPTIC_STRONG};
+    s_ui.valet_seg = SettingsValetSegments(page, names, 4, OnValetHaptic);
+    lv_obj_add_event_cb(s_ui.valet_seg, [](lv_event_t*) { s_ui.valet_seg = nullptr; }, LV_EVENT_DELETE, nullptr);
     RefreshOptions();
 }
 

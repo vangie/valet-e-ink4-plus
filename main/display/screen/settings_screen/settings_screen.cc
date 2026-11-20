@@ -398,8 +398,9 @@ static void SetQuick(lv_event_t* event) {
         if (!ScreenLvAsync([](void* context) {
             const uint32_t expected = *static_cast<uint32_t*>(context);
             delete static_cast<uint32_t*>(context);
-            if (s_settings_scr && expected == s_settings_generation &&
-                s_ui.group == -1 && !s_ui.content_built) ShowOverview();
+            if (!s_settings_scr || expected != s_settings_generation || s_ui.content_built) return;
+            if (s_ui.group == -1) ShowOverview();
+            else if (s_ui.group == 4) ShowGroup(4);
         }, expected)) delete expected;
     }, Application::TaskDomain::Storage)) {
         ScreenShowToast(Text("操作繁忙，请重试", "Busy. Try again."));
@@ -417,7 +418,9 @@ static void AddLevel(lv_obj_t* box, Glyph glyph, const char* name, int value, bo
     lv_obj_set_style_text_font(label, SmallFont(), 0);
     lv_obj_align(label, LV_ALIGN_LEFT_MID, 52, 0);
     const int filled = (std::clamp(value, 0, 100) + 5) / 10;
-    constexpr int kBlockW = 32, kBlockGap = 5, kBlocksX = 130;
+    // Without a name the blocks take the room the name would have used.
+    const bool named = name && *name;
+    const int kBlockW = named ? 32 : 43, kBlockGap = named ? 5 : 6, kBlocksX = named ? 130 : 58;
     for (int i = 0; i < 10; ++i) {
         // The touch target is the full row height; the drawn block is the centre of it.
         auto* hit = lv_obj_create(row);
@@ -542,7 +545,27 @@ static void ShowGroup(int group) {
             AddRow(Text("打开阅读", "Open reading"), nullptr, OpenReading, 0);
             break;
         }
-        case 4: AddTab(SettingsTab::kBluetooth); AddTab(SettingsTab::kPager); AddTab(SettingsTab::kHaptic); break;
+        case 4: {
+            // Volume and key haptics on the page itself; Bluetooth
+            // and the page turner have screens of their own behind two rows.
+            SettingsValetLabel(s_ui.content_page, Text("音量", "Volume"));
+            if (auto* codec = Board::GetInstance().GetAudioCodec()) {
+                auto* box = lv_obj_create(s_ui.content_page);
+                lv_obj_remove_style_all(box);
+                lv_obj_set_size(box, lv_pct(100), LV_SIZE_CONTENT);
+                lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+                lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+                AddLevel(box, kGlyphSpeaker, "", codec->output_volume(), false);
+            }
+            // Whether replies are spoken is set on the assistant page: for the official
+            // service it is a server-side preference with its own request, not a local switch.
+            SettingsValetGap(s_ui.content_page);
+            SettingsHapticTab_BuildValet(s_ui.content_page);
+            SettingsValetGap(s_ui.content_page);
+            AddTab(SettingsTab::kBluetooth, Text("耳机、音箱、键盘与语音", "Headset, speaker, keys and voice"));
+            AddTab(SettingsTab::kPager, Text("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"));
+            break;
+        }
         case 5:
             AddTab(SettingsTab::kLanguage); AddTab(SettingsTab::kPower); AddTab(SettingsTab::kCharging);
             AddTab(SettingsTab::kLog); AddTab(SettingsTab::kTest); AddTab(SettingsTab::kAbout); break;
