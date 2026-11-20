@@ -41,7 +41,7 @@ constexpr lv_coord_t HOME_SLASH_PAD_COL = UiSx(14);
 constexpr lv_coord_t HOME_SLASH_NAME_NUDGE_R = UiSx(12);
 constexpr lv_coord_t HOME_SLASH_BORDER_W = UiSx(4);
 constexpr lv_coord_t HOME_SLASH_ROW_MIN_H = UiSy(110);
-#define HOME_APP_CARD_STYLE_DEFAULT HomeScreen::kCardStyleBorder // 默认首页主题：黑色描边
+#define HOME_APP_CARD_STYLE_DEFAULT HomeScreen::kCardStyleSlash // Valet 默认：斜切（官方默认是黑色描边）
 
 constexpr const char* TAG = "HomeScreen";
 constexpr const char* kScreenId = "home";

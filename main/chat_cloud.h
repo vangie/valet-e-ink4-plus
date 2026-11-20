@@ -58,6 +58,11 @@ inline custom_chat::Config CustomConfig() {
     if (const auto* active = profiles.Active()) return active->connection;
     return {};
 }
+// Calls belong to an assistant of your own: no call entry anywhere until
+// 「自建」 is selected and an assistant is connected.
+inline bool HasCallEntry() {
+    return IsCustom() && valet::LoadAssistantProfiles().Active() != nullptr;
+}
 inline std::string CustomUrl() {
     return CustomConfig().url;
 }

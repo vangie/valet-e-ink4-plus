@@ -277,7 +277,7 @@ void AssistantScreen::SyncPttOverlay() {
 }
 
 void AssistantScreen::RequestLive() {
-    if (!chat_cloud::IsCustom()) { ScreenShowToast("通话需先选择自建助理"); return; }
+    if (!chat_cloud::HasCallEntry()) { ScreenShowToast("通话需先连接自建助理"); return; }
     ValetProtocol::SetLive(true);
     RequestOpen();
 }
@@ -571,7 +571,7 @@ lv_obj_t* AssistantScreen::Create() {
     lv_obj_set_style_text_color(action_label, lv_color_white(), 0);
     lv_obj_center(action_label);
     lv_obj_add_flag(action_label, LV_OBJ_FLAG_HIDDEN);
-    if (chat_cloud::IsCustom() && !custom_live) {
+    if (chat_cloud::HasCallEntry() && !custom_live) {
         lv_obj_add_flag(action, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(action, ChangeTalkMode, LV_EVENT_CLICKED, nullptr);
         lv_obj_add_flag(action_label, LV_OBJ_FLAG_HIDDEN);

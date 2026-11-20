@@ -15,6 +15,10 @@ function L(zh, en) {
 function agentReady() {
   return state.paired && /^wss?:\/\/.+/.test(state.gateway) && state.pair.trim() !== "";
 }
+// 通话只属于自己的助理：没选「自建」或还没配对时，哪里都不出现通话入口。
+function callEntry() {
+  return state.provider === "agent" && agentReady();
+}
 function onBook() {
   return state.provider === "agent" && state.sessionType === "book";
 }
@@ -245,6 +249,14 @@ function v2Home() {
   const liveOk = agent && agentReady() && assistantCaps().live;
   const open = state.todos.filter((x) => !x.done);
   const pct = Math.round(((state.page + 1) / pages.length) * 100);
+  // 有自己的助理：提问和通话两块。没有：只有提问，占满整行，斜边留在右侧。
+  const pairArt = callEntry()
+    ? `<polygon class="dark" data-ask points="0.6,0.6 127,0.6 96,133.4 0.6,133.4" />
+        <polygon class="${liveOk ? "" : "off"}" data-live points="134,0.6 221.4,0.6 221.4,133.4 103,133.4" />`
+    : `<polygon class="dark" data-ask points="0.6,0.6 221.4,0.6 190.4,133.4 0.6,133.4" />`;
+  const callBlock = callEntry()
+    ? `<div class="v-call${liveOk ? "" : " off"}">${ic("wave")}<b>${L("通话", "Call")}</b><span>${liveOk ? L("接通就聊", "Just talk") : L("还没配置通话", "Call not set up")}</span></div>`
+    : "";
   return `${bar()}<main class="v-home">
     <section class="v-hero">
       <div class="v-clock"><span>10</span><i></i><span>48</span></div>
@@ -253,11 +265,10 @@ function v2Home() {
     <section class="v-pair">
       <svg viewBox="0 0 222 134" width="222" height="134">
         <pattern id="v-dither" width="3" height="3" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#111"/></pattern>
-        <polygon class="dark" data-ask points="0.6,0.6 127,0.6 96,133.4 0.6,133.4" />
-        <polygon class="${liveOk ? "" : "off"}" data-live points="134,0.6 221.4,0.6 221.4,133.4 103,133.4" />
+        ${pairArt}
       </svg>
       <div class="v-ask">${ic("mic")}<b>${L("提问", "Ask")}</b><span>${L("按住，说一句", "Hold and say it")}</span></div>
-      <div class="v-call${liveOk ? "" : " off"}">${ic("wave")}<b>${L("通话", "Call")}</b><span>${liveOk ? L("接通就聊", "Just talk") : agent && agentReady() ? L("还没配置通话", "Call not set up") : L("要用「自建」", "Needs Custom")}</span></div>
+      ${callBlock}
     </section>
     <button class="v-who" data-setting="talk"><i class="${!agent || liveOk ? "on" : ""}"></i><span>${v2Who()}</span>${ic("go")}</button>
     <button class="v-book" data-go="reader">
@@ -383,7 +394,7 @@ function v2Ai() {
       ? `<button class="v-cam${state.photo ? " on" : ""}" data-v2photo aria-label="${L("拍照", "Photo")}">${ic("cam")}</button>` : `<i></i>`;
     const holdWord = state.listening ? L("松开发送", "Release to send") : state.photo ? L("按住说话，连照片一起发", "Hold to talk, photo attached") : L("按住说话", "Hold to talk");
     foot = `${pager}<div class="v-talk${state.listening ? " rec" : ""}">${cam}<span data-hold>${holdWord}</span>
-      ${agent ? `<button class="tolive" data-live>${ic("wave")}${L("通话", "Call")}</button>` : ""}</div>`;
+      ${callEntry() ? `<button class="tolive" data-live>${ic("wave")}${L("通话", "Call")}</button>` : ""}</div>`;
   }
   return `${bar()}<main class="v-page v-ai">${v2Head(state.live ? L("通话", "Call") : L("提问", "Ask"), who, fresh)}${top}
     <div class="v-body">${body}</div>${foot}</main>`;
@@ -402,7 +413,7 @@ function v2Reader() {
   const sheet = state.sheet ? `<div class="sheet v-sheet">
       <div class="v-sheet-ai">
         <button class="solid" data-ask>${ic("mic")}${agent ? L("问这一页", "Ask this page") : `${L("问", "Ask ")}${PROVIDERS[state.provider]}`}</button>
-        ${agent ? `<button data-live>${ic("wave")}${L("聊这一页", "Talk about it")}</button>` : ""}
+        ${callEntry() ? `<button data-live>${ic("wave")}${L("聊这一页", "Talk about it")}</button>` : ""}
       </div>
       <div class="tabs">${tabs}</div>${pack}${sheetBody()}</div>` : "";
   return `<div class="read v-read">

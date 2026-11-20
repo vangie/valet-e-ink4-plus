@@ -228,16 +228,18 @@ void BuildHero(lv_obj_t* root) {
 // ── Ask / Call
 void DrawChoice(lv_event_t* e) {
     auto* obj = static_cast<lv_obj_t*>(lv_event_get_target(e));
-    const bool ask = lv_event_get_user_data(e) != nullptr;
+    const intptr_t kind = reinterpret_cast<intptr_t>(lv_event_get_user_data(e));
+    const bool ask = kind != 0, alone = kind == 2;
     auto* layer = lv_event_get_layer(e);
     lv_area_t a;
     lv_obj_get_coords(obj, &a);
     // Design polygons on a 222 x 134 grid: ask (0,0)(127,0)(96,134)(0,134), call (134,0)(222,0)(222,134)(103,134).
+    // Without a call entry Ask takes the whole row and keeps the slant on its right: (0,0)(222,0)(190,134)(0,134).
     const int w = a.x2 - a.x1, h = a.y2 - a.y1;
     auto px = [&](int v) { return static_cast<lv_value_precise_t>(a.x1 + v * w / 222); };
     const lv_value_precise_t top = a.y1, bottom = a.y1 + h;
     if (ask) {
-        const lv_point_precise_t p[4] = {{px(0), top}, {px(127), top}, {px(96), bottom}, {px(0), bottom}};
+        const lv_point_precise_t p[4] = {{px(0), top}, {px(alone ? 222 : 127), top}, {px(alone ? 190 : 96), bottom}, {px(0), bottom}};
         Quad(layer, p, true);
         // Microphone: capsule, cradle, stem.
         const int ix = a.x1 + 60, iy = a.y1 + 32;
@@ -275,23 +277,19 @@ void DrawChoice(lv_event_t* e) {
 }
 void BuildPair(lv_obj_t* root) {
     auto* pair = Box(root, kSide, kPairY, kWidth, kPairH);
-    // Say on the block itself why a call cannot start, instead of only after the tap.
-    const char* call_note = Text("要用「自建」", "Needs Custom");
-    if (chat_cloud::IsCustom()) {
-        const auto profiles = valet::LoadAssistantProfiles();
-        const auto* active = profiles.Active();
-        call_note = !active ? Text("还没配对", "Not paired") :
-            active->live ? Text("接通就聊", "Just talk") : Text("还没配置通话", "Call not set up");
-    }
-    for (int i = 0; i < 2; ++i) {
+    // No assistant of your own, no Call: Ask alone, across the whole row.
+    const bool call = chat_cloud::HasCallEntry();
+    for (int i = 0; i < (call ? 2 : 1); ++i) {
         const bool ask = i == 0;
         // Each half owns its side of the cut; the art is drawn over the whole pair.
         auto* art = Box(pair, 0, 0, kWidth, kPairH);
-        lv_obj_add_event_cb(art, DrawChoice, LV_EVENT_DRAW_MAIN, ask ? reinterpret_cast<void*>(1) : nullptr);
-        auto* hit = Box(pair, ask ? 0 : kWidth / 2 + 8, 0, kWidth / 2 - 8, kPairH, ask ? Ask : Call);
+        lv_obj_add_event_cb(art, DrawChoice, LV_EVENT_DRAW_MAIN,
+                            reinterpret_cast<void*>(static_cast<intptr_t>(!ask ? 0 : call ? 1 : 2)));
+        auto* hit = Box(pair, ask ? 0 : kWidth / 2 + 8, 0, ask && !call ? kWidth : kWidth / 2 - 8, kPairH,
+                        ask ? Ask : Call);
         auto* title = Label(hit, ask ? Text("提问", "Ask") : Text("通话", "Call"), &kValetTitleFont, ask);
         lv_obj_set_style_text_letter_space(title, 4, 0);
-        auto* note = Label(hit, ask ? Text("按住，说一句", "Hold and say it") : call_note, Small(), ask);
+        auto* note = Label(hit, ask ? Text("按住，说一句", "Hold and say it") : Text("接通就聊", "Just talk"), Small(), ask);
         if (ask) {
             lv_obj_align(title, LV_ALIGN_BOTTOM_LEFT, 36, -70);
             lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, 36, -30);
@@ -502,10 +500,11 @@ void DrawShelfIcon(lv_event_t* e) {
     auto x = [&](int tenths) { return a.x1 + tenths * w / 240; };
     auto y = [&](int tenths) { return a.y1 + tenths * w / 240; };
     auto* layer = lv_event_get_layer(e);
-    Line(layer, x(50), y(40), x(50), y(195), 5, false, true);
-    Line(layer, x(95), y(40), x(95), y(195), 5, false, true);
-    Line(layer, x(135), y(55), x(180), y(195), 5, false, true);
-    Line(layer, x(30), y(200), x(210), y(200), 5, false, true);
+    const bool white = lv_event_get_user_data(e) != nullptr;
+    Line(layer, x(50), y(40), x(50), y(195), 5, white, true);
+    Line(layer, x(95), y(40), x(95), y(195), 5, white, true);
+    Line(layer, x(135), y(55), x(180), y(195), 5, white, true);
+    Line(layer, x(30), y(200), x(210), y(200), 5, white, true);
 }
 void BuildAppName(lv_obj_t* cell, const AppEntry& entry, int style) {
     auto* name = Label(cell, Home_AppLabel(entry), Small());
@@ -520,6 +519,90 @@ void BuildAppName(lv_obj_t* cell, const AppEntry& entry, int style) {
         lv_obj_set_style_pad_hor(name, 8, 0);
     }
     lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -28);}
+// Built-in icons are 120 px, stored compressed in strips that cannot be scaled
+// while drawing: decode the whole icon once, then scale it. App store icons are
+// 128 px one-bit images with their own resampler. Returns the icon, centred on
+// (cx, cy) inside `parent`.
+lv_obj_t* AppIcon(lv_obj_t* parent, const AppEntry& entry, int edge, int cx, int cy, bool white) {
+    if (entry.icon_path && std::strcmp(entry.icon_path, kHomeValetShelfIcon) == 0) {
+        auto* art = Box(parent, cx - edge / 2, cy - edge / 2, edge, edge);
+        lv_obj_add_event_cb(art, DrawShelfIcon, LV_EVENT_DRAW_MAIN, white ? reinterpret_cast<void*>(1) : nullptr);
+        return art;
+    }
+    auto* icon = lv_image_create(parent);
+    int box = edge;
+    if (entry.installed_id.empty() && entry.create != AppStoreScreen::Create &&
+        HomeIconSetFullSource(icon, entry.icon_path)) {
+        const int natural = lv_image_get_src_width(icon);
+        if (natural > 0 && natural != edge) {
+            box = natural;
+            lv_obj_set_size(icon, natural, natural);
+            lv_image_set_pivot(icon, natural / 2, natural / 2);
+            lv_image_set_scale(icon, edge * LV_SCALE_NONE / natural);
+        }
+    } else {
+        AppStoreIcons::SetSource(icon, Home_AppIcon(entry), edge);
+        lv_obj_set_size(icon, edge, edge);
+    }
+    lv_obj_set_style_image_recolor(icon, white ? lv_color_white() : lv_color_black(), 0);
+    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+    lv_obj_set_pos(icon, cx - box / 2, cy - box / 2);
+    lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    return icon;
+}
+
+// Slanted tiles, from the design's 246-unit grid (x 2.78): rows of 206 px every
+// 228; the cut leans one way on even rows and the other on odd rows, and dark
+// and light alternate like a checkerboard.
+constexpr int kTileH = 206, kTilePitch = 228, kTileL = 35, kTileR = 649, kTileNear = 267, kTileFar = 389, kTileGap = 20;
+void DrawTile(lv_event_t* e) {
+    const intptr_t flags = reinterpret_cast<intptr_t>(lv_event_get_user_data(e));
+    const bool right = flags & 1, dark = flags & 2, odd = flags & 4;
+    lv_area_t a;
+    lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+    const int top = odd ? kTileNear : kTileFar, bottom = odd ? kTileFar : kTileNear;
+    auto P = [&](int x, bool low) {
+        return lv_point_precise_t{static_cast<lv_value_precise_t>(a.x1 + x),
+                                  static_cast<lv_value_precise_t>(low ? a.y2 - 1 : a.y1 + 1)};
+    };
+    const lv_point_precise_t p[4] = {
+        P(right ? top + kTileGap : kTileL, false), P(right ? kTileR : top, false),
+        P(right ? kTileR : bottom, true), P(right ? bottom + kTileGap : kTileL, true)};
+    auto* layer = lv_event_get_layer(e);
+    if (dark) { Quad(layer, p, true); return; }
+    for (int i = 0; i < 4; ++i) Line(layer, p[i].x, p[i].y, p[(i + 1) % 4].x, p[(i + 1) % 4].y, 3);
+}
+void BuildTiles(lv_obj_t* root, int start, int total) {
+    // All the shapes first, so no tile is painted over its neighbour's icon or name.
+    for (int i = 0; i < kHomeValetAppsPerPage && start + i < total; ++i) {
+        const int row = i / 2, side = i % 2;
+        auto* art = Box(root, 0, kAppsTop + row * kTilePitch, LV_HOR_RES, kTileH);
+        lv_obj_add_event_cb(art, DrawTile, LV_EVENT_DRAW_MAIN, reinterpret_cast<void*>(static_cast<intptr_t>(
+            side | (((row + side) % 2 == 0) ? 2 : 0) | ((row % 2) ? 4 : 0))));
+    }
+    // The two tiles of a row share the slanted edge; split the touch area down its middle.
+    constexpr int kSplit = (kTileNear + kTileFar + kTileGap) / 2;
+    for (int i = 0; i < kHomeValetAppsPerPage && start + i < total; ++i) {
+        const AppEntry& entry = kValetApps[start + i];
+        const int row = i / 2, side = i % 2;
+        const bool dark = (row + side) % 2 == 0;
+        const int x = side ? kSplit : kTileL, w = side ? kTileR - kSplit : kSplit - kTileL;
+        auto* hit = Box(root, x, kAppsTop + row * kTilePitch, w, kTileH);
+        lv_obj_add_flag(hit, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(hit);
+        lv_obj_set_user_data(hit, const_cast<AppEntry*>(&entry));
+        lv_obj_add_event_cb(hit, Home_OnAppClicked, LV_EVENT_CLICKED, const_cast<AppEntry*>(&entry));
+        const char* text = Home_AppLabel(entry);
+        const bool long_name = std::strlen(text) > 15 || (static_cast<unsigned char>(text[0]) < 0x80 && std::strlen(text) > 5);
+        constexpr int kIcon = 89;
+        // Icon on the outer side, name towards the cut.
+        const int icon_x = side ? 586 - x : (long_name ? 92 : 108) - x;
+        AppIcon(hit, entry, kIcon, icon_x, kTileH / 2, dark);
+        auto* name = Label(hit, text, long_name ? Small() : Body(), dark);
+        if (side) lv_obj_align(name, LV_ALIGN_RIGHT_MID, -(kTileR - 525), 0);
+        else lv_obj_align(name, LV_ALIGN_LEFT_MID, (long_name ? 150 : 167) - x, 0);
+    }
+}
 void BuildAppCell(lv_obj_t* root, int slot, const AppEntry& entry, int style) {
     auto* cell = Box(root, kSide + (slot % 2) * (kCellW + kCellGapX), kAppsTop + (slot / 2) * (kCellH + kCellGapY),
                      kCellW, kCellH);
@@ -527,40 +610,9 @@ void BuildAppCell(lv_obj_t* root, int slot, const AppEntry& entry, int style) {
     HapticAttachClick(cell);
     lv_obj_set_user_data(cell, const_cast<AppEntry*>(&entry));
     lv_obj_add_event_cb(cell, Home_OnAppClicked, LV_EVENT_CLICKED, const_cast<AppEntry*>(&entry));
-    // The slanted tiles of the 斜切 style are not drawn on this grid yet; use the outline until they are.
-    if (style == HomeScreen::kCardStyleSlash) style = HomeScreen::kCardStyleBorder;
     Home_ApplyCardStyle(cell, style);
     if (style == HomeScreen::kCardStyleBorder) lv_obj_set_style_border_width(cell, 3, 0);
-    // Built-in icons are 120 px, stored compressed in strips that cannot be
-    // scaled while drawing: decode the whole icon once, then scale it. App
-    // store icons are 128 px one-bit images with their own resampler.
-    constexpr int kIcon = 78;
-    if (entry.icon_path && std::strcmp(entry.icon_path, kHomeValetShelfIcon) == 0) {
-        auto* art = Box(cell, 0, 0, kIcon, kIcon);
-        lv_obj_align(art, LV_ALIGN_TOP_MID, 0, 28);
-        lv_obj_add_event_cb(art, DrawShelfIcon, LV_EVENT_DRAW_MAIN, nullptr);
-        BuildAppName(cell, entry, style);
-        return;
-    }
-    auto* icon = lv_image_create(cell);
-    int box = kIcon;
-    if (entry.installed_id.empty() && entry.create != AppStoreScreen::Create &&
-        HomeIconSetFullSource(icon, entry.icon_path)) {
-        const int natural = lv_image_get_src_width(icon);
-        if (natural > 0 && natural != kIcon) {
-            box = natural;
-            lv_obj_set_size(icon, natural, natural);
-            lv_image_set_pivot(icon, natural / 2, natural / 2);
-            lv_image_set_scale(icon, kIcon * LV_SCALE_NONE / natural);
-        }
-    } else {
-        AppStoreIcons::SetSource(icon, Home_AppIcon(entry), kIcon);
-        lv_obj_set_size(icon, kIcon, kIcon);
-    }
-    lv_obj_set_style_image_recolor(icon, lv_color_black(), 0);
-    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-    lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 28 - (box - kIcon) / 2);
-    lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    AppIcon(cell, entry, 78, kCellW / 2, 28 + 39, false);
     BuildAppName(cell, entry, style);
 }
 
@@ -611,7 +663,8 @@ void HomeValet_BuildApps(lv_obj_t* screen, lv_coord_t status_height, int style) 
     lv_obj_set_pos(title, kSide, 20);
     const int total = static_cast<int>(kValetApps.size());
     const int start = (Home_page - 1) * kHomeValetAppsPerPage;
-    for (int i = 0; i < kHomeValetAppsPerPage && start + i < total; ++i) BuildAppCell(root, i, kValetApps[start + i], style);
+    if (style == HomeScreen::kCardStyleSlash) BuildTiles(root, start, total);
+    else for (int i = 0; i < kHomeValetAppsPerPage && start + i < total; ++i) BuildAppCell(root, i, kValetApps[start + i], style);
     BuildFoot(root, height);
     ESP_LOGI(kLog, "apps page %d/%d apps %d..%d of %d", Home_page + 1, Home_PageCount(), start,
              std::min(start + kHomeValetAppsPerPage, total) - 1, total);
