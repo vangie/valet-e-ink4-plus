@@ -257,9 +257,9 @@ void RefreshValet() {
     for (int i = 0; i < 4; ++i) if (kGraceSeconds[i] == grace) chosen = i;
     SettingsValetSelect(s_ui.grace_seg, chosen);
     if (s_ui.wifi_row_detail) {
+        // The state of the connection is on the card at the top, which is kept current; this row only says what it opens.
         const char* detail = cell ? ValetText("没在用。点这里选网络", "Not in use. Tap to choose")
-            : WifiStation::GetInstance().IsConnected() ? ValetText("已连接。点这里换网络", "Connected. Tap to change")
-            : ValetText("没连上。点这里选网络", "Not connected. Tap to choose");
+                                  : ValetText("点这里选网络、换网络", "Tap to choose or change the network");
         if (std::strcmp(lv_label_get_text(s_ui.wifi_row_detail), detail) != 0) lv_label_set_text(s_ui.wifi_row_detail, detail);
     }
     if (s_ui.proxy_row_detail) {
@@ -781,7 +781,7 @@ void OnValetProxyRow(lv_event_t*) {
 lv_obj_t* AddValetRow(lv_obj_t* page, const char* title, lv_event_cb_t callback, bool first) {
     auto* row = lv_obj_create(page);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, lv_pct(100), first ? 124 : 122);
+    lv_obj_set_size(row, lv_pct(100), first ? 114 : 112);
     lv_obj_set_style_border_width(row, 2, 0);
     lv_obj_set_style_border_side(row, static_cast<lv_border_side_t>(LV_BORDER_SIDE_BOTTOM | (first ? LV_BORDER_SIDE_TOP : LV_BORDER_SIDE_NONE)), 0);
     lv_obj_set_style_border_color(row, lv_color_black(), 0);
@@ -812,31 +812,37 @@ lv_obj_t* AddValetRow(lv_obj_t* page, const char* title, lv_event_cb_t callback,
     return detail;
 }
 // Signal and ICCID are diagnostics; keep them at the bottom, out of the way of the choices.
+// Space between two fields on this page: a little under the usual 38, so that the 4G layout
+// (status card, connection, SIM, two rows, idle time) fits the screen without scrolling.
+constexpr int kValetGap = 26;
 void BuildValet(lv_obj_t* page) {
     lv_obj_set_style_pad_row(page, 0, 0);
+    // How the connection is doing right now comes first: it is what this page is opened for.
+    SettingsNetworkSignal_BuildCard(page);
+    SettingsValetGap(page, 26);
     SettingsValetLabel(page, ValetText("怎么上网", "Connection"));
     static const char* const kLinkZh[] = {"4G", "Wi-Fi"};
     static const intptr_t kLinkValues[] = {static_cast<intptr_t>(NetworkType::CELLULAR), static_cast<intptr_t>(NetworkType::WIFI)};
     s_ui.link_seg = SettingsValetSegments(page, kLinkZh, 2, OnNetworkOptionClicked, kLinkValues);
     SettingsValetNote(page, ValetText("换上网方式或换卡，设备会重启一次。", "Switching restarts the device."));
     if (IsCellNetwork()) {
-        SettingsValetGap(page);
+        SettingsValetGap(page, kValetGap);
         SettingsValetLabel(page, ValetText("用哪张卡", "SIM"));
         const char* const sims[] = {ValetText("内置卡", "Built-in"), ValetText("外置卡", "External")};
         s_ui.sim_seg = SettingsValetSegments(page, sims, 2, OnValetSim);
+        // The card's number belongs with the card; it is only needed when dealing with the carrier.
+        SettingsNetworkSignal_BuildCardNumber(page);
     }
-    SettingsValetGap(page);
+    SettingsValetGap(page, kValetGap);
     // Two ruled rows that lead elsewhere: the Wi-Fi network list, and the proxy page.
     s_ui.wifi_row_detail = AddValetRow(page, "Wi-Fi", OnValetWifiRow, true);
     s_ui.proxy_row_detail = AddValetRow(page, ValetText("代理", "Proxy"), OnValetProxyRow, false);
-    SettingsValetGap(page);
+    SettingsValetGap(page, kValetGap);
     SettingsValetLabel(page, ValetText("不用网时，多久断开", "Disconnect when idle after"));
     const char* const graces[] = {ValetText("30 秒", "30 s"), ValetText("1 分钟", "1 min"), ValetText("2 分钟", "2 min"), ValetText("不断", "Never")};
     static const intptr_t kGraceValues[] = {30, 60, 120, 0};
     s_ui.grace_seg = SettingsValetSegments(page, graces, 4, OnValetGrace, kGraceValues);
     SettingsValetNote(page, ValetText("断得快更省电，下一次提问要多等一两秒连网。", "Sooner saves battery; the next question waits to reconnect."));
-    SettingsValetGap(page, 34);
-    SettingsNetworkSignal_Build(page);
 }
 }  // namespace
 

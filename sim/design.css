@@ -432,3 +432,5 @@ div.v-row { box-sizing: border-box; }
 .v2 .calibration .note { margin: 6px 0; font-size: 12px; }
 /* 代理页的测试按钮占满一行，和设备上一样。 */
 .v-fld > .v-line.is-full { width: 100%; }
+/* 网络页多了顶部的状态卡：间距收一点，4G 那一版（状态卡、上网方式、选卡、两行入口、断网时间）一屏放得下。 */
+.v-pane.is-tight { gap: 7px; }

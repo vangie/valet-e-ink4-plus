@@ -47,6 +47,8 @@ void SettingsValetSelect(lv_obj_t* segments, int selected);
 /** @brief Status card: black when all is well, a dashed outline when something needs doing. Returns the card. */
 lv_obj_t* SettingsValetCard(lv_obj_t* parent, const char* title, const char* detail, bool ok = true,
                             bool device_icon = false);
+/** @brief Change a card's two lines. Unchanged text is not redrawn (a redraw is a panel refresh). */
+void SettingsValetCardSet(lv_obj_t* card, const char* title, const char* detail);
 /** @brief Outlined (or solid) button of the design's height; width is the caller's. */
 lv_obj_t* SettingsValetButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, intptr_t data = 0, bool solid = false);
 /** @brief Vertical space between two fields. */

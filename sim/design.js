@@ -557,9 +557,12 @@ function v2SettingsPane(id) {
       ${v2Fld(L("谁来回答", "Who answers"), v2Seg(providerChoices(), state.pendingProvider, "data-provider"))}${mine}${reboot}`;
   }
   if (id === "net") {
-    const sim = state.link === "4G" ? v2Fld(L("用哪张卡", "SIM"), v2Seg([["int", L("内置卡", "Built-in")], ["ext", L("外置卡", "External")]], state.sim, "data-sim")) : "";
-    return `${v2Fld(L("怎么上网", "Connection"), v2Seg([["4G", "4G"], ["wifi", "Wi-Fi"]], state.link, "data-link"), L("换上网方式或换卡，设备会重启一次。", "Switching restarts the device."))}${sim}
-      <nav class="v-rows">${`<button class="v-row" data-go="wifi"><span><b>Wi-Fi</b><em>${state.link === "wifi" ? "Metalio-Home · " + L("已连接", "connected") : L("没在用。点这里选网络", "Not in use. Tap to choose")}</em></span>${ic("go", "chev")}</button>`}
+    const cell = state.link === "4G";
+    const sim = cell ? v2Fld(L("用哪张卡", "SIM"), v2Seg([["int", L("内置卡", "Built-in")], ["ext", L("外置卡", "External")]], state.sim, "data-sim"), L("卡号（ICCID）", "Card number (ICCID)") + " 89860000000000000000") : "";
+    // 最上面先说现在连得怎么样：进这一页多半就是来看这个的。强度用话说，数字放后面。
+    const status = `<div class="v-card">${ic("check")}<span><b>${cell ? "4G" : "Wi-Fi"} · ${L("信号好", "good signal")}</b><em>${cell ? L("已连上 · 强度 24 / 31", "Connected · strength 24 / 31") : "Metalio-Home · -42 dBm"}</em></span></div>`;
+    return `${status}${v2Fld(L("怎么上网", "Connection"), v2Seg([["4G", "4G"], ["wifi", "Wi-Fi"]], state.link, "data-link"), L("换上网方式或换卡，设备会重启一次。", "Switching restarts the device."))}${sim}
+      <nav class="v-rows">${`<button class="v-row" data-go="wifi"><span><b>Wi-Fi</b><em>${state.link === "wifi" ? L("点这里选网络、换网络", "Tap to choose or change the network") : L("没在用。点这里选网络", "Not in use. Tap to choose")}</em></span>${ic("go", "chev")}</button>`}
         <button class="v-row" data-setting="proxy"><span><b>${L("代理", "Proxy")}</b><em>${proxySummary()}</em></span>${ic("go", "chev")}</button></nav>
       ${v2Fld(L("不用网时，多久断开", "Disconnect when idle after"), v2Seg([["30", L("30 秒", "30 s")], ["60", L("1 分钟", "1 min")], ["120", L("2 分钟", "2 min")], ["0", L("不断", "Never")]], state.netGrace, "data-grace"), L("断得快更省电，下一次提问要多等一两秒连网。", "Sooner saves battery; the next question waits to reconnect."))}`;
   }
@@ -648,7 +651,7 @@ function v2Settings() {
     diag: L("诊断", "Diagnostics"), about: L("关于", "About"), proxy: L("代理", "Proxy"),
   };
   const body = id === "list" ? v2SettingsHome() : v2SettingsPane(id);
-  return `${bar()}<main class="v-page v-set">${v2Head(titles[id] || titles.list)}<div class="v-pane">${body}</div></main>`;
+  return `${bar()}<main class="v-page v-set">${v2Head(titles[id] || titles.list)}<div class="v-pane${id === "net" ? " is-tight" : ""}">${body}</div></main>`;
 }
 
 // 待机：官方的斜切大时钟，下面是下一条待办和一句提示。

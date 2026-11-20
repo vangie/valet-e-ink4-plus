@@ -4,6 +4,8 @@
 #include "haptic_feedback.h"
 #include "screen_text.h"
 
+#include <cstring>
+
 void SettingsStyleBrightnessButton(lv_obj_t* button) {
     lv_obj_set_size(button, kSettingsBrightnessButtonW, kSettingsBrightnessButtonH);
     lv_obj_set_style_pad_all(button, 0, 0);
@@ -234,6 +236,16 @@ lv_obj_t* SettingsValetCard(lv_obj_t* parent, const char* title, const char* det
     lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
     lv_obj_align(sub, LV_ALIGN_LEFT_MID, 106, 24);
     return card;
+}
+
+void SettingsValetCardSet(lv_obj_t* card, const char* title, const char* detail) {
+    if (!card || lv_obj_get_child_count(card) < 3) return;
+    // Children in the order SettingsValetCard creates them: mark, title, detail.
+    const char* const texts[2] = {title, detail};
+    for (int i = 0; i < 2; ++i) {
+        auto* label = lv_obj_get_child(card, i + 1);
+        if (std::strcmp(lv_label_get_text(label), texts[i]) != 0) lv_label_set_text(label, texts[i]);
+    }
 }
 
 lv_obj_t* SettingsValetButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, intptr_t data, bool solid) {
