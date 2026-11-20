@@ -379,6 +379,13 @@ void Cloud_OnScreenDeleted(lv_event_t* e) {
     st.xfer.dl_page_open = false;
 }
 
+static bool s_open_on_usb = false;   // set by CreateOnUsb for the Create() that follows
+
+lv_obj_t* CloudScreen::CreateOnUsb() {
+    s_open_on_usb = true;
+    return Create();
+}
+
 lv_obj_t* CloudScreen::Create() {
     auto& st = Cloud_State();
     InvalidateSession();
@@ -489,7 +496,9 @@ lv_obj_t* CloudScreen::Create() {
     s_storage_error_timer = lv_timer_create([](lv_timer_t*) {
         if (ApTransferNeedsStorageRestart()) ShowStorageErrorDialog();
     }, 500, nullptr);
-    EnterCloudMode(kCloudModeAp);
+    // Opened from 存储与 U 盘, the page starts on the USB disk tab; otherwise on the hotspot tab as before.
+    EnterCloudMode(s_open_on_usb ? kCloudModeUsb : kCloudModeAp);
+    s_open_on_usb = false;
 
     VkKey_AttachScreen(scr, kScreenId,
                        VkKeyScreenDesc{CloudScreen::Create, Cloud_OnVkKey, nullptr, nullptr, nullptr,

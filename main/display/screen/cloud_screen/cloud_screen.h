@@ -7,6 +7,8 @@ class CloudScreen {
 public:
     /** @brief 创建云传输页 */
     static lv_obj_t* Create();
+    /** @brief The same page, opened on its USB disk tab (for 设置 → 设备 → 存储与 U 盘). */
+    static lv_obj_t* CreateOnUsb();
     /** @brief 停止当前传输并收起进度 UI；可从多线程调用 */
     static void StopTransfer();
     /** @brief 电源键进待机前关掉 AP 热点，传输页保留 */

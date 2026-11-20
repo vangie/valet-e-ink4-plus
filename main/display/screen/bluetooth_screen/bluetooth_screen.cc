@@ -20,6 +20,7 @@
 #include "simple_uart.hpp"
 #include "ui_scale.h"
 
+#include "sdkconfig.h"
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -266,6 +267,26 @@ void OpenAudioDevices() {
     lv_obj_add_event_cb(page, [](lv_event_t*) {
         audio_devices_page = audio_devices_status = nullptr;
     }, LV_EVENT_DELETE, nullptr);
+    lv_obj_t* host = page;   // where the list panel and the status line go
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    {
+        const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+        lv_obj_set_style_pad_all(page, 0, 0);
+        lv_obj_set_style_pad_row(page, 0, 0);
+        // The button being tapped is inside the page it closes: close after the event has returned.
+        SettingsValetHeader(page, zh ? "找耳机或音箱" : "Find a headset or speaker",
+                            [](lv_event_t*) { lv_async_call([](void*) { CloseAudioDevices(); }, nullptr); });
+        host = lv_obj_create(page);
+        Bluetooth_strip_container(host);
+        lv_obj_set_width(host, lv_pct(100));
+        lv_obj_set_flex_grow(host, 1);
+        lv_obj_set_style_pad_hor(host, 33, 0);
+        lv_obj_set_style_pad_top(host, 24, 0);
+        lv_obj_set_style_pad_bottom(host, 16, 0);
+        lv_obj_set_style_pad_row(host, kSettingsOptionGap, 0);
+        lv_obj_set_flex_flow(host, LV_FLEX_FLOW_COLUMN);
+    }
+    #else
     auto* title = lv_label_create(page);
     lv_label_set_text(title, Lang::Strings::BT_AUDIO_DEVICES);
     lv_obj_set_width(title, lv_pct(100));
@@ -273,14 +294,16 @@ void OpenAudioDevices() {
     lv_obj_set_style_text_color(title, lv_color_black(), 0);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_clear_flag(title, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_parent(panel, page);
+    #endif
+    lv_obj_set_parent(panel, host);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(panel, 0);
     lv_obj_set_flex_grow(panel, 1);
-    audio_devices_status = lv_label_create(page);
+    audio_devices_status = lv_label_create(host);
     lv_obj_set_size(audio_devices_status, lv_pct(100), UiSy(80));
     lv_label_set_long_mode(audio_devices_status, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(audio_devices_status, Lang::Strings::BT_MODE2_SET);
+    lv_label_set_text(audio_devices_status, "");
+    Bluetooth_update_status_label(Lang::Strings::BT_MODE2_SET);
     lv_obj_set_style_text_font(audio_devices_status, fontpack_lv_font_ui(), 0);
     lv_obj_set_style_text_color(audio_devices_status, lv_color_black(), 0);
     lv_obj_clear_flag(audio_devices_status, LV_OBJ_FLAG_CLICKABLE);
@@ -316,7 +339,7 @@ void RestoreVersionButton() {
         version_query_timer = nullptr;
     }
     auto* button = Bluetooth_State().check_version_btn;
-    if (button != nullptr) {
+    if (button != nullptr && Bluetooth_State().version_hint_label != nullptr) {
         lv_label_set_text(Bluetooth_State().version_hint_label, Lang::Strings::BT_CHECK_VERSION);
         lv_obj_remove_state(button, LV_STATE_DISABLED);
     }
@@ -324,6 +347,11 @@ void RestoreVersionButton() {
 
 void QueryVersion() {
     auto* button = Bluetooth_State().check_version_btn;
+    if (Bluetooth_State().valet_modes != nullptr) {
+        // Valet layout: asked once when the page opens; the answer fills the row.
+        if (Bluetooth_screen_active && !Bluetooth_mode_cmd_busy.load()) Bluetooth_query_version();
+        return;
+    }
     if (!Bluetooth_screen_active || button == nullptr || version_query_timer != nullptr ||
         Bluetooth_mode_cmd_busy.load()) return;
     version_query_timer = lv_timer_create(
@@ -353,7 +381,30 @@ void Bluetooth_strip_container(lv_obj_t* obj) {
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+// Valet layout: the status line on the Bluetooth page itself. An empty line takes no room.
+static void ShowPageStatus(const char* text) {
+    auto* label = Bluetooth_State().status_label;
+    if (label == nullptr) return;
+    if (std::strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+    lv_obj_set_flag(label, LV_OBJ_FLAG_HIDDEN, text[0] == '\0');
+}
+
 void Bluetooth_update_status_label(const char* text) {
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    {
+        // Valet: the module's "mode N set" lines in plain words. The selected segment already
+        // says which mode is set, so say only what there is to do next.
+        const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+        auto is = [text](const char* other) { return std::strcmp(text, other) == 0; };
+        if (is(Lang::Strings::BT_MODE1_SET) || is(Lang::Strings::BT_MODE3_SET)) text = "";
+        else if (is(Lang::Strings::BT_MODE2_SET)) text = audio_devices_status != nullptr
+            ? (zh ? "点「扫描设备」找附近的耳机或音箱，再点名字连接。" : "Tap Scan to find headsets and speakers nearby, then tap one to connect.")
+            : (zh ? "点下面的按钮找耳机或音箱。" : "Use the button below to find a headset or speaker.");
+        else if (is(Lang::Strings::BT_MODE5_SET)) text = zh ? "在电脑或手机的蓝牙里配对这台设备。" : "Pair this device from the computer or phone.";
+        else if (is(Lang::Strings::BT_SWITCH_MODE1) || is(Lang::Strings::BT_SWITCH_MODE2) ||
+                 is(Lang::Strings::BT_SWITCH_MODE3) || is(Lang::Strings::BT_SWITCH_MODE5)) text = zh ? "正在切换…" : "Switching…";
+    }
+    #endif
     if (audio_devices_status != nullptr) {
         lv_label_set_text(audio_devices_status, text);
         return;
@@ -367,6 +418,10 @@ void Bluetooth_update_status_label(const char* text) {
         return;
     }
     if (Bluetooth_State().status_label == nullptr) {
+        return;
+    }
+    if (Bluetooth_State().valet_modes != nullptr) {
+        ShowPageStatus(text);
         return;
     }
     lv_label_set_text(Bluetooth_State().status_label, text);
@@ -435,10 +490,20 @@ void Bluetooth_refresh_mode_buttons() {
             case BtMode::kMode5: description = Lang::Strings::BT_MODE5_DESC; break;
             default: break;
         }
-        lv_label_set_text(label, description);
-        auto* area = lv_obj_get_parent(label);
-        ScreenFitLabel(label, lv_obj_get_content_width(area), lv_obj_get_content_height(area));
-        lv_obj_center(label);
+        if (Bluetooth_State().valet_modes != nullptr) {
+            // A note under the choice: wraps by itself, and unchanged text is not redrawn.
+            if (std::strcmp(lv_label_get_text(label), description) != 0) lv_label_set_text(label, description);
+        } else {
+            lv_label_set_text(label, description);
+            auto* area = lv_obj_get_parent(label);
+            ScreenFitLabel(label, lv_obj_get_content_width(area), lv_obj_get_content_height(area));
+            lv_obj_center(label);
+        }
+    }
+    if (auto* modes = Bluetooth_State().valet_modes) {
+        int chosen = -1;
+        for (int i = 0; i < kBluetoothModeCount; ++i) if (Bluetooth_active_mode.load() == kBluetoothModes[i]) chosen = i;
+        SettingsValetSelect(modes, chosen);
     }
     if (Bluetooth_active_mode != BtMode::kMode5) ReleaseHidAlt();
     auto* hid_panel = Bluetooth_State().hid_panel;
@@ -707,8 +772,23 @@ lv_obj_t* CreateHidTestScreen() {
     lv_obj_set_style_pad_all(page, kSettingsContentPad, 0);
     lv_obj_set_style_pad_row(page, kSettingsOptionGap, 0);
     lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    {
+        const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+        auto* band = lv_obj_get_parent(SettingsValetHeader(screen, zh ? "试一下快捷键" : "Try the shortcut keys",
+            [](lv_event_t*) { if (ReleaseHidAlt()) ScreenNavigateBack(); }));
+        lv_obj_set_pos(band, 0, status_bar.height);
+        lv_obj_set_height(page, LV_VER_RES - status_bar.height - 94);
+        lv_obj_set_style_pad_hor(page, 33, 0);
+        lv_obj_set_style_pad_top(page, 24, 0);
+    }
+    #endif
 
     for (const char* text : {Lang::Strings::BT_HID_TITLE, Lang::Strings::BT_HID_HINT}) {
+        #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+        if (text == Lang::Strings::BT_HID_TITLE) continue;   // the title is in the header band
+        if (std::strcmp(Lang::Current(), "zh-CN") == 0) text = "先在电脑上配对，再点开一个能打字的地方。\n点一下发一次按键；按住 Alt 再点别的键是组合键。";
+        #endif
         lv_obj_t* label = lv_label_create(page);
         lv_label_set_text(label, text);
         lv_obj_set_width(label, lv_pct(100));
@@ -801,6 +881,91 @@ lv_obj_t* CreateHidTestScreen() {
 }
 } // namespace
 
+// Valet layout: where the sound goes comes first (it is what the page is for), then what follows
+// from the choice, then the module's name and firmware, and the reset last.
+static void BuildValet(lv_obj_t* parent) {
+    const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+    auto& ui = Bluetooth_State();
+    lv_obj_set_style_pad_row(parent, 0, 0);
+    SettingsValetLabel(parent, zh ? "声音从哪里出" : "Audio route");
+    const char* const modes[] = {zh ? "本机喇叭" : "Speaker", zh ? "蓝牙耳机" : "Headset",
+                                 zh ? "当蓝牙音箱" : "As speaker", zh ? "键盘与语音" : "Keys & voice"};
+    ui.valet_modes = SettingsValetSegments(parent, modes, kBluetoothModeCount, Bluetooth_on_mode_btn_clicked, nullptr, 2);
+    ui.mode_description_label = SettingsValetNote(parent, "");
+    // What the module last reported (switching, set, reconnecting, a failure).
+    ui.status_label = SettingsValetNote(parent, "");
+    lv_obj_set_style_margin_top(ui.status_label, 8, 0);
+    SettingsValetGap(parent, 20);
+    // Shown only in the mode they belong to; hidden rows take no room.
+    ui.mode2_entry = SettingsValetButton(parent, zh ? "找耳机或音箱" : "Find a headset or speaker",
+                                         [](lv_event_t*) { OpenAudioDevices(); });
+    lv_obj_add_flag(ui.mode2_entry, LV_OBJ_FLAG_HIDDEN);
+    ui.hid_panel = SettingsValetButton(parent, zh ? "试一下快捷键" : "Try the shortcut keys", [](lv_event_t*) {
+        if (Bluetooth_mode_cmd_busy.load(std::memory_order_acquire)) return;
+        ScreenNavigateTo(CreateHidTestScreen, SettingsScreen::CreateBluetooth);
+    });
+    lv_obj_add_flag(ui.hid_panel, LV_OBJ_FLAG_HIDDEN);
+    SettingsValetGap(parent, 26);
+    ui.name_label = SettingsValetRow(parent, zh ? "蓝牙名称" : "Bluetooth name", Lang::Strings::COMMON_UNKNOWN, nullptr, 0, true);
+    ui.version_label = SettingsValetRow(parent, zh ? "蓝牙模块固件" : "Bluetooth module firmware", Lang::Strings::COMMON_UNKNOWN);
+    SettingsValetGap(parent, 26);
+    ui.valet_reset = SettingsValetButton(parent, zh ? "复位蓝牙模块" : "Reset the Bluetooth module", Bluetooth_on_reset_bt_clicked);
+    SettingsValetNote(parent, zh ? "连不上、没声音时试一下，几秒后自动恢复。"
+                                 : "Try this when nothing connects or there is no sound; the mode is restored after a few seconds.");
+    SettingsValetGap(parent);
+
+    // The device list for the headset mode lives in a panel that the device manager page borrows.
+    lv_obj_t* panel = lv_obj_create(parent);
+    ui.mode2_panel = panel;
+    Bluetooth_strip_container(panel);
+    lv_obj_set_width(panel, lv_pct(100));
+    lv_obj_set_height(panel, UiSy(280));
+    lv_obj_set_style_border_width(panel, kSettingsBorderW, 0);
+    lv_obj_set_style_border_color(panel, lv_color_black(), 0);
+    lv_obj_set_style_pad_all(panel, UiSx(8), 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    ui.scan_btn = Bluetooth_make_action_button(panel, Lang::Strings::BT_SCAN_BTN, Bluetooth_on_scan_clicked);
+    lv_obj_set_width(ui.scan_btn, lv_pct(100));
+    lv_obj_align(ui.scan_btn, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_t* list = lv_obj_create(panel);
+    ui.device_list = list;
+    Bluetooth_strip_container(list);
+    lv_obj_set_size(list, lv_pct(100), UiSy(140));
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, kSettingsOptionH + UiSy(8));
+    lv_obj_set_style_border_width(list, kSettingsBorderW, 0);
+    lv_obj_set_style_border_color(list, lv_color_black(), 0);
+    lv_obj_set_style_pad_all(list, UiSx(6), 0);
+    lv_obj_set_style_pad_row(list, UiSy(6), 0);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_add_event_cb(panel, [](lv_event_t* e) {
+        auto* panel = lv_event_get_target_obj(e);
+        auto* list = static_cast<lv_obj_t*>(lv_event_get_user_data(e));
+        const auto available = lv_obj_get_content_height(panel) - 2 * kSettingsOptionH - UiSy(24);
+        lv_obj_set_height(list, available > 0 ? available : 1);
+    }, LV_EVENT_SIZE_CHANGED, list);
+    lv_obj_t* btn_row = lv_obj_create(panel);
+    Bluetooth_strip_container(btn_row);
+    lv_obj_set_width(btn_row, lv_pct(100));
+    lv_obj_set_height(btn_row, kSettingsOptionH);
+    lv_obj_align(btn_row, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(btn_row, kSettingsOptionGap, 0);
+    ui.music_btn = Bluetooth_make_action_button(btn_row, Lang::Strings::BT_MUSIC_BTN, Bluetooth_on_music_mode_clicked);
+    lv_obj_set_flex_grow(ui.music_btn, 1);
+    ui.call_btn = Bluetooth_make_action_button(btn_row, Lang::Strings::BT_CALL_BTN, Bluetooth_on_call_mode_clicked);
+    lv_obj_set_flex_grow(ui.call_btn, 1);
+
+    // 开机 MetalioAudio 已下发模式1；UI 首次进入时对齐选中态
+    if (Bluetooth_active_mode == BtMode::kNone) Bluetooth_active_mode = BtMode::kMode1;
+    Bluetooth_restore_mode_ui();
+    // Say what there is to do in this mode, on this page, whatever screen is in front right now.
+    ShowPageStatus(Bluetooth_active_mode == BtMode::kMode2 ? (zh ? "点下面的按钮找耳机或音箱。" : "Use the button below to find a headset or speaker.")
+                 : Bluetooth_active_mode == BtMode::kMode5 ? (zh ? "在电脑或手机的蓝牙里配对这台设备。" : "Pair this device from the computer or phone.")
+                 : "");
+}
+
 void BluetoothScreen::BuildInto(lv_obj_t* parent) {
     Bluetooth_conn_state = ConnState::kIdle;
     {
@@ -809,6 +974,10 @@ void BluetoothScreen::BuildInto(lv_obj_t* parent) {
         Bluetooth_devices.clear();
     }
     Bluetooth_State().root = parent;
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    BuildValet(parent);
+    return;
+    #endif
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_pad_row(parent, UiSy(6), 0);
@@ -999,9 +1168,19 @@ void BluetoothScreen::BuildInto(lv_obj_t* parent) {
     Bluetooth_restore_mode_ui();
 }
 
+const char* BluetoothScreen::RouteName() {
+    const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+    switch (Bluetooth_active_mode.load()) {
+        case BtMode::kMode2: return zh ? "蓝牙耳机" : "Headset";
+        case BtMode::kMode3: return zh ? "当蓝牙音箱" : "As speaker";
+        case BtMode::kMode5: return zh ? "键盘与语音" : "Keys & voice";
+        default: return zh ? "本机喇叭" : "Speaker";
+    }
+}
+
 void BluetoothScreen::ResetUi() {
     CloseAudioDevices();
-    if (auto* root = Bluetooth_State().root) {
+    if (auto* root = Bluetooth_State().root; root && Bluetooth_State().valet_modes == nullptr) {
         lv_obj_add_flag(root, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO);
         lv_obj_set_style_pad_row(root, kSettingsOptionGap, 0);

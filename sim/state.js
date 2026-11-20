@@ -95,6 +95,7 @@ const state = {
   shakeTurn: false,
   shakeLevel: 3,
   logOn: false,
+  pagerAuto: false,  // 翻页器：开机和退出待机后自动找附近的翻页器
   usb: false,
   taskTab: "todo",
   taskOpen: -1,

@@ -53,6 +53,8 @@ struct BluetoothUiState {
     lv_obj_t* device_list = nullptr; // 设备列表
     lv_obj_t* music_btn = nullptr; // 音乐模式按钮
     lv_obj_t* call_btn = nullptr; // 通话模式按钮
+    lv_obj_t* valet_modes = nullptr; // Valet layout: the four modes as one segmented choice
+    lv_obj_t* valet_reset = nullptr; // Valet layout: the reset button
 };
 
 extern std::atomic<bool> Bluetooth_mode_cmd_busy; // 模式命令忙

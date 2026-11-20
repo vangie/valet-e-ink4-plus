@@ -11,6 +11,7 @@
 #include "lv_adapter_display.h"
 #include "haptic_feedback.h"
 
+#include "sdkconfig.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -360,7 +361,11 @@ void List(const Snapshot& state, int width, int height) {
         }
         if (!count) {
             lv_obj_set_flex_align(rows, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-            auto* hint = Label(rows, group == 0 ? Lang::Strings::SETTINGS_PAGER_NO_SAVED : Lang::Strings::PAGER_NO_UNSAVED,
+            const char* empty = group == 0 ? Lang::Strings::SETTINGS_PAGER_NO_SAVED : Lang::Strings::PAGER_NO_UNSAVED;
+            #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+            if (group == 0 && std::strcmp(Lang::Current(), "zh-CN") == 0) empty = "还没保存过。连上一个翻页器就会记住";
+            #endif
+            auto* hint = Label(rows, empty,
                 0, lv_obj_get_height(rows));
             lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
         }
@@ -622,14 +627,22 @@ lv_obj_t* PagerScreen::Create() {
     lv_obj_set_style_bg_color(root, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     auto status = ScreenCreateStatusBar(root);
-    const int pad = UiSx(12);
     s_gap = UiSy(8);
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    // Valet: the settings pages' header band (with a way back) and side margin.
+    const int pad = 33;
+    const int width = LV_HOR_RES - 2 * pad;
+    lv_obj_set_pos(lv_obj_get_parent(SettingsValetHeader(root, Lang::Strings::SETTINGS_PAGER_MANAGE, Back)), 0, status.height);
+    const int top = status.height + 94 + 3 * s_gap;
+    #else
+    const int pad = UiSx(12);
     const int width = LV_HOR_RES - 2 * pad;
     const int title_y = status.height + s_gap;
     auto* heading = Label(root, Lang::Strings::SETTINGS_PAGER_MANAGE, title_y, Font()->line_height + s_gap, 0);
     lv_obj_set_x(heading, pad);
     lv_obj_set_width(heading, width);
     const int top = title_y + Font()->line_height + 3 * s_gap;
+    #endif
     const int row = kSettingsOptionH;
     const int footer_y = LV_VER_RES - row - pad;
     s_body = Container(root, width, footer_y - top - s_gap);

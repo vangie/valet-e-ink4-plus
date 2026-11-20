@@ -15,6 +15,8 @@ public:
     static void OnDeactivated();
     /** @brief 逐级收起名称弹窗、键盘或设备管理页；已处理返回 true */
     static bool DismissOverlay();
+    /** @brief Where the sound goes now, in the words of the Valet page (本机喇叭 / 蓝牙耳机 …). */
+    static const char* RouteName();
     /** @brief 开机默认应用模式 1，适用于 UART 初始化后、UI 未启动时场景。 */
     static void ApplyDefaultMode();
 };

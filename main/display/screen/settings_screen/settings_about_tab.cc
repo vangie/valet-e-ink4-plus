@@ -13,6 +13,8 @@
 #include "lv_adapter_epdiy.h"
 #include "power_policy.h"
 
+#include "sdkconfig.h"
+#include <cstring>
 #include <atomic>
 #include <cstdio>
 #include <new>
@@ -331,6 +333,34 @@ void SettingsAboutTab_Build(lv_obj_t* page) {
     SettingsAboutInfoItem items[8];
     int count = 0;
     CollectInfoItems(items, &count);
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    {
+        // Valet layout: what this is first, then the plain facts as ruled rows.
+        const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+        const auto* app = esp_app_get_description();
+        lv_obj_set_style_pad_row(page, 0, 0);
+        char line[96];
+        std::snprintf(line, sizeof(line), zh ? "固件 %s · %s" : "Firmware %s · %s", app->version, app->date);
+        auto* card = SettingsValetCard(page, zh ? "Valet 随行" : "Valet", line, true, true);
+        lv_obj_add_event_cb(card, [](lv_event_t*) { SettingsAboutTab_Reset(); }, LV_EVENT_DELETE, nullptr);
+        SettingsValetGap(page, 26);
+        SettingsValetRow(page, zh ? "检查更新" : "Check for updates",
+                         zh ? "查的是官方固件的版本，有新版本会先问你" : "Checks the official firmware's version; asks before installing",
+                         OnFirmwareRowClicked, 0, true);
+        // Items in the order CollectInfoItems fills them: model, chip, cores, firmware, build, MAC, flash, PSRAM.
+        if (count == 8) {
+            SettingsValetRow(page, items[0].label, items[0].value);
+            std::snprintf(line, sizeof(line), "%s · %s", items[1].value, items[2].value);
+            SettingsValetRow(page, zh ? "芯片" : "Chip", line);
+            SettingsValetRow(page, items[4].label, items[4].value);
+            SettingsValetRow(page, items[5].label, items[5].value);
+            std::snprintf(line, sizeof(line), "Flash %s · PSRAM %s", items[6].value, items[7].value);
+            SettingsValetRow(page, zh ? "存储器" : "Memory", line);
+        }
+        SettingsValetGap(page);
+        return;
+    }
+    #endif
 
     lv_obj_t* list = lv_obj_create(page);
     lv_obj_add_event_cb(list, [](lv_event_t*) { SettingsAboutTab_Reset(); }, LV_EVENT_DELETE, nullptr);

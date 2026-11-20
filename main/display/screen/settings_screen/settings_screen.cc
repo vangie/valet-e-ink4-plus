@@ -17,6 +17,8 @@
 #include "settings_network_tab.h"
 #include "settings_power_tab.h"
 #include "settings_proxy_page.h"
+#include "settings_storage_page.h"
+#include "sdkconfig.h"
 #include "settings_charging_tab.h"
 #include "assets/lang_charging.h"
 #include "settings_test/settings_test_tab.h"
@@ -62,6 +64,7 @@ enum class SettingsTab : int {
     kTest = 8,
     kLog = 9,
     kCharging = 11, // 充电电流配置
+    kStorage = 13, // Valet: SD card and the way to the USB disk
     kAbout = 10, // 关于始终放最后
 };
 
@@ -100,6 +103,7 @@ static const char* TabNameTest() {
     return Lang::Strings::SETTINGS_TAB_TEST;
 }
 static const char* TabNameLog() { return Lang::Strings::SETTINGS_TAB_LOG; }
+static const char* TabNameStorage() { return std::strcmp(Lang::Current(), "zh-CN") == 0 ? "存储与 U 盘" : "Storage & USB"; }
 static const char* TabNameAbout() {
     return Lang::Strings::SETTINGS_TAB_ABOUT;
 }
@@ -117,6 +121,7 @@ static constexpr SettingsTabEntry kTabs[] = {
     {SettingsTab::kPager, TabNamePager},
     {SettingsTab::kTest, TabNameTest},
     {SettingsTab::kLog, TabNameLog},
+    {SettingsTab::kStorage, TabNameStorage},
     {SettingsTab::kAbout, TabNameAbout},
 };
 static constexpr int kTabCount = sizeof(kTabs) / sizeof(kTabs[0]);
@@ -140,6 +145,15 @@ static bool s_open_overview = true;
 static lv_obj_t* s_settings_scr = nullptr;
 static uint32_t s_settings_generation = 0;
 
+static int TabIndexOf(SettingsTab id);
+static const char* TabTitle(SettingsTab id) {
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+    if (id == SettingsTab::kPower) return zh ? "电池与省电" : "Battery & power";
+    if (id == SettingsTab::kLog) return zh ? "诊断" : "Diagnostics";
+    #endif
+    return kTabs[TabIndexOf(id)].name();
+}
 static int TabIndexOf(SettingsTab id) {
     for (int i = 0; i < kTabCount; ++i) {
         if (kTabs[i].id == id) {
@@ -155,6 +169,9 @@ static ScreenFactory FactoryForTab(SettingsTab id) {
     if (id == SettingsTab::kTest) {
         return SettingsScreen::CreateTest;
     }
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    if (id == SettingsTab::kLog) return SettingsScreen::CreateTest;   // 诊断 holds the tests
+    #endif
     return SettingsScreen::Create;
 }
 
@@ -194,6 +211,9 @@ static void ResetTab(SettingsTab id) {
             break;
         case SettingsTab::kLog:
             SettingsLogTab_Reset();
+            break;
+        case SettingsTab::kStorage:
+            SettingsStoragePage_Reset();
             break;
         case SettingsTab::kAbout:
             SettingsAboutTab_Reset();
@@ -242,6 +262,14 @@ static void BuildTab(SettingsTab id) {
             break;
         case SettingsTab::kLog:
             SettingsLogTab_Build(page);
+            #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+            // 诊断: the tests follow the log on the same page.
+            SettingsValetGap(page, 30);
+            SettingsTestTab_BuildValet(page);
+            #endif
+            break;
+        case SettingsTab::kStorage:
+            SettingsStoragePage_Build(page);
             break;
         case SettingsTab::kAbout:
             SettingsAboutTab_Build(page);
@@ -472,7 +500,7 @@ static lv_obj_t* AddQuickBox() {
 }
 static void OpenTab(lv_event_t* e) {
     ShowTab(TabIndexOf(static_cast<SettingsTab>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)))));
-    lv_label_set_text(s_ui.heading, kTabs[s_ui.active_tab].name());
+    lv_label_set_text(s_ui.heading, TabTitle(kTabs[s_ui.active_tab].id));
     lv_obj_scroll_to_y(s_ui.content_page, 0, LV_ANIM_OFF);
 }
 static void OpenGroup(lv_event_t* e) {
@@ -518,7 +546,7 @@ static void AddRow(const char* title, const char* detail, lv_event_cb_t callback
     lv_obj_align(AddGlyph(row, kGlyphGo, 26), LV_ALIGN_RIGHT_MID, -2, 0);
 }
 static void AddTab(SettingsTab tab, const char* detail = nullptr) {
-    AddRow(kTabs[TabIndexOf(tab)].name(), detail, OpenTab, static_cast<intptr_t>(tab));
+    AddRow(TabTitle(tab), detail, OpenTab, static_cast<intptr_t>(tab));
 }
 static void ClearContent() {
     TearDownActiveTab();
@@ -671,7 +699,12 @@ static void ShowGroup(int group) {
             SettingsValetGap(s_ui.content_page);
             SettingsHapticTab_BuildValet(s_ui.content_page);
             SettingsValetGap(s_ui.content_page);
-            AddTab(SettingsTab::kBluetooth, Text("耳机、音箱、键盘与语音", "Headset, speaker, keys and voice"));
+            {
+                // The row says where the sound goes now; the choice itself is one level down.
+                char route[96];
+                std::snprintf(route, sizeof(route), Text("声音现在从%s出 · 点这里换", "Now: %s · tap to change"), BluetoothScreen::RouteName());
+                AddTab(SettingsTab::kBluetooth, route);
+            }
             break;
         }
         case 5: {
@@ -690,16 +723,16 @@ static void ShowGroup(int group) {
             lv_obj_set_size(rule, lv_pct(100), 3);
             lv_obj_set_style_bg_color(rule, lv_color_black(), 0);
             lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
-            const auto& power = PowerPolicy::GetInstance();
-            char line[96];
-            std::snprintf(line, sizeof(line), Text("空闲时 %d MHz · 5 分钟待机，30 分钟关机", "%d MHz idle · standby 5 min, off 30 min"),
-                          power.GetIdleCpuMhz());
+            // One row per thing to manage, each with its current state, grouped as in the design.
+            char line[128];
+            const int mhz = PowerPolicy::GetInstance().GetIdleCpuMhz();
+            std::snprintf(line, sizeof(line), Text("%s · 5 分钟待机 · 充电 %s A", "%s · standby after 5 min · charging %s A"),
+                          mhz <= 160 ? Text("最省电", "Saver") : mhz <= 240 ? Text("均衡", "Balanced") : Text("最流畅", "Smooth"),
+                          MetalioPower_GetChargeCurrentMa() <= 500 ? "0.5" : MetalioPower_GetChargeCurrentMa() <= 1000 ? "1" : "1.5");
             AddTab(SettingsTab::kPower, line);
-            std::snprintf(line, sizeof(line), Text("充电电流 %d mA", "Charging current %d mA"), MetalioPower_GetChargeCurrentMa());
-            AddTab(SettingsTab::kCharging, line);
+            AddTab(SettingsTab::kStorage, SettingsStoragePage_Summary());
             AddTab(SettingsTab::kLanguage, std::strcmp(Lang::Current(), "zh-CN") == 0 ? "简体中文" : "English");
-            AddTab(SettingsTab::kLog, Text("记录并上传运行日志", "Record and upload logs"));
-            AddTab(SettingsTab::kTest, Text("屏幕、触摸、电池、声音", "Screen, touch, battery, audio"));
+            AddTab(SettingsTab::kLog, Text("日志、测试、关机和重启", "Logs, tests, power off and restart"));
             const auto* app = esp_app_get_description();
             std::snprintf(line, sizeof(line), "Valet %s", app ? app->version : "");
             AddTab(SettingsTab::kAbout, line);
@@ -885,7 +918,7 @@ static lv_obj_t* CreateInternal() {
         const bool whole_group = open_tab == SettingsTab::kConversation || open_tab == SettingsTab::kNetwork;
         s_ui.direct = whole_group;
         lv_label_set_text(s_ui.heading, whole_group ? Text(kGroups[s_ui.group].zh, kGroups[s_ui.group].en)
-                                                    : kTabs[s_ui.active_tab].name());
+                                                    : TabTitle(kTabs[s_ui.active_tab].id));
     }
     s_open_overview = true;
     ESP_LOGI(TAG, "settings ready tabs=%d open=%d haptic=%d", kTabCount, (int)open_tab,
@@ -923,6 +956,12 @@ lv_obj_t* SettingsScreen::CreateBluetooth() {
     return CreateInternal();
 }
 lv_obj_t* SettingsScreen::CreateTest() {
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    // The tests are on the 诊断 page: coming back from a test lands there.
+    s_open_overview = false;
+    s_pending_tab = SettingsTab::kLog;
+    return CreateInternal();
+    #endif
     s_open_overview = false;
     s_pending_tab = SettingsTab::kTest;
     return CreateInternal();

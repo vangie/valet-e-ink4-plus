@@ -7,6 +7,13 @@
 #include "settings_common.h"
 #include "ui_scale.h"
 #include "screen_text.h"
+#include "assets/lang_charging.h"
+#include "board.h"
+#include "metalio_power.h"
+#include "sdkconfig.h"
+
+#include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -160,14 +167,99 @@ lv_obj_t* CreateOptionRow(lv_obj_t* page) {
     return row;
 }
 
+// ── Valet layout: battery card, idle CPU speed in words, what happens when idle, charging current.
+// Disconnect-when-idle is on the network page, where it belongs.
+const char* ValetText(const char* zh, const char* en) {
+    return std::strcmp(Lang::Current(), "zh-CN") == 0 ? zh : en;
+}
+struct ValetUi {
+    lv_obj_t* card = nullptr;
+    lv_obj_t* mhz_seg = nullptr;
+    lv_obj_t* charge_seg = nullptr;
+    lv_obj_t* charge_note = nullptr;
+    lv_timer_t* timer = nullptr;
+};
+ValetUi s_valet;
+constexpr int kChargeMa[] = {500, 1000, 1500};
+
+void RefreshValetCard(lv_timer_t* = nullptr) {
+    if (!s_valet.card) return;
+    int level = 0;
+    bool charging = false, discharging = false;
+    char title[48];
+    const char* detail;
+    if (Board::GetInstance().GetBatteryLevel(level, charging, discharging)) {
+        std::snprintf(title, sizeof(title), "%s %d%%", ValetText("电量", "Battery"), level);
+        detail = charging ? ValetText("正在充电", "Charging") : ValetText("没在充电", "Not charging");
+    } else {
+        std::snprintf(title, sizeof(title), "%s", ValetText("电量", "Battery"));
+        detail = ValetText("还没读到", "Not read yet");
+    }
+    SettingsValetCardShow(s_valet.card, title, detail, true, true);
+}
+void RefreshValet() {
+    const int mhz = PowerPolicy::GetInstance().GetIdleCpuMhz();
+    int chosen = -1;
+    for (int i = 0; i < kMhzCount; ++i) if (kMhzOptions[i].mhz == mhz) chosen = i;
+    SettingsValetSelect(s_valet.mhz_seg, chosen);
+    const int ma = MetalioPower_GetChargeCurrentMa();
+    chosen = -1;
+    for (int i = 0; i < 3; ++i) if (kChargeMa[i] == ma) chosen = i;
+    SettingsValetSelect(s_valet.charge_seg, chosen);
+}
+void BuildValet(lv_obj_t* page) {
+    lv_obj_set_style_pad_row(page, 0, 0);
+    s_valet.card = SettingsValetCardSlot(page);
+    RefreshValetCard();
+    SettingsValetGap(page, 30);
+    SettingsValetLabel(page, ValetText("没操作的时候", "When idle"));
+    const char* const speeds[] = {ValetText("最省电", "Saver"), ValetText("均衡", "Balanced"), ValetText("最流畅", "Smooth")};
+    static const intptr_t kMhzValues[] = {160, 240, 320};
+    s_valet.mhz_seg = SettingsValetSegments(page, speeds, 3, [](lv_event_t* e) {
+        const int mhz = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+        if (PowerPolicy::GetInstance().GetIdleCpuMhz() != mhz) PowerPolicy::GetInstance().SetIdleCpuMhz(mhz);
+        RefreshValet();
+    }, kMhzValues);
+    SettingsValetNote(page, ValetText("越省电，下一次翻页和唤醒越慢一点。", "More saving means a slightly slower page turn and wake."));
+    SettingsValetGap(page, 30);
+    SettingsValetRow(page, ValetText("5 分钟没操作 → 待机", "5 min idle → standby"),
+                     ValetText("屏上留着日期和待办，按电源键醒来", "Date and to-dos stay on screen; the power key wakes"), nullptr, 0, true);
+    SettingsValetRow(page, ValetText("待机满 30 分钟 → 关机", "30 min in standby → off"),
+                     ValetText("开机后回到上次读的那一页", "Reopens the page you were reading"));
+    SettingsValetGap(page, 30);
+    SettingsValetLabel(page, ValetText("充电电流", "Charging current"));
+    static const char* const kAmps[] = {"0.5 A", "1 A", "1.5 A"};
+    static const intptr_t kMaValues[] = {500, 1000, 1500};
+    s_valet.charge_seg = SettingsValetSegments(page, kAmps, 3, [](lv_event_t* e) {
+        const int ma = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+        const bool ok = MetalioPower_GetChargeCurrentMa() == ma || MetalioPower_SetChargeCurrentMa(ma);
+        const char* note = ok ? ValetText("充电头功率小就选 0.5 A。", "Use 0.5 A with a weak charger.")
+                              : Lang::Strings::SETTINGS_CHARGING_FAILED;
+        if (s_valet.charge_note && std::strcmp(lv_label_get_text(s_valet.charge_note), note) != 0)
+            lv_label_set_text(s_valet.charge_note, note);
+        RefreshValet();
+    }, kMaValues);
+    s_valet.charge_note = SettingsValetNote(page, ValetText("充电头功率小就选 0.5 A。", "Use 0.5 A with a weak charger."));
+    SettingsValetGap(page);
+    RefreshValet();
+    // The battery figure moves slowly: look twice a minute, redraw only on a change.
+    s_valet.timer = lv_timer_create(RefreshValetCard, 30000, nullptr);
+}
+
 }  // namespace
 
 void SettingsPowerTab_Reset() {
     s_ui = {};
+    if (s_valet.timer) lv_timer_delete(s_valet.timer);
+    s_valet = {};
 }
 
 void SettingsPowerTab_Build(lv_obj_t* page) {
     s_ui = {};
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    BuildValet(page);
+    return;
+    #endif
     lv_obj_set_style_pad_row(page, kPagePadRow, 0);
 
     AddSectionTitle(page, Lang::Strings::SETTINGS_POWER_IDLE_MHZ_TITLE);

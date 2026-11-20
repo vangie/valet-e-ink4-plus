@@ -248,6 +248,146 @@ void SettingsValetCardSet(lv_obj_t* card, const char* title, const char* detail)
     }
 }
 
+lv_obj_t* SettingsValetCardSlot(lv_obj_t* parent) {
+    auto* slot = lv_obj_create(parent);
+    lv_obj_remove_style_all(slot);
+    lv_obj_set_size(slot, lv_pct(100), 138);
+    lv_obj_clear_flag(slot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(slot, LV_OBJ_FLAG_CLICKABLE);
+    return slot;
+}
+
+void SettingsValetCardShow(lv_obj_t* slot, const char* title, const char* detail, bool ok, bool device_icon) {
+    if (!slot) return;
+    // The slot remembers which kind of card it holds: 1 solid, 2 dashed.
+    const intptr_t kind = ok ? 1 : 2;
+    if (lv_obj_get_child_count(slot) == 1 && reinterpret_cast<intptr_t>(lv_obj_get_user_data(slot)) == kind) {
+        SettingsValetCardSet(lv_obj_get_child(slot, 0), title, detail);
+        return;
+    }
+    lv_obj_clean(slot);
+    SettingsValetCard(slot, title, detail, ok, device_icon);
+    lv_obj_set_user_data(slot, reinterpret_cast<void*>(kind));
+}
+
+namespace {
+// A chevron drawn with two lines (the UI font pack has no symbol glyphs): 0 points right, 1 left.
+void DrawChevron(lv_event_t* e) {
+    lv_area_t a;
+    lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+    const int size = a.x2 - a.x1 + 1;
+    const bool back = lv_event_get_user_data(e) != nullptr;
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = lv_color_black();
+    line.width = size >= 44 ? 4 : 3;
+    line.opa = LV_OPA_COVER;
+    line.round_start = line.round_end = 1;
+    // On a 240-unit grid, as the other line icons.
+    const int outer = back ? 145 : 95, tip = back ? 75 : 165;
+    auto point = [&](int x, int y) {
+        return lv_point_precise_t{static_cast<lv_value_precise_t>(a.x1 + x * size / 240),
+                                  static_cast<lv_value_precise_t>(a.y1 + y * size / 240)};
+    };
+    line.p1 = point(outer, 50); line.p2 = point(tip, 120);
+    lv_draw_line(lv_event_get_layer(e), &line);
+    line.p1 = point(tip, 120); line.p2 = point(outer, 190);
+    lv_draw_line(lv_event_get_layer(e), &line);
+}
+lv_obj_t* Chevron(lv_obj_t* parent, int size, bool back) {
+    auto* icon = lv_obj_create(parent);
+    lv_obj_remove_style_all(icon);
+    lv_obj_set_size(icon, size, size);
+    lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(icon, DrawChevron, LV_EVENT_DRAW_MAIN, back ? icon : nullptr);
+    return icon;
+}
+}
+
+lv_obj_t* SettingsValetHeader(lv_obj_t* parent, const char* title, lv_event_cb_t back) {
+    auto* header = lv_obj_create(parent);
+    lv_obj_remove_style_all(header);
+    lv_obj_set_size(header, lv_pct(100), 94);
+    lv_obj_set_style_border_width(header, 3, 0);
+    lv_obj_set_style_border_side(header, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(header, lv_color_black(), 0);
+    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
+    auto* button = lv_obj_create(header);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_size(button, 96, 90);
+    lv_obj_clear_flag(button, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+    HapticAttachClick(button);
+    lv_obj_add_event_cb(button, back, LV_EVENT_CLICKED, nullptr);
+    lv_obj_align(Chevron(button, 44, true), LV_ALIGN_LEFT_MID, 28, 0);
+    auto* heading = lv_label_create(header);
+    lv_label_set_text(heading, title);
+    lv_obj_set_style_text_font(heading, ValetStrong(), 0);
+    lv_obj_set_style_text_color(heading, lv_color_black(), 0);
+    lv_obj_set_width(heading, LV_HOR_RES - 140);
+    lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
+    lv_obj_align(heading, LV_ALIGN_LEFT_MID, 96, 0);
+    return heading;
+}
+
+lv_obj_t* SettingsValetRow(lv_obj_t* parent, const char* title, const char* detail,
+                           lv_event_cb_t callback, intptr_t data, bool first) {
+    auto* row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), 112);
+    lv_obj_set_style_border_width(row, 2, 0);
+    lv_obj_set_style_border_side(row, static_cast<lv_border_side_t>(
+        LV_BORDER_SIDE_BOTTOM | (first ? LV_BORDER_SIDE_TOP : LV_BORDER_SIDE_NONE)), 0);
+    lv_obj_set_style_border_color(row, lv_color_black(), 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    const int right = callback ? 52 : 8;
+    auto* name = lv_label_create(row);
+    lv_label_set_text(name, title);
+    lv_obj_set_style_text_font(name, ValetStrong(), 0);
+    lv_obj_set_style_text_color(name, lv_color_black(), 0);
+    lv_obj_set_width(name, lv_pct(100));
+    lv_obj_set_style_pad_right(name, right, 0);
+    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    lv_obj_align(name, LV_ALIGN_LEFT_MID, 4, -20);
+    lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
+    auto* sub = lv_label_create(row);
+    lv_label_set_text(sub, detail);
+    lv_obj_set_style_text_font(sub, ValetSmall(), 0);
+    lv_obj_set_style_text_color(sub, lv_color_black(), 0);
+    lv_obj_set_width(sub, lv_pct(100));
+    lv_obj_set_style_pad_right(sub, right, 0);
+    lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+    lv_obj_align(sub, LV_ALIGN_LEFT_MID, 4, 22);
+    lv_obj_clear_flag(sub, LV_OBJ_FLAG_CLICKABLE);
+    if (callback) {
+        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(row);
+        lv_obj_add_event_cb(row, callback, LV_EVENT_CLICKED, reinterpret_cast<void*>(data));
+        lv_obj_align(Chevron(row, 26, false), LV_ALIGN_RIGHT_MID, -2, 0);
+    }
+    return sub;
+}
+
+lv_obj_t* SettingsValetPairs(lv_obj_t* parent) {
+    auto* box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_size(box, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_pad_column(box, 14, 0);
+    lv_obj_set_style_pad_row(box, 14, 0);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    return box;
+}
+
+void SettingsValetHalf(lv_obj_t* button, int height) {
+    auto* box = lv_obj_get_parent(button);
+    lv_obj_update_layout(box);
+    lv_obj_set_size(button, (lv_obj_get_content_width(box) - 14) / 2, height);
+    lv_obj_center(lv_obj_get_child(button, 0));
+}
+
 lv_obj_t* SettingsValetButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, intptr_t data, bool solid) {
     auto* button = lv_obj_create(parent);
     lv_obj_remove_style_all(button);

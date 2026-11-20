@@ -4,6 +4,7 @@
 #include "fontpack_lvgl.h"
 #include "settings_common.h"
 #include "settings_screen.h"
+#include "sdkconfig.h"
 
 #include <cstring>
 
@@ -67,6 +68,19 @@ void SettingsLanguageTab_Reset() {
 
 void SettingsLanguageTab_Build(lv_obj_t* page) {
     s_ui = {};
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    {
+        // Valet layout: one choice. The selected segment says which is current.
+        lv_obj_set_style_pad_row(page, 0, 0);
+        SettingsValetLabel(page, Lang::Strings::SETTINGS_LANG_TITLE);
+        static const char* const kNames[] = {"简体中文", "English"};
+        static const intptr_t kCodes[] = {reinterpret_cast<intptr_t>("zh-CN"), reinterpret_cast<intptr_t>("en-US")};
+        auto* seg = SettingsValetSegments(page, kNames, 2, OnLangOptionClicked, kCodes);
+        SettingsValetSelect(seg, std::strcmp(Lang::CODE, "zh-CN") == 0 ? 0 : 1);
+        SettingsValetNote(page, Lang::Strings::SETTINGS_LANG_HINT);
+        return;
+    }
+    #endif
 
     lv_obj_t* title = lv_label_create(page);
     lv_label_set_text(title, Lang::Strings::SETTINGS_LANG_TITLE);

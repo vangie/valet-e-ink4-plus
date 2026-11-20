@@ -177,7 +177,7 @@ function openSetting(id) {
   v2.direct = id;
   render();
 }
-const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "device", about: "device", proxy: "net" };
+const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "device", about: "device", proxy: "net", bt: "sound", pager: "read" };
 // 返回 true = 这次返回已经在设置里往上走了一级。
 function v2Back() {
   if (state.screen !== "settings") return false;
@@ -593,45 +593,86 @@ function v2SettingsPane(id) {
       <div class="v-two"><button class="v-line" data-go="transfer">${L("去传输页上传", "Open Transfer")}</button><button class="v-line dashed" data-fontpack>${state.fontpack ? L("假的：当作没装", "Fake: remove") : L("假的：当作已装好", "Fake: installed")}</button></div>
       ${v2Fld(L("正文字号", "Text size"), `<div class="v-step"><button data-size="-">A−</button><b>${state.fontSize}</b><button data-size="+">A+</button></div>`, L("字体、边距、行距在正文里点屏幕中间改。", "Font, margins and spacing are in the reading card."))}
       ${shakeOptions}
-      <nav class="v-rows"><button class="v-row" data-go="pager"><span><b>${L("翻页器", "Page turner")}</b><em>${state.pagerOn ? "PageTurner-A · " + L("已连接", "connected") : L("没连。正文里加 / 减音量键也能翻页", "Not connected. Volume keys also turn pages")}</em></span>${ic("go", "chev")}</button></nav>`;
+      <nav class="v-rows">${v2Row("pager", "", L("翻页器", "Page turner"), state.pagerOn ? "PageTurner-A · " + L("已连接", "connected") : L("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"))}</nav>`;
   }
   if (id === "sound") {
-    const desc = { 1: L("用机身上的麦克风和喇叭。", "Built-in mic and speaker."), 2: L("声音从蓝牙耳机或音箱出来，通话更清楚。", "Audio goes to a Bluetooth headset."), 3: L("把手机的声音放到这台机器上。", "Play phone audio here."), 5: L("把按键和语音发给连着的电脑或手机。", "Send keys and voice to a paired device.") }[state.btMode];
     const hapt = state.haptic === "off" ? "off" : state.hapticLevel;
     return `${v2Fld(L("音量", "Volume"), v2Level("speaker", "", state.volume, "vol"))}
-      ${v2Fld(L("助手回答时", "When the assistant answers"), v2Seg([["on", L("念出来", "Speak")], ["off", L("只看字", "Text only")]], state.tts ? "on" : "off", "data-tts"))}
-      ${v2Fld(L("声音从哪里出", "Audio route"), v2Seg(Object.entries(BT).map(([k, v]) => [k, pickL(v)]), state.btMode, "data-btmode").replace("v-seg", "v-seg two"), `${desc} ${L("蓝牙名称", "Name")}：${esc(state.btName)}`)}
-      ${v2Fld(L("按键震动", "Key haptics"), v2Seg([["off", L("关", "Off")], ["low", L("弱", "Low")], ["mid", L("中", "Mid")], ["high", L("强", "High")]], hapt, "data-hapt"))}`;
+      ${v2Fld(L("按键震动", "Key haptics"), v2Seg([["off", L("关", "Off")], ["low", L("弱", "Low")], ["mid", L("中", "Mid")], ["high", L("强", "High")]], hapt, "data-hapt"))}
+      <nav class="v-rows">${v2Row("bt", "", L("蓝牙", "Bluetooth"), L(`声音现在从${pickL(BT[state.btMode])}出 · 点这里换`, `Now: ${pickL(BT[state.btMode])} · tap to change`))}</nav>`;
+  }
+  if (id === "bt") {
+    // 声音从哪里出放在最前面（这一页就是为它来的），然后是这个方式下要做的事，再是模块的名字和固件，复位放最后。
+    const desc = { 1: L("使用本机麦克风和扬声器", "Built-in mic and speaker"), 2: L("连接蓝牙音箱或耳机播放声音", "Play through a Bluetooth speaker or headset"),
+      3: L("接收手机等设备播放的声音", "Play audio from a phone here"), 5: L("向连接设备发送按键和语音", "Send keys and voice to a paired device") }[state.btMode];
+    const next = { 2: L("点下面的按钮找耳机或音箱。", "Use the button below to find a headset or speaker."), 5: L("在电脑或手机的蓝牙里配对这台设备。", "Pair this device from the computer or phone.") }[state.btMode] || "";
+    const action = { 2: L("找耳机或音箱", "Find a headset or speaker"), 5: L("试一下快捷键", "Try the shortcut keys") }[state.btMode];
+    return `${v2Fld(L("声音从哪里出", "Audio route"), v2Seg(Object.entries(BT).map(([k, v]) => [k, pickL(v)]), state.btMode, "data-btmode").replace("v-seg", "v-seg two"), desc + (next ? "<br>" + next : ""))}
+      ${action ? `<button class="v-line is-full" data-fake>${action}</button>` : ""}
+      <div class="v-rows">
+        <div class="v-row"><span><b>${L("蓝牙名称", "Bluetooth name")}</b><em>${esc(state.btName)}</em></span></div>
+        <div class="v-row"><span><b>${L("蓝牙模块固件", "Bluetooth module firmware")}</b><em>V1.03</em></span></div>
+      </div>
+      <div class="v-fld"><button class="v-line is-full" data-btreset>${L("复位蓝牙模块", "Reset the Bluetooth module")}</button>
+        <p>${L("连不上、没声音时试一下，几秒后自动恢复。", "Try this when nothing connects or there is no sound.")}</p></div>`;
+  }
+  if (id === "pager") {
+    // 现在连着什么放在最上面；自动连接是一个开关；找设备、改按键在设备管理里。
+    const card = state.pagerOn
+      ? `<div class="v-card">${ic("check")}<span><b>PageTurner-A · ${L("已连接", "connected")}</b><em>AA:BB:CC:00:00:01</em></span></div>`
+      : `<div class="v-card bad">${ic("x")}<span><b>${L("没连翻页器", "No page turner connected")}</b><em>${L("正文里加 / 减音量键也能翻页", "The volume keys also turn pages while reading")}</em></span></div>`;
+    return `${card}
+      ${v2Fld(L("自动连接", "Auto-connect"), v2Seg([["off", L("关", "Off")], ["on", L("开", "On")]], state.pagerAuto ? "on" : "off", "data-pager-auto"),
+        L("开机及退出待机后自动寻找附近翻页器；无可用连接将自动关闭。", "Looks for page turners at start-up and after standby; turns itself off when none is found."))}
+      <nav class="v-rows"><button class="v-row" data-go="pager"><span><b>${L("设备管理", "Devices")}</b><em>${L("找附近的翻页器，连接、改按键、忘记", "Find page turners nearby; connect, remap keys, forget")}</em></span>${ic("go", "chev")}</button></nav>`;
   }
   if (id === "device") {
-    return `<div class="v-card">${ic("device")}<span><b>Metalio E-Ink4 Plus</b><em>${L("电量", "Battery")} ${state.battery}% · SD 12.4 / 29.1 GB</em></span></div>
+    const speed = { 160: L("最省电", "Saver"), 240: L("均衡", "Balanced"), 320: L("最流畅", "Smooth") }[state.idleMhz];
+    return `<div class="v-card">${ic("device")}<span><b>Metalio E-Ink4 Plus</b><em>${L("电量", "Battery")} ${state.battery}% · ${L("SD 卡已插入", "SD card in")}</em></span></div>
       <nav class="v-rows">
-        ${v2Row("power", "", L("电池与省电", "Battery & power"), L("5 分钟没操作待机，30 分钟关机", "Standby after 5 min, off after 30"))}
-        ${v2Row("storage", "", L("存储与 U 盘", "Storage & USB"), state.usb ? L("电脑正在当 U 盘用", "Mounted on a computer") : L("SD 卡已插入", "SD card inserted"))}
+        ${v2Row("power", "", L("电池与省电", "Battery & power"), L(`${speed} · 5 分钟待机 · 充电 ${state.chargeMa / 1000} A`, `${speed} · standby after 5 min · charging ${state.chargeMa / 1000} A`))}
+        ${v2Row("storage", "", L("存储与 U 盘", "Storage & USB"), state.usb ? L("电脑正在当 U 盘用", "In use by a computer as a USB disk") : L("SD 卡已插入", "SD card inserted"))}
         ${v2Row("lang", "", L("语言", "Language"), state.lang === "zh" ? "简体中文" : "English")}
-        ${v2Row("diag", "", L("诊断", "Diagnostics"), L("日志、测试", "Logs, tests"))}
-        ${v2Row("about", "", L("关于", "About"), prototypeVersionLabel())}
+        ${v2Row("diag", "", L("诊断", "Diagnostics"), L("日志、测试、关机和重启", "Logs, tests, power off and restart"))}
+        ${v2Row("about", "", L("关于", "About"), "Valet 2.0.82")}
       </nav>`;
   }
   if (id === "power") {
     return `<div class="v-card">${ic("device")}<span><b>${L("电量", "Battery")} ${state.battery}%</b><em>${state.charging ? L("正在充电", "Charging") : L("没在充电", "Not charging")}</em></span></div>
-      ${v2Fld(L("没操作的时候", "When idle"), v2Seg([["160", L("最省电", "Saver")], ["240", L("均衡", "Balanced")], ["320", L("最流畅", "Smooth")]], state.idleMhz, "data-mhz"), L("越省电，下一次翻页和唤醒越慢一点。", "More saving means a slower wake."))}
+      ${v2Fld(L("没操作的时候", "When idle"), v2Seg([["160", L("最省电", "Saver")], ["240", L("均衡", "Balanced")], ["320", L("最流畅", "Smooth")]], state.idleMhz, "data-mhz"), L("越省电，下一次翻页和唤醒越慢一点。", "More saving means a slightly slower page turn and wake."))}
       <div class="v-rows">
-        <div class="v-row"><span><b>${L("5 分钟没操作 → 待机", "5 min idle → standby")}</b><em>${L("屏上留着时钟和待办，按电源键醒来", "Clock stays on screen; power key wakes")}</em></span></div>
+        <div class="v-row"><span><b>${L("5 分钟没操作 → 待机", "5 min idle → standby")}</b><em>${L("屏上留着日期和待办，按电源键醒来", "Date and to-dos stay on screen; the power key wakes")}</em></span></div>
         <div class="v-row"><span><b>${L("待机满 30 分钟 → 关机", "30 min in standby → off")}</b><em>${L("开机后回到上次读的那一页", "Reopens the page you were reading")}</em></span></div>
       </div>
       ${v2Fld(L("充电电流", "Charging current"), v2Seg([["500", "0.5 A"], ["1000", "1 A"], ["1500", "1.5 A"]], state.chargeMa, "data-charge"), L("充电头功率小就选 0.5 A。", "Use 0.5 A with a weak charger."))}`;
   }
-  // 设备下面的几页沿用官方的选项，只换外观。
-  const pane = (tab) => {
-    const keep = state.settingsTab;
-    state.settingsTab = tab;
-    const html = settingsPane();
-    state.settingsTab = keep;
-    return html;
-  };
-  if (id === "diag") return `<div class="v-old">${pane("log")}<h3>${L("测试", "Tests")}</h3><div class="v-grid2">${pane("test")}</div></div>`;
-  return `<div class="v-old">${pane(id)}</div>`;
+  if (id === "storage") {
+    // U 盘只在「传输」里开关（离开那一页会自动关），这里是卡的状态和去那里的入口。
+    const card = state.usb
+      ? `<div class="v-card bad">${ic("x")}<span><b>${L("SD 卡 · 电脑在用", "SD card · in use by a computer")}</b><em>${L("电脑上弹出 U 盘后，这里才能用卡", "Eject it on the computer to use the card here")}</em></span></div>`
+      : `<div class="v-card">${ic("device")}<span><b>${L("SD 卡 · 已插入", "SD card · inserted")}</b><em>${L("还剩 14.5 GB，共 14.8 GB", "14.5 GB free of 14.8 GB")}</em></span></div>`;
+    return `${card}
+      <nav class="v-rows"><button class="v-row" data-go="transfer"><span><b>${L("当 U 盘用", "Use as a USB disk")}</b><em>${L("打开「传输」的 U 盘一栏，接上电脑拷文件", "Opens the USB disk tab of Transfer; copy files from a computer")}</em></span>${ic("go", "chev")}</button></nav>`;
+  }
+  if (id === "lang") {
+    return v2Fld(L("界面语言", "Language"), v2Seg([["zh", "简体中文"], ["en", "English"]], state.lang, "data-lang"), L("切换后立即生效", "Takes effect immediately"));
+  }
+  if (id === "diag") {
+    const pair = (items) => `<div class="v-two">${items.map((name) => `<button class="v-line" data-fake>${name}</button>`).join("")}</div>`;
+    return `${v2Fld(L("运行日志", "Runtime log"), v2Seg([["on", L("记录", "Record")], ["off", L("不记录", "Off")]], state.logOn ? "on" : "off", "data-log"),
+        L("记在 SD 卡的 metalio/e-ink/logs 里。<br>出了问题时上传，方便查原因。", "Kept on the SD card in metalio/e-ink/logs.<br>Upload it when something goes wrong."))}
+      ${pair([L("上传日志", "Upload logs"), L("清除日志", "Clear logs")])}
+      <div class="v-fld"><label>${L("测试", "Tests")}</label>${pair([L("自动测试", "Auto test"), L("触摸测试", "Touch test"), L("电池测试", "Battery test"), L("老化测试", "Aging test"), L("显示测试", "Display test"), L("UI调节", "UI adjustment")])}</div>
+      <div class="v-fld"><label>${L("设备操作", "Device")}</label>${pair([L("关机", "Power off"), L("重启", "Restart")])}</div>`;
+  }
+  // 关于：先说这是什么，再是几行平实的信息。地址是假的。
+  return `<div class="v-card">${ic("device")}<span><b>${L("Valet 随行", "Valet")}</b><em>${L("固件", "Firmware")} 2.0.82 · Nov 20 2026</em></span></div>
+    <nav class="v-rows"><button class="v-row" data-fake><span><b>${L("检查更新", "Check for updates")}</b><em>${L("查的是官方固件的版本，有新版本会先问你", "Checks the official firmware's version; asks before installing")}</em></span>${ic("go", "chev")}</button>
+      <div class="v-row"><span><b>${L("设备型号", "Device model")}</b><em>metalio-e-ink4-plus</em></span></div>
+      <div class="v-row"><span><b>${L("芯片", "Chip")}</b><em>ESP32-S31 · ${L("2 核", "2 cores")}</em></span></div>
+      <div class="v-row"><span><b>${L("编译时间", "Build time")}</b><em>Nov 20 2026 15:33:15</em></span></div>
+      <div class="v-row"><span><b>${L("MAC 地址", "MAC")}</b><em>00:00:00:00:00:00</em></span></div>
+      <div class="v-row"><span><b>${L("存储器", "Memory")}</b><em>Flash 16.0 MB · PSRAM 16.0 MB</em></span></div></nav>`;
 }
 // 网络页「代理」一行的说明：没设置 / 没开 / 在用 / 只在另一种上网方式下才走。
 function proxySummary() {
@@ -649,6 +690,7 @@ function v2Settings() {
     read: L("阅读与字库", "Reading & fonts"), sound: L("声音与蓝牙", "Sound & Bluetooth"), device: L("设备", "Device"),
     power: L("电池与省电", "Battery & power"), storage: L("存储与 U 盘", "Storage & USB"), lang: L("语言", "Language"),
     diag: L("诊断", "Diagnostics"), about: L("关于", "About"), proxy: L("代理", "Proxy"),
+    bt: L("蓝牙", "Bluetooth"), pager: L("翻页器", "Page turner"),
   };
   const body = id === "list" ? v2SettingsHome() : v2SettingsPane(id);
   return `${bar()}<main class="v-page v-set">${v2Head(titles[id] || titles.list)}<div class="v-pane${id === "net" ? " is-tight" : ""}">${body}</div></main>`;
@@ -770,6 +812,8 @@ panel.addEventListener("click", (e) => {
     log("点了页脚的缺字提示：打开阅读卡片的字体页。");
     return render();
   }
+  if ((el = hit("[data-pager-auto]"))) { state.pagerAuto = el.dataset.pagerAuto === "on"; return render(); }
+  if (hit("[data-fake]")) return toast(L("假壳子里这一步不做", "Not done in the mock-up"));
   // 代理页。设备上地址和账号用屏幕键盘输入（账号、密码各一个框）；这里点一下填上示例，再点一下清空。
   if ((el = hit("[data-proxy-wifi]")) || (el = hit("[data-proxy-cell]"))) {
     const wifi = "proxyWifi" in el.dataset;

@@ -9,7 +9,10 @@
 #include "screen_text.h"
 
 #include <algorithm>
+#include "sdkconfig.h"
+
 #include <cstdio>
+#include <cstring>
 
 namespace {
 lv_obj_t* s_root = nullptr;
@@ -78,6 +81,56 @@ void Refresh(lv_timer_t*) {
 void Deleted(lv_event_t* event) {
     if (lv_event_get_target(event) == s_root) SettingsPagerTab_Reset();
 }
+
+// ── Valet layout: what is connected now as a status card, the auto-connect choice, the device list.
+lv_obj_t* s_valet_card = nullptr;
+lv_obj_t* s_valet_auto = nullptr;
+lv_obj_t* s_valet_note = nullptr;
+const char* ValetText(const char* zh, const char* en) {
+    return std::strcmp(Lang::Current(), "zh-CN") == 0 ? zh : en;
+}
+void RefreshValet(lv_timer_t*) {
+    if (!s_valet_card) return;
+    const auto state = BlePageTurner::GetSnapshot();
+    if (state.revision == s_revision) return;
+    s_revision = state.revision;
+    const bool connected = state.state == BlePageTurner::State::kConnected;
+    const bool connecting = state.state == BlePageTurner::State::kConnecting;
+    char title[64];
+    if (connected || connecting) {
+        std::snprintf(title, sizeof(title), "%s · %s", BlePageTurner::ModelName(state.target_model),
+                      connected ? Lang::Strings::PAGER_CONNECTED_TAG : Lang::Strings::PAGER_CONNECTING_TAG);
+        SettingsValetCardShow(s_valet_card, title, state.target_address, true);
+    } else {
+        SettingsValetCardShow(s_valet_card, ValetText("没连翻页器", "No page turner connected"),
+                              ValetText("正文里加 / 减音量键也能翻页", "The volume keys also turn pages while reading"), false);
+    }
+    SettingsValetSelect(s_valet_auto, state.enabled ? 1 : 0);
+    const char* note = state.timed_out ? Lang::Strings::PAGER_AUTO_TIMEOUT : Lang::Strings::PAGER_AUTO_HINT;
+    if (std::strcmp(lv_label_get_text(s_valet_note), note) != 0) lv_label_set_text(s_valet_note, note);
+}
+void BuildValet(lv_obj_t* page) {
+    lv_obj_set_style_pad_row(page, 0, 0);
+    s_valet_card = SettingsValetCardSlot(page);
+    s_root = s_valet_card;
+    lv_obj_add_event_cb(s_root, Deleted, LV_EVENT_DELETE, nullptr);
+    SettingsValetGap(page, 30);
+    SettingsValetLabel(page, ValetText("自动连接", "Auto-connect"));
+    const char* const onoff[] = {ValetText("关", "Off"), ValetText("开", "On")};
+    s_valet_auto = SettingsValetSegments(page, onoff, 2, [](lv_event_t* e) {
+        const bool on = lv_event_get_user_data(e) != nullptr;
+        if (BlePageTurner::GetSnapshot().enabled == on) return;
+        if (!BlePageTurner::SetEnabled(on)) ScreenShowToast(Lang::Strings::SETTINGS_PAGER_SAVE_ERROR);
+    });
+    s_valet_note = SettingsValetNote(page, "");
+    SettingsValetGap(page, 26);
+    SettingsValetRow(page, ValetText("设备管理", "Devices"),
+                     ValetText("找附近的翻页器，连接、改按键、忘记", "Find page turners nearby; connect, remap keys, forget"),
+                     [](lv_event_t*) { ScreenNavigateTo(PagerScreen::Create); }, 0, true);
+    SettingsValetGap(page);
+    s_timer = lv_timer_create(RefreshValet, 250, nullptr);
+    RefreshValet(nullptr);
+}
 }
 
 void SettingsPagerTab_Reset() {
@@ -85,12 +138,17 @@ void SettingsPagerTab_Reset() {
     s_timer = nullptr;
     s_root = s_switch = s_state = s_current = nullptr;
     s_connection_state = s_current_box = nullptr;
+    s_valet_card = s_valet_auto = s_valet_note = nullptr;
     s_revision = UINT32_MAX;
 }
 
 void SettingsPagerTab_Build(lv_obj_t* page) {
     SettingsPagerTab_Reset();
     BlePageTurner::Init(PagerKey_Receive);
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    BuildValet(page);
+    return;
+    #endif
     lv_obj_update_layout(page);
     s_root = lv_obj_create(page);
     lv_obj_remove_style_all(s_root);

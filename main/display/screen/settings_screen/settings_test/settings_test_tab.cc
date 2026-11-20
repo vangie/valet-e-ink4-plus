@@ -11,6 +11,7 @@
 #include "assets/lang_config.h"
 #include "screen_common.h"
 #include <esp_log.h>
+#include <cstring>
 
 namespace {
 constexpr const char* TAG = "SettingsTestTab";
@@ -36,6 +37,30 @@ void OnAgingTestClicked(lv_event_t* /*e*/) {
 }
 
 }  // namespace
+
+void SettingsTestTab_BuildValet(lv_obj_t* page) {
+    const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+    SettingsValetLabel(page, zh ? "测试" : "Tests");
+    auto* tests = SettingsValetPairs(page);
+    struct Entry { const char* name; lv_event_cb_t open; };
+    const Entry entries[] = {
+        {Lang::Strings::SETTINGS_TEST_AUTO, OnAutoTestClicked},
+        {Lang::Strings::SETTINGS_TEST_TOUCH, OnTouchTestClicked},
+        {Lang::Strings::SETTINGS_TEST_BATTERY, OnBatteryTestClicked},
+        {Lang::Strings::SETTINGS_TEST_AGING, OnAgingTestClicked},
+        {Lang::Strings::SETTINGS_TEST_DISPLAY, [](lv_event_t*) { ScreenNavigateTo(SettingsTestDisplayScreen::Create); }},
+        {Lang::Strings::SETTINGS_TEST_MARGIN, [](lv_event_t*) { ScreenNavigateTo(SettingsTestMarginScreen::Create); }},
+    };
+    for (const auto& entry : entries) SettingsValetHalf(SettingsValetButton(tests, entry.name, entry.open));
+    SettingsValetGap(page, 30);
+    SettingsValetLabel(page, zh ? "设备操作" : "Device");
+    auto* actions = SettingsValetPairs(page);
+    SettingsValetHalf(SettingsValetButton(actions, Lang::Strings::SETTINGS_TEST_POWER_OFF,
+        [](lv_event_t*) { PowerPolicy::GetInstance().RequestPowerOff(); }));
+    SettingsValetHalf(SettingsValetButton(actions, Lang::Strings::COMMON_RESTART,
+        [](lv_event_t*) { Application::GetInstance().Reboot(); }));
+    SettingsValetGap(page);
+}
 
 void SettingsTestTab_Build(lv_obj_t* page) {
     SettingsCreateSelectableOption(page, Lang::Strings::SETTINGS_TEST_AUTO, OnAutoTestClicked, 0);

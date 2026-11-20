@@ -10,7 +10,10 @@
 #include "settings_common.h"
 #include "settings_log_upload.h"
 
+#include "sdkconfig.h"
+
 #include <atomic>
+#include <cstring>
 
 struct SettingsLogOption {
     bool enabled; // 是否写 SD 日志
@@ -49,8 +52,19 @@ static const char* CurrentText(bool enabled) {
     return kOptions[0].current_text();
 }
 
+static lv_obj_t* s_valet_seg = nullptr;   // Valet layout: record on / off
 static void RefreshOptions() {
     const bool enabled = SdLogWriter_IsEnabled();
+    if (s_valet_seg) {
+        SettingsValetSelect(s_valet_seg, enabled ? 0 : 1);
+        // The two actions keep their look; while a clear runs they only stop taking taps.
+        for (auto* button : {s_ui.upload_btn, s_ui.clear_btn}) {
+            if (!button) continue;
+            if (s_clearing.load()) lv_obj_add_state(button, LV_STATE_DISABLED);
+            else lv_obj_remove_state(button, LV_STATE_DISABLED);
+        }
+        return;
+    }
     auto refresh_button = [](lv_obj_t* button, bool selected) {
         if (button == nullptr) return;
         if (s_clearing.load()) lv_obj_add_state(button, LV_STATE_DISABLED);
@@ -118,10 +132,33 @@ static void OnClearClicked(lv_event_t* e) {
 void SettingsLogTab_Reset() {
     SettingsLogUpload_Teardown();
     s_ui = {};
+    s_valet_seg = nullptr;
 }
 
 void SettingsLogTab_Build(lv_obj_t* page) {
     s_ui = {};
+    s_valet_seg = nullptr;
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    {
+        const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+        lv_obj_set_style_pad_row(page, 0, 0);
+        SettingsValetLabel(page, zh ? "运行日志" : "Runtime log");
+        const char* const names[] = {zh ? "记录" : "Record", zh ? "不记录" : "Off"};
+        static const intptr_t kValues[] = {1, 0};
+        s_valet_seg = SettingsValetSegments(page, names, 2, OnOptionClicked, kValues);
+        SettingsValetNote(page, zh ? "记在 SD 卡的 metalio/e-ink/logs 里。\n出了问题时上传，方便查原因。"
+                                   : "Kept on the SD card in metalio/e-ink/logs. Upload it when something goes wrong.");
+        SettingsValetGap(page, 20);
+        auto* actions = SettingsValetPairs(page);
+        s_ui.upload_btn = SettingsValetButton(actions, Lang::Strings::SETTINGS_LOG_UPLOAD, OnUploadClicked);
+        s_ui.clear_btn = SettingsValetButton(actions, Lang::Strings::SETTINGS_LOG_CLEAR, OnClearClicked);
+        SettingsValetHalf(s_ui.upload_btn);
+        SettingsValetHalf(s_ui.clear_btn);
+        s_ui.clear_status = SettingsValetNote(page, s_clearing.load() ? Lang::Strings::SETTINGS_LOG_CLEARING : "");
+        RefreshOptions();
+        return;
+    }
+    #endif
 
     lv_obj_t* title = lv_label_create(page);
     lv_label_set_text(title, Lang::Strings::SETTINGS_LOG_TITLE);
