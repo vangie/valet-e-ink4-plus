@@ -58,7 +58,6 @@ body { font-family: "PingFang SC", "Avenir Next", "Helvetica Neue", sans-serif; 
 .v-clock span:last-child { margin: -3px 0 0 5px; }
 .v-clock i { position: absolute; left: 6px; top: 53px; width: 56px; border-top: 1.2px solid var(--ink); transform: rotate(-11.2deg); transform-origin: left center; }
 .v-date { position: absolute; right: 0; bottom: 9px; text-align: right; }
-.v-date > i { display: block; width: 30px; margin: 0 0 6px auto; border-top: 1px solid var(--ink); }
 .v-date span { display: block; font: 300 10.8px/1.5 "Avenir Next", "PingFang SC", sans-serif; letter-spacing: 0.4px; }
 .v-date b { display: block; font-size: 14.4px; font-weight: 600; line-height: 1.45; }
 

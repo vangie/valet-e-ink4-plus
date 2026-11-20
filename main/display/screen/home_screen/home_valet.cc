@@ -58,6 +58,7 @@ struct Ui {
     lv_obj_t* date = nullptr;
     lv_obj_t* lunar = nullptr;
     lv_obj_t* weather = nullptr;
+    lv_obj_t* date_column = nullptr;
     lv_obj_t* book_title = nullptr;
     lv_obj_t* book_sub = nullptr;
     lv_obj_t* book_track = nullptr;
@@ -190,6 +191,7 @@ void RefreshClock(bool force) {
         std::snprintf(s.last_date, sizeof(s.last_date), "%s", date);
     }
 }
+void PlaceDateBlock();
 void RefreshWeather() {
     if (!s.root) return;
     const time_t now = std::time(nullptr);
@@ -202,14 +204,31 @@ void RefreshWeather() {
     const bool weather = StandbyClassic_CopyWeatherView(&view) && view.valid;
     char lunar[24] = {};
     if (weather && zh) StandbyClassic_FormatLunarOrWeekday(lunar, sizeof(lunar), view.lunar);
-    SetText(s.lunar, lunar);
+    if (std::strcmp(lv_label_get_text(s.lunar), lunar) != 0) {
+        // The generated font holds only the characters lunar dates are made of.
+        bool covered = true;
+        for (const unsigned char* p = reinterpret_cast<const unsigned char*>(lunar); *p && covered;) {
+            // Decode one UTF-8 character (lunar text is plain BMP Chinese or ASCII).
+            uint32_t cp = *p;
+            int extra = cp >= 0xF0 ? 3 : cp >= 0xE0 ? 2 : cp >= 0xC0 ? 1 : 0;
+            cp &= extra == 3 ? 0x07 : extra == 2 ? 0x0F : extra == 1 ? 0x1F : 0x7F;
+            for (++p; extra > 0 && *p; --extra, ++p) cp = (cp << 6) | (*p & 0x3F);
+            lv_font_glyph_dsc_t glyph{};
+            covered = lv_font_get_glyph_dsc(&kValetLunarFont, &glyph, cp, 0) && !glyph.is_placeholder;
+        }
+        lv_obj_set_style_text_font(s.lunar, covered ? &kValetLunarFont : Strong(), 0);
+        lv_label_set_text(s.lunar, lunar);
+    }
     if (lunar[0]) lv_obj_remove_flag(s.lunar, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(s.lunar, LV_OBJ_FLAG_HIDDEN);
     char line[80] = {};
     const char* day = valid ? (zh ? kZh : kEn)[local.tm_wday] : "";
     if (weather && view.has_temp) std::snprintf(line, sizeof(line), "%s · %s %d°", day, view.text, view.temp);
     else if (weather) std::snprintf(line, sizeof(line), "%s · %s", day, view.text);
     else std::snprintf(line, sizeof(line), "%s", day);
+    const int before = lv_obj_get_y(s.date_column);
     SetText(s.weather, line);
+    PlaceDateBlock();
+    if (lv_obj_get_y(s.date_column) != before) lv_obj_invalidate(s.root);
 }
 void BuildHero(lv_obj_t* root) {
     // Hours over minutes, minutes shifted right, a thin rising stroke between them.
@@ -220,21 +239,25 @@ void BuildHero(lv_obj_t* root) {
     s.slash = Box(root, kSide + 16, 124, 154, 34);
     lv_obj_add_event_cb(s.slash, DrawClockSlash, LV_EVENT_DRAW_MAIN, nullptr);
 
-    // Date block: right-aligned, sitting on the bottom of the hero.
-    auto* column = Box(root, 0, 0, 330, LV_SIZE_CONTENT);
+    // Date block: right-aligned, sitting on the bottom of the hero. Sizes are
+    // the design's (23 / 37 / 28 px glyph height); the UI font pack only has
+    // Chinese at 25 and 30, so the date and the lunar date use generated fonts.
+    auto* column = Box(root, 0, 0, 360, LV_SIZE_CONTENT);
     lv_obj_align(column, LV_ALIGN_TOP_RIGHT, -kSide, 0);
     lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(column, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_set_style_pad_row(column, 6, 0);
-    auto* rule = Box(column, 0, 0, 84, 2);
-    lv_obj_set_style_bg_color(rule, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
-    lv_obj_set_style_margin_bottom(rule, 8, 0);
-    s.date = Label(column, "", Small());
-    s.lunar = Label(column, "", Strong());
-    s.weather = Label(column, "", Small());
+    lv_obj_set_style_pad_row(column, 8, 0);
+    s.date = Label(column, "", &kValetDateFont);
+    lv_obj_set_style_text_letter_space(s.date, 1, 0);
+    s.lunar = Label(column, "", &kValetLunarFont);
+    s.weather = Label(column, "", Body());
     lv_obj_update_layout(column);
-    lv_obj_set_y(column, kHeroH - 20 - lv_obj_get_height(column));
+    s.date_column = column;
+}
+// The lunar line comes and goes with the weather data; keep the block's last line on the same baseline.
+void PlaceDateBlock() {
+    lv_obj_update_layout(s.date_column);
+    lv_obj_set_y(s.date_column, kHeroH - 22 - lv_obj_get_height(s.date_column));
 }
 
 // ── The two blocks: Ask and Call, or Ask and Read when there is no assistant of your own

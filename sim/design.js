@@ -272,7 +272,7 @@ function v2Home() {
   return `${bar()}<main class="v-home">
     <section class="v-hero">
       <div class="v-clock"><span>10</span><i></i><span>48</span></div>
-      <div class="v-date"><i></i><span>2026.11.17</span><b>${L("十月初八", "November 17")}</b><span>${t("tue")} · ${t("weather")} ${t("temp")}</span></div>
+      <div class="v-date"><span>2026.11.17</span><b>${L("十月初八", "November 17")}</b><span>${t("tue")} · ${t("weather")} ${t("temp")}</span></div>
     </section>
     <section class="v-pair">
       <svg viewBox="0 0 222 134" width="222" height="134">

@@ -56,7 +56,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     clock, clock_bytes, cap = font_source("kValetClockFont", "ExtraLight", 132, "0123456789")
     title, title_bytes, _ = font_source("kValetTitleFont", "Demibold", 40, "提问通话接着读阅AskCalRed")
+    # 日期块：公历一行细体数字；农历一行半粗，用字只有月名、日名和「闰」。
+    date, date_bytes, _ = font_source("kValetDateFont", "Light", 32, "0123456789.-")
+    lunar, lunar_bytes, _ = font_source("kValetLunarFont", "Demibold", 40, "正一二三四五六七八九十冬腊寒月初廿卅闰")
+    clock_bytes += date_bytes + lunar_bytes
     header = ("// 由 tools/generate_valet_home_font.py 生成；源字体 tools/ttf-fonts/MiSans\n"
-              "#pragma once\n#include <lvgl.h>\n" + clock + "\n" + title + "\n")
+              "#pragma once\n#include <lvgl.h>\n" + clock + "\n" + title + "\n" + date + "\n" + lunar + "\n")
     Path(args.output).write_text(header, encoding="utf-8", newline="")
     print("Valet home fonts:", clock_bytes + title_bytes, "bytes; digit height", cap, "px")
