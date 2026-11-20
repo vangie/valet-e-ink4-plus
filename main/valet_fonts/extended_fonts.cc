@@ -22,6 +22,7 @@
 
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <esp_vfs_fat.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -41,6 +42,7 @@ constexpr char kSha256[] = "7cad7820f4a304535392d118e7b9c01e6ed02c797376d82278af
 constexpr char kPartPath[] = SD_PATH_FONT_EXT ".part";
 constexpr size_t kIoBytes = 64 * 1024;
 constexpr int kTimeoutMs = 20000;
+constexpr int kConnectMs = 25000;
 constexpr int kMaxRedirects = 4;
 constexpr int kMaxAttempts = 6;   // reconnect-and-resume attempts in one run
 
@@ -64,11 +66,19 @@ uint64_t FileSize(const char* path) {
     struct stat st{};
     return stat(path, &st) == 0 ? static_cast<uint64_t>(st.st_size) : 0;
 }
-// Wi-Fi only: the pack is 255 MB and the bundled SIM is metered.
-bool OnWifi() {
+// Wi-Fi only: the pack is 255 MB and the bundled SIM is metered. "Wi-Fi is the
+// connection in use and switched on" is the test, not "associated right now":
+// the radio is parked after a short idle time and comes back on demand.
+bool WifiSelected() {
     auto* dual = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
     const bool wifi = dual ? dual->GetNetworkType() == NetworkType::WIFI : true;
-    return wifi && WifiStation::GetInstance().IsConnected();
+    return wifi && WifiStation::GetInstance().IsUserEnabled();
+}
+// Bring the parked radio back; the caller holds PowerNeed::OtaDownload, which keeps it up.
+bool WifiUp(int timeout_ms) {
+    if (!WifiSelected()) return false;
+    if (WifiStation::GetInstance().IsConnected()) return true;
+    return Board::GetInstance().EnsureNetworkReady(timeout_ms) && WifiStation::GetInstance().IsConnected();
 }
 
 // GitHub answers a release download with a redirect to a signed address, and the
@@ -89,8 +99,13 @@ bool OpenFollowing(std::unique_ptr<Http>& http, std::string url, uint64_t from, 
             std::snprintf(range, sizeof(range), "bytes=%llu-", static_cast<unsigned long long>(from));
             http->SetHeader("Range", range);
         }
-        if (!http->Open("GET", url)) return false;
+        // Bound connecting and the wait for the answer; without it a stalled handshake blocks for 90 s.
+        // The limit is lifted before the body, which takes as long as it takes.
+        http->SetRequestDeadline(esp_timer_get_time() + kConnectMs * 1000ll);
+        if (!http->Open("GET", url)) { ESP_LOGW(TAG, "hop %d: cannot connect", hop); return false; }
         const int status = http->GetStatusCode();
+        http->SetRequestDeadline(0);
+        ESP_LOGI(TAG, "hop %d: status %d from byte %llu", hop, status, static_cast<unsigned long long>(from));
         if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
             std::string next = http->GetResponseHeader("Location");
             if (next.empty()) next = http->GetResponseHeader("location");
@@ -112,6 +127,10 @@ Fetch FetchOnce(uint8_t* buffer, std::string& error) {
     const uint64_t have = FileSize(kPartPath);
     if (have > kBytes) { unlink(kPartPath); return Fetch::kRetry; }
     if (have == kBytes) return Fetch::kDone;
+    if (!WifiUp(30000)) {
+        error = WifiSelected() ? Text("Wi-Fi 没连上", "Wi-Fi is not connected") : Text("Wi-Fi 关了", "Wi-Fi was turned off");
+        return WifiSelected() ? Fetch::kRetry : Fetch::kFatal;
+    }
     std::unique_ptr<Http> http;
     int status = 0;
     if (!OpenFollowing(http, kUrl, have, &status)) { error = Text("连不上下载地址", "Cannot reach the download"); return Fetch::kRetry; }
@@ -133,21 +152,45 @@ Fetch FetchOnce(uint8_t* buffer, std::string& error) {
     uint64_t total = have;
     Fetch result = Fetch::kRetry;
     int last_percent = -1;
-    for (;;) {
+    // The connection hands over about one network packet per read. Collect a full
+    // buffer before writing: packet-sized writes to the card are far slower than the network.
+    int64_t mark_us = esp_timer_get_time(), read_us = 0, write_us = 0;
+    uint64_t mark_bytes = total;
+    bool finished = false;
+    while (!finished) {
         if (s_cancel.load()) { result = Fetch::kStop; break; }
-        if (!OnWifi()) { error = Text("Wi-Fi 断了", "Wi-Fi dropped"); result = Fetch::kRetry; break; }
-        const int n = http->Read(reinterpret_cast<char*>(buffer), kIoBytes);
-        if (n < 0) { error = Text("下载中断了", "The download was interrupted"); result = Fetch::kRetry; break; }
-        if (n == 0) { result = total == kBytes ? Fetch::kDone : Fetch::kRetry; break; }
-        if (total + static_cast<uint64_t>(n) > kBytes) { error = Text("下载到的文件不对", "The downloaded file is wrong"); result = Fetch::kFatal; break; }
-        if (fwrite(buffer, 1, static_cast<size_t>(n), file) != static_cast<size_t>(n)) {
+        if (!WifiSelected()) { error = Text("Wi-Fi 关了", "Wi-Fi was turned off"); result = Fetch::kFatal; break; }
+        size_t filled = 0;
+        bool broken = false;
+        int64_t t0 = esp_timer_get_time();
+        while (filled < kIoBytes && !s_cancel.load()) {
+            const int n = http->Read(reinterpret_cast<char*>(buffer) + filled, kIoBytes - filled);
+            if (n < 0) { broken = true; break; }
+            if (n == 0) { finished = true; break; }
+            filled += static_cast<size_t>(n);
+        }
+        int64_t t1 = esp_timer_get_time();
+        read_us += t1 - t0;
+        if (total + filled > kBytes) { error = Text("下载到的文件不对", "The downloaded file is wrong"); result = Fetch::kFatal; break; }
+        // What arrived before a break is still good: keep it, the next connection resumes after it.
+        if (filled > 0 && fwrite(buffer, 1, filled, file) != filled) {
             error = Text("SD 卡写不进去，可能满了", "Cannot write to the SD card; it may be full");
             result = Fetch::kFatal;
             break;
         }
-        total += static_cast<uint64_t>(n);
+        write_us += esp_timer_get_time() - t1;
+        total += filled;
         const int percent = static_cast<int>(total * 100 / kBytes);
         if (percent != last_percent) { last_percent = percent; Set(State::kDownloading, percent, total); }
+        if (t1 - mark_us >= 10000000) {
+            ESP_LOGI(TAG, "%llu / %llu bytes, %u KB/s (waiting for data %u ms, writing %u ms)",
+                     static_cast<unsigned long long>(total), static_cast<unsigned long long>(kBytes),
+                     static_cast<unsigned>((total - mark_bytes) * 1000000ull / static_cast<uint64_t>(t1 - mark_us) / 1024),
+                     static_cast<unsigned>(read_us / 1000), static_cast<unsigned>(write_us / 1000));
+            mark_us = t1; mark_bytes = total; read_us = 0; write_us = 0;
+        }
+        if (broken) { error = Text("下载中断了", "The download was interrupted"); result = Fetch::kRetry; break; }
+        if (finished) result = total == kBytes ? Fetch::kDone : Fetch::kRetry;
     }
     http->Close();
     if (fflush(file) != 0 || fclose(file) != 0) {
@@ -274,8 +317,8 @@ void Refresh() {
 
 bool Start() {
     if (s_running.load()) return false;
-    if (!OnWifi()) {
-        Set(State::kFailed, 0, 0, Text("要连上 Wi-Fi 才能下载（255 MB）", "Connect to Wi-Fi to download (255 MB)"));
+    if (!WifiSelected()) {
+        Set(State::kFailed, 0, 0, Text("要用 Wi-Fi 上网才能下载（255 MB）：设置 → 网络", "Use Wi-Fi to download (255 MB): Settings → Network"));
         return false;
     }
     if (!SdCardManager::GetInstance().IsMounted()) {

@@ -356,6 +356,7 @@ void SwitchNetworkTask(void* arg) {
 [[maybe_unused]] void OnNetworkOptionClicked(lv_event_t* e) {
     const auto target = static_cast<NetworkType>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
     if (CurrentNetworkType() == target) {
+        if (s_ui.link_seg) return;   // Valet layout: nothing to reveal
         // 点已选中的 4G：确保 SIM 区可见；点已选中的 WiFi：确保配网区可见
         if (target == NetworkType::CELLULAR) {
             SetSimSectionVisible(true);
@@ -365,7 +366,12 @@ void SwitchNetworkTask(void* arg) {
         }
         return;
     }
-    if (target == NetworkType::WIFI) {
+    if (s_ui.link_seg) {
+        // Valet layout: mark the choice and say what is happening; the switch restarts the device.
+        SettingsValetSelect(s_ui.link_seg, target == NetworkType::CELLULAR ? 0 : 1);
+        ScreenShowToast(target == NetworkType::WIFI ? Lang::Strings::SETTINGS_NET_SWITCH_WIFI
+                                                    : Lang::Strings::SETTINGS_NET_SWITCH_4G);
+    } else if (target == NetworkType::WIFI) {
         SettingsStyleSelectable(s_ui.wifi_btn, lv_obj_get_child(s_ui.wifi_btn, 0), true);
         SettingsStyleSelectable(s_ui.cell_btn, lv_obj_get_child(s_ui.cell_btn, 0), false);
         SetSimSectionVisible(false);
