@@ -40,6 +40,8 @@
 #include <esp_app_desc.h>
 #include "SdCardManager.hpp"
 #include "metalio_power.h"
+#include "valet_fonts/extended_fonts.h"
+#include <string>
 #include "power_policy.h"
 #include <algorithm>
 
@@ -526,6 +528,54 @@ static void ClearContent() {
     lv_obj_scroll_to_y(s_ui.content_page, 0, LV_ANIM_OFF);
     VkKey_SetScreenFactory(kScreenId, SettingsScreen::Create);
 }
+// Extended font pack: installed or not, and one button to fetch it over Wi-Fi.
+static lv_timer_t* s_font_timer = nullptr;
+static int s_font_drawn = -1;   // state and percent last drawn, to rebuild only on change
+static void FontPackAction(lv_event_t*) {
+    const auto status = valet::fonts::GetStatus();
+    if (status.state == valet::fonts::State::kDownloading || status.state == valet::fonts::State::kVerifying) valet::fonts::Cancel();
+    else valet::fonts::Start();
+    s_font_drawn = -1;
+}
+static void BuildFontPackCard() {
+    using valet::fonts::State;
+    const auto status = valet::fonts::GetStatus();
+    const bool busy = status.state == State::kDownloading || status.state == State::kVerifying;
+    const unsigned total_mb = static_cast<unsigned>(valet::fonts::PackBytes() >> 20);
+    char detail[128];
+    if (status.state == State::kInstalled) std::snprintf(detail, sizeof(detail), "%s", Text("十万多个汉字，生僻字能显示", "100k+ characters, rare ones included"));
+    else if (status.state == State::kDownloading) std::snprintf(detail, sizeof(detail), Text("正在下载 %d%% · %u / %u MB", "Downloading %d%% · %u / %u MB"),
+                                                               status.percent, static_cast<unsigned>(status.done_bytes >> 20), total_mb);
+    else if (status.state == State::kVerifying) std::snprintf(detail, sizeof(detail), Text("下载好了，正在校验 %d%%", "Downloaded; checking %d%%"), status.percent);
+    else std::snprintf(detail, sizeof(detail), "%s", Text("机内字库没有的字会画成方框", "Missing characters show as boxes"));
+    std::string title = std::string(Text("扩展字库", "Extended fonts")) + " · " +
+        (status.state == State::kInstalled ? Text("已安装", "installed") : busy ? Text("安装中", "installing") : Text("未安装", "not installed"));
+    SettingsValetCard(s_ui.content_page, title.c_str(), detail, status.state == State::kInstalled);
+    if (status.state != State::kInstalled) {
+        if (status.state == State::kFailed && status.message[0]) SettingsValetNote(s_ui.content_page, status.message);
+        SettingsValetGap(s_ui.content_page, 16);
+        char button[96];
+        if (busy) std::snprintf(button, sizeof(button), "%s", Text("停止下载", "Stop"));
+        else if (status.done_bytes > 0) std::snprintf(button, sizeof(button), Text("接着下载（已有 %d%%）", "Resume (%d%% done)"), status.percent);
+        else std::snprintf(button, sizeof(button), Text("下载并安装（%u MB，只走 Wi-Fi）", "Download and install (%u MB, Wi-Fi only)"), total_mb);
+        SettingsValetButton(s_ui.content_page, button, FontPackAction, 0, !busy);
+        if (!busy) SettingsValetNote(s_ui.content_page, Text(
+            "下载期间设备不会待机，可以离开这一页。中断了下次接着下。", "The device stays awake while downloading; you can leave this page. An interrupted download resumes."));
+    }
+    SettingsValetGap(s_ui.content_page);
+    s_font_drawn = static_cast<int>(status.state) * 1000 + status.percent;
+    // Redraw the page when the state or the percentage moves, and only then.
+    if (!s_font_timer) s_font_timer = lv_timer_create([](lv_timer_t*) {
+        if (!s_settings_scr || s_ui.group != 3 || s_ui.content_built) return;
+        const auto now = valet::fonts::GetStatus();
+        const int key = static_cast<int>(now.state) * 1000 + now.percent;
+        if (key == s_font_drawn) return;
+        const int scroll = lv_obj_get_scroll_y(s_ui.content_page);
+        ShowGroup(3);
+        lv_obj_scroll_to_y(s_ui.content_page, scroll, LV_ANIM_OFF);
+    }, 1000, nullptr);
+    valet::fonts::Refresh();
+}
 static void ShowGroup(int group) {
     if (group < 0 || group >= 6) return;
     ClearContent();
@@ -553,6 +603,7 @@ static void ShowGroup(int group) {
             // Reading settings that make sense outside a book. Font, margins and spacing are set
             // on the page being read, where the change can be seen.
             BookReaderPrefsEnsureLoaded();
+            BuildFontPackCard();
             SettingsValetLabel(s_ui.content_page, Text("翻页方式", "Page turn"));
             const char* const turns[] = {Text("左右滑动", "Slide"), Text("水波纹", "Ripple"), Text("推白翻页", "Wipe")};
             auto* turn = SettingsValetSegments(s_ui.content_page, turns, 3, [](lv_event_t* e) {
@@ -584,8 +635,8 @@ static void ShowGroup(int group) {
             SettingsValetGap(s_ui.content_page);
             SettingsValetLabel(s_ui.content_page, Text("字体与排版", "Font and layout"));
             SettingsValetNote(s_ui.content_page, Text(
-                "字号、字体、边距、行距在正文里点屏幕中间改，改了当场能看到。正文里出现方框是机内字库缺这个字：把 extended-fonts.fontpack 放进 SD 卡的 metalio/e-ink/fonts/，再重新打开书。",
-                "Font, size, margins and spacing are changed from the reading card, where you can see the result. Boxes in the text are missing glyphs: copy extended-fonts.fontpack to metalio/e-ink/fonts/ on the SD card and reopen the book."));
+                "字号、字体、边距、行距在正文里点屏幕中间改，改了当场能看到。",
+                "Font, size, margins and spacing are changed from the reading card, where you can see the result."));
             SettingsValetGap(s_ui.content_page, 20);
             AddRow(Text("打开阅读", "Open reading"), Text("回到书架或上次读的书", "Shelf or the last book"), OpenReading, 0);
             AddTab(SettingsTab::kPager, Text("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"));
@@ -693,6 +744,7 @@ static void OnScreenDeleted(lv_event_t* e) {
     s_ui = {};
     s_settings_scr = nullptr;
     s_status_battery = nullptr;
+    if (s_font_timer) { lv_timer_delete(s_font_timer); s_font_timer = nullptr; }
 }
 
 static bool OnSettingsKey(const char* key) {
