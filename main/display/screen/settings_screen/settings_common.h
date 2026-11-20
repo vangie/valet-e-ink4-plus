@@ -33,6 +33,20 @@ constexpr lv_coord_t kSettingsBrightnessButtonH = UiSy(38);
 constexpr lv_coord_t kSettingsBrightnessSliderGap = UiSx(18);
 void SettingsStyleBrightnessButton(lv_obj_t* button);
 
+// ── Valet controls, sized from sim/ (新设计 → 设置): a small field label, a
+// segmented choice in one frame, and a small note under it.
+/** @brief Small label above a control. */
+lv_obj_t* SettingsValetLabel(lv_obj_t* parent, const char* text);
+/** @brief Small explanatory text under a control; wraps. */
+lv_obj_t* SettingsValetNote(lv_obj_t* parent, const char* text);
+/** @brief One frame holding `count` choices; `columns` < `count` wraps into rows. Returns the frame. */
+lv_obj_t* SettingsValetSegments(lv_obj_t* parent, const char* const* names, int count, lv_event_cb_t cb,
+                                const intptr_t* values = nullptr, int columns = 0);
+/** @brief Mark the chosen segment (index within the frame; -1 for none). */
+void SettingsValetSelect(lv_obj_t* segments, int selected);
+/** @brief Vertical space between two fields. */
+void SettingsValetGap(lv_obj_t* parent, int height = 38);
+
 /** @brief 创建整行可选中选项 */
 lv_obj_t* SettingsCreateSelectableOption(lv_obj_t* parent, const char* title, lv_event_cb_t cb,
                                          intptr_t user_data);

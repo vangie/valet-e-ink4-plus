@@ -119,6 +119,7 @@ struct SettingsShellUi {
     bool content_built = false;
     lv_obj_t* heading = nullptr;
     int group = -1;
+    bool direct = false; // the open page is the whole group, with no list in between
 };
 
 static SettingsShellUi s_ui;
@@ -506,6 +507,7 @@ static void AddTab(SettingsTab tab, const char* detail = nullptr) {
 }
 static void ClearContent() {
     TearDownActiveTab();
+    s_ui.direct = false;
     // 分组列表自身也有控件（不归旧页签生命周期管理）。
     lv_obj_clean(s_ui.content_page);
     lv_obj_set_style_pad_row(s_ui.content_page, 0, 0);
@@ -520,8 +522,18 @@ static void ShowGroup(int group) {
     lv_label_set_text(s_ui.heading, Text(kGroups[group].zh, kGroups[group].en));
     switch (group) {
         case 0: AddTab(SettingsTab::kConversation, Text("选择服务，管理自建助理", "Service and custom assistants")); break;
-        case 1: AddTab(SettingsTab::kNetwork); break;
-        case 2: AddTab(SettingsTab::kFrontlight); AddTab(SettingsTab::kTheme); break;
+        case 1:
+            // One page in this group: open it directly, with the group's name as the title.
+            ShowTab(TabIndexOf(SettingsTab::kNetwork));
+            lv_obj_scroll_to_y(s_ui.content_page, 0, LV_ANIM_OFF);
+            s_ui.direct = true;
+            break;
+        case 2:
+            // Front light, refresh and the app grid style are one page now.
+            ShowTab(TabIndexOf(SettingsTab::kFrontlight));
+            lv_obj_scroll_to_y(s_ui.content_page, 0, LV_ANIM_OFF);
+            s_ui.direct = true;
+            break;
         case 3: {
             auto* note = lv_label_create(s_ui.content_page);
             lv_label_set_text(note, Text("字号、字体、边距与行距在阅读中的排版菜单设置。扩展字库放入 SD 卡 metalio/e-ink/fonts/。", "Adjust font, size and spacing in the reader. Extended fonts belong in metalio/e-ink/fonts/ on the SD card."));
@@ -565,6 +577,8 @@ static void ShowOverview() {
     for (int i = 0; i < 6; ++i) AddRow(Text(kGroups[i].zh, kGroups[i].en), descriptions[i], OpenGroup, i, kGroupGlyphs[i]);
 }
 static bool NavigateUp() {
+    // A page opened directly from the overview goes back to the overview.
+    if (s_ui.content_built && s_ui.direct) { ShowOverview(); return true; }
     if (s_ui.content_built) { ShowGroup(s_ui.group < 0 ? 5 : s_ui.group); return true; }
     if (s_ui.group >= 0) { ShowOverview(); return true; }
     return false;
@@ -673,7 +687,7 @@ static lv_obj_t* CreateInternal() {
     lv_obj_set_flex_grow(content, 1);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_hor(content, 33, 0);
-    lv_obj_set_style_pad_top(content, 26, 0);
+    lv_obj_set_style_pad_top(content, 30, 0);
     lv_obj_set_style_pad_bottom(content, 16, 0);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);

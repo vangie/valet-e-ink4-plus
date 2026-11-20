@@ -8,6 +8,8 @@
 #include "nt26_board.h"
 #include "settings.h"
 #include "settings_common.h"
+#include "haptic_feedback.h"
+#include "power_policy.h"
 #include "screen_common.h"
 #include "screen_text.h"
 #include "screen_wifi.h"
@@ -57,6 +59,11 @@ struct NetworkUi {
     lv_timer_t* reboot_timer = nullptr;
     int reboot_remaining = 0;
     std::string reboot_headline;
+    // Valet layout: segmented choices instead of stacked buttons.
+    lv_obj_t* link_seg = nullptr;
+    lv_obj_t* sim_seg = nullptr;
+    lv_obj_t* grace_seg = nullptr;
+    lv_obj_t* wifi_row_detail = nullptr;
 };
 
 NetworkUi s_ui;
@@ -215,7 +222,9 @@ void OpenRestartCountdown(const char* headline) {
     s_ui.reboot_timer = lv_timer_create(RebootTimerCb, 1000, nullptr);
 }
 
+void RefreshValet();
 void RefreshSimUi() {
+    RefreshValet();
     if (s_ui.sim_ext_btn == nullptr || s_ui.sim_int_btn == nullptr) {
         return;
     }
@@ -227,6 +236,28 @@ void RefreshSimUi() {
         char buf[48];
         snprintf(buf, sizeof(buf), Lang::Strings::SETTINGS_NET_CURRENT_FMT, SimSlotName(slot));
         lv_label_set_text(s_ui.sim_cur_lbl, buf);
+    }
+}
+// Valet layout
+const char* ValetText(const char* zh, const char* en) {
+    return std::strcmp(Lang::Current(), "zh-CN") == 0 ? zh : en;
+}
+constexpr int kGraceSeconds[] = {30, 60, 120, 0};
+void RefreshValet() {
+    if (!s_ui.link_seg) return;
+    const bool cell = IsCellNetwork();
+    SettingsValetSelect(s_ui.link_seg, cell ? 0 : 1);
+    // Segment order is built-in, external.
+    SettingsValetSelect(s_ui.sim_seg, GetCachedSimSlot() == kSimSlotInternal ? 0 : 1);
+    const int grace = PowerPolicy::GetInstance().GetNetGraceSec();
+    int chosen = -1;
+    for (int i = 0; i < 4; ++i) if (kGraceSeconds[i] == grace) chosen = i;
+    SettingsValetSelect(s_ui.grace_seg, chosen);
+    if (s_ui.wifi_row_detail) {
+        const char* detail = cell ? ValetText("没在用。点这里选网络", "Not in use. Tap to choose")
+            : WifiStation::GetInstance().IsConnected() ? ValetText("已连接。点这里换网络", "Connected. Tap to change")
+            : ValetText("没连上。点这里选网络", "Not connected. Tap to choose");
+        if (std::strcmp(lv_label_get_text(s_ui.wifi_row_detail), detail) != 0) lv_label_set_text(s_ui.wifi_row_detail, detail);
     }
 }
 
@@ -283,6 +314,7 @@ void OnWifiPowerClicked(lv_event_t* /*event*/) {
 }
 
 void RefreshNetworkOptions() {
+    RefreshValet();
     const bool is_cell = IsCellNetwork();
     if (s_ui.wifi_btn != nullptr) {
         SettingsStyleSelectable(s_ui.wifi_btn, lv_obj_get_child(s_ui.wifi_btn, 0), !is_cell);
@@ -712,6 +744,74 @@ void BuildWifiConfigSection(lv_obj_t* page) {
     SetSimSectionVisible(false);
 }
 
+void OnValetSim(lv_event_t* e) {
+    ScheduleSimSwitch(lv_event_get_user_data(e) ? kSimSlotExternal : kSimSlotInternal);
+}
+void OnValetGrace(lv_event_t* e) {
+    const int sec = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+    if (PowerPolicy::GetInstance().GetNetGraceSec() != sec) PowerPolicy::GetInstance().SetNetGraceSec(sec);
+    RefreshValet();
+}
+void OnValetWifiRow(lv_event_t* e) {
+    if (IsCellNetwork()) {
+        // Wi-Fi networks can only be chosen while Wi-Fi is the connection.
+        ScreenShowToast(ValetText("先把「怎么上网」换成 Wi-Fi", "Switch the connection to Wi-Fi first"));
+        return;
+    }
+    OnEnterWifiConfigClicked(e);
+}
+// Signal and ICCID are diagnostics; keep them at the bottom, out of the way of the choices.
+void BuildValet(lv_obj_t* page) {
+    lv_obj_set_style_pad_row(page, 0, 0);
+    SettingsValetLabel(page, ValetText("怎么上网", "Connection"));
+    static const char* const kLinkZh[] = {"4G", "Wi-Fi"};
+    static const intptr_t kLinkValues[] = {static_cast<intptr_t>(NetworkType::CELLULAR), static_cast<intptr_t>(NetworkType::WIFI)};
+    s_ui.link_seg = SettingsValetSegments(page, kLinkZh, 2, OnNetworkOptionClicked, kLinkValues);
+    SettingsValetNote(page, ValetText("换上网方式或换卡，设备会重启一次。", "Switching restarts the device."));
+    if (IsCellNetwork()) {
+        SettingsValetGap(page);
+        SettingsValetLabel(page, ValetText("用哪张卡", "SIM"));
+        const char* const sims[] = {ValetText("内置卡", "Built-in"), ValetText("外置卡", "External")};
+        s_ui.sim_seg = SettingsValetSegments(page, sims, 2, OnValetSim);
+    }
+    SettingsValetGap(page);
+    // Wi-Fi: one ruled row that leads to the network list.
+    auto* row = lv_obj_create(page);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), 124);
+    lv_obj_set_style_border_width(row, 2, 0);
+    lv_obj_set_style_border_side(row, static_cast<lv_border_side_t>(LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_BOTTOM), 0);
+    lv_obj_set_style_border_color(row, lv_color_black(), 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    HapticAttachClick(row);
+    lv_obj_add_event_cb(row, OnValetWifiRow, LV_EVENT_CLICKED, nullptr);
+    auto* name = lv_label_create(row);
+    lv_label_set_text(name, "Wi-Fi");
+    const auto* strong = fontpack_lv_font_get(30, 4);
+    lv_obj_set_style_text_font(name, strong ? strong : fontpack_lv_font_ui(), 0);
+    lv_obj_align(name, LV_ALIGN_LEFT_MID, 4, -20);
+    lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
+    s_ui.wifi_row_detail = lv_label_create(row);
+    lv_label_set_text(s_ui.wifi_row_detail, "");
+    const auto* small = fontpack_lv_font_get(25, 2);
+    lv_obj_set_style_text_font(s_ui.wifi_row_detail, small ? small : fontpack_lv_font_ui(), 0);
+    lv_obj_align(s_ui.wifi_row_detail, LV_ALIGN_LEFT_MID, 4, 22);
+    lv_obj_clear_flag(s_ui.wifi_row_detail, LV_OBJ_FLAG_CLICKABLE);
+    auto* go = lv_label_create(row);
+    lv_label_set_text(go, ">");
+    lv_obj_set_style_text_font(go, small ? small : fontpack_lv_font_ui(), 0);
+    lv_obj_align(go, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_obj_clear_flag(go, LV_OBJ_FLAG_CLICKABLE);
+    SettingsValetGap(page);
+    SettingsValetLabel(page, ValetText("不用网时，多久断开", "Disconnect when idle after"));
+    const char* const graces[] = {ValetText("30 秒", "30 s"), ValetText("1 分钟", "1 min"), ValetText("2 分钟", "2 min"), ValetText("不断", "Never")};
+    static const intptr_t kGraceValues[] = {30, 60, 120, 0};
+    s_ui.grace_seg = SettingsValetSegments(page, graces, 4, OnValetGrace, kGraceValues);
+    SettingsValetNote(page, ValetText("断得快更省电，下一次提问要多等一两秒连网。", "Sooner saves battery; the next question waits to reconnect."));
+    SettingsValetGap(page, 34);
+    SettingsNetworkSignal_Build(page);
+}
 }  // namespace
 
 void SettingsNetworkTab_Reset() {
@@ -731,11 +831,19 @@ bool SettingsNetworkTab_IsWifi() {
 }
 
 void SettingsNetworkTab_Build(lv_obj_t* page) {
-    SettingsNetworkSignal_Build(page);
     s_ui = {};
     s_tab_alive = true;
     s_sim_switch_pending = false;
     s_ui.root_scr = lv_obj_get_screen(page);
+    #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    // Domestic board: the Valet layout. The global board keeps the official page below.
+    BuildValet(page);
+    RefreshValet();
+    ScheduleLoadSimSlotFromNvs();
+    if (IsCellNetwork()) ScheduleSimSlotQuery();
+    return;
+    #endif
+    SettingsNetworkSignal_Build(page);
 
     s_ui.mode_lbl = lv_label_create(page);
     lv_obj_set_width(s_ui.mode_lbl, lv_pct(100));

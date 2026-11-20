@@ -13,6 +13,7 @@
 #include "haptic_feedback.h"
 #include "settings.h"
 #include "settings_common.h"
+#include "home_screen/home_screen.h"
 
 namespace {
 
@@ -28,6 +29,15 @@ struct SettingsFrontlightUi {
     lv_obj_t* depth_hint = nullptr; // 非默认档位的风险提示
     int depth_selected = -1; // 已绘制档位，避免轮询时重复设置样式
     lv_timer_t* depth_timer = nullptr; // 页面存活期间更新校准值
+    // Valet layout: segmented choices and ten brightness blocks.
+    lv_obj_t* light_seg = nullptr;
+    lv_obj_t* blocks[10] = {};
+    lv_obj_t* level_value = nullptr;
+    lv_obj_t* refresh_seg = nullptr;
+    lv_obj_t* depth_seg = nullptr;
+    lv_obj_t* depth_gap = nullptr;
+    lv_obj_t* theme_seg = nullptr;
+    int level_drawn = -1;
 };
 
 static SettingsFrontlightUi s_ui;
@@ -50,7 +60,59 @@ static void SaveFrontlight() {
     }
 }
 
+static const char* ValetText(const char* zh, const char* en) {
+    return std::strcmp(Lang::Current(), "zh-CN") == 0 ? zh : en;
+}
+static void SetIfChanged(lv_obj_t* label, const char* text) {
+    if (label && std::strcmp(lv_label_get_text(label), text)) lv_label_set_text(label, text);
+}
+static constexpr int kValetThemes[] = {HomeScreen::kCardStyleSlash, HomeScreen::kCardStyleWhite,
+    HomeScreen::kCardStyleGray, HomeScreen::kCardStyleBorder, HomeScreen::kCardStylePixel};
+static void RefreshValet() {
+    if (!s_ui.light_seg) return;
+    auto& light = Frontlight::GetInstance();
+    for (int i = 0; i < 4; ++i) if (light.cct() == kLightModes[i]) SettingsValetSelect(s_ui.light_seg, i);
+    const int level = (std::clamp<int>(light.target_brightness(), 0, 100) + 5) / 10;
+    if (level != s_ui.level_drawn) {
+        for (int i = 0; i < 10; ++i)
+            lv_obj_set_style_bg_color(s_ui.blocks[i], i < level ? lv_color_black() : lv_color_white(), 0);
+        s_ui.level_drawn = level;
+    }
+    char value[8];
+    std::snprintf(value, sizeof(value), "%d", static_cast<int>(light.target_brightness()));
+    SetIfChanged(s_ui.level_value, value);
+    const auto profile = EpdGetRefreshProfile();
+    SettingsValetSelect(s_ui.refresh_seg, static_cast<int>(profile));
+    const char* hints[] = {Lang::Strings::SETTINGS_SCREEN_REFRESH_CLEAR_HINT,
+        Lang::Strings::SETTINGS_SCREEN_REFRESH_BALANCED_HINT, Lang::Strings::SETTINGS_SCREEN_REFRESH_FAST_HINT};
+    SetIfChanged(s_ui.refresh_hint, hints[static_cast<int>(profile)]);
+    const int style = HomeScreen::LoadCardStyle();
+    for (int i = 0; i < 5; ++i) if (kValetThemes[i] == style) SettingsValetSelect(s_ui.theme_seg, i);
+    // Black depth: the calibrated panel voltage when there is one, three levels when there is not.
+    const auto state = PanelVcomGetState();
+    const bool calibrated = state.vcom_mv != 0, fallback = !calibrated && state.revision != 0;
+    char text[128];
+    if (calibrated) std::snprintf(text, sizeof(text), ValetText("%s · 已按屏幕校准（%d mV）", "%s · calibrated (%d mV)"),
+                                  Lang::Strings::SETTINGS_SCREEN_BLACK_DEPTH_TITLE, state.vcom_mv);
+    else if (fallback) std::snprintf(text, sizeof(text), "%s", Lang::Strings::SETTINGS_SCREEN_BLACK_DEPTH_TITLE);
+    else std::snprintf(text, sizeof(text), "%s · %s", Lang::Strings::SETTINGS_SCREEN_BLACK_DEPTH_TITLE,
+                       Lang::Strings::SETTINGS_TEST_SIGNAL_READING);
+    SetIfChanged(s_ui.depth_label, text);
+    const bool shown = !lv_obj_has_flag(s_ui.depth_seg, LV_OBJ_FLAG_HIDDEN);
+    if (fallback != shown) {
+        if (fallback) lv_obj_remove_flag(s_ui.depth_seg, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_ui.depth_seg, LV_OBJ_FLAG_HIDDEN);
+    }
+    const int depth = static_cast<int>(EpdGetBlackDepth());
+    SettingsValetSelect(s_ui.depth_seg, depth);
+    const bool warn = fallback && depth != 0, warned = !lv_obj_has_flag(s_ui.depth_hint, LV_OBJ_FLAG_HIDDEN);
+    if (warn != warned) {
+        if (warn) lv_obj_remove_flag(s_ui.depth_hint, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_ui.depth_hint, LV_OBJ_FLAG_HIDDEN);
+    }
+}
 static void RefreshDepth() {
+    if (s_ui.light_seg) { RefreshValet(); return; }
     if (!s_ui.depth_label) return;
     const auto state = PanelVcomGetState();
     const bool calibrated = state.vcom_mv != 0;
@@ -87,6 +149,7 @@ static void OnDepthClicked(lv_event_t* event) {
 }
 
 static void RefreshOptions() {
+    if (s_ui.light_seg) { RefreshValet(); return; }
     auto& light = Frontlight::GetInstance();
     for (int i = 0; i < 4; ++i) {
         if (s_ui.light_options[i]) SettingsStyleSelectable(s_ui.light_options[i],
@@ -171,6 +234,96 @@ static void OnBrightnessStep(lv_event_t* event) {
     }
 }
 
+// Ten blocks: tap one to set that level; tap the current one to go a step lower, so zero is reachable.
+static void OnValetLevel(lv_event_t* event) {
+    auto& light = Frontlight::GetInstance();
+    if (!light.initialized()) return;
+    const int block = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(event)));
+    const int now = (light.target_brightness() + 5) / 10;
+    light.SetBrightness(static_cast<uint8_t>((now == block ? block - 1 : block) * 10));
+    if (light.cct() == FrontlightCct::kOff) light.SetWarmth(light.warmth());
+    RefreshOptions();
+    SaveFrontlight();
+}
+static void OnValetTheme(lv_event_t* event) {
+    const int style = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(event)));
+    if (HomeScreen::LoadCardStyle() != style) HomeScreen::SaveCardStyle(style);
+    RefreshOptions();
+}
+static void BuildValet(lv_obj_t* page) {
+    lv_obj_set_style_pad_row(page, 0, 0);
+    const auto* small = fontpack_lv_font_get(25, 2);
+    if (!small) small = fontpack_lv_font_ui();
+
+    SettingsValetLabel(page, Lang::Strings::SETTINGS_FRONTLIGHT_TITLE);
+    const char* const lights[] = {Lang::Strings::SETTINGS_FRONTLIGHT_COOL, Lang::Strings::SETTINGS_FRONTLIGHT_WARM,
+        Lang::Strings::SETTINGS_FRONTLIGHT_BOTH, ValetText("关", "Off")};
+    s_ui.light_seg = SettingsValetSegments(page, lights, 4, OnLightOptionClicked);
+    auto* level = lv_obj_create(page);
+    lv_obj_remove_style_all(level);
+    lv_obj_set_size(level, lv_pct(100), 72);
+    lv_obj_set_style_margin_top(level, 10, 0);
+    lv_obj_clear_flag(level, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(level, LV_OBJ_FLAG_CLICKABLE);
+    auto* name = lv_label_create(level);
+    lv_label_set_text(name, ValetText("亮度", "Level"));
+    lv_obj_set_style_text_font(name, small, 0);
+    lv_obj_align(name, LV_ALIGN_LEFT_MID, 2, 0);
+    constexpr int kBlockW = 40, kBlockGap = 6, kBlocksX = 82;
+    for (int i = 0; i < 10; ++i) {
+        // The whole row height is the touch target; the drawn block is its centre.
+        auto* hit = lv_obj_create(level);
+        lv_obj_remove_style_all(hit);
+        lv_obj_set_size(hit, kBlockW + kBlockGap, 72);
+        lv_obj_set_pos(hit, kBlocksX + i * (kBlockW + kBlockGap), 0);
+        lv_obj_clear_flag(hit, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(hit, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(hit, OnValetLevel, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(i + 1)));
+        s_ui.blocks[i] = lv_obj_create(hit);
+        lv_obj_remove_style_all(s_ui.blocks[i]);
+        lv_obj_set_size(s_ui.blocks[i], kBlockW, 40);
+        lv_obj_align(s_ui.blocks[i], LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_set_style_border_width(s_ui.blocks[i], 2, 0);
+        lv_obj_set_style_border_color(s_ui.blocks[i], lv_color_black(), 0);
+        lv_obj_set_style_bg_color(s_ui.blocks[i], lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(s_ui.blocks[i], LV_OPA_COVER, 0);
+        lv_obj_clear_flag(s_ui.blocks[i], LV_OBJ_FLAG_CLICKABLE);
+    }
+    s_ui.level_value = lv_label_create(level);
+    lv_label_set_text(s_ui.level_value, "");
+    lv_obj_set_style_text_font(s_ui.level_value, small, 0);
+    lv_obj_align(s_ui.level_value, LV_ALIGN_RIGHT_MID, -2, 0);
+
+    SettingsValetGap(page);
+    SettingsValetLabel(page, ValetText("刷新", "Refresh"));
+    const char* const profiles[] = {Lang::Strings::SETTINGS_SCREEN_REFRESH_CLEAR,
+        Lang::Strings::SETTINGS_SCREEN_REFRESH_BALANCED, Lang::Strings::SETTINGS_SCREEN_REFRESH_FAST};
+    s_ui.refresh_seg = SettingsValetSegments(page, profiles, 3, OnProfileClicked);
+    s_ui.refresh_hint = SettingsValetNote(page, "");
+
+    SettingsValetGap(page);
+    SettingsValetLabel(page, ValetText("应用页样式", "App grid style"));
+    const char* const themes[] = {ValetText("斜切", "Slash"), ValetText("白底", "White"), ValetText("网点", "Dots"),
+        ValetText("描边", "Outline"), ValetText("像素", "Pixel")};
+    static const intptr_t kThemeValues[] = {HomeScreen::kCardStyleSlash, HomeScreen::kCardStyleWhite,
+        HomeScreen::kCardStyleGray, HomeScreen::kCardStyleBorder, HomeScreen::kCardStylePixel};
+    s_ui.theme_seg = SettingsValetSegments(page, themes, 5, OnValetTheme, kThemeValues);
+
+    SettingsValetGap(page);
+    s_ui.depth_label = SettingsValetLabel(page, "");
+    const char* const depths[] = {Lang::Strings::SETTINGS_SCREEN_BLACK_DEPTH_DEFAULT,
+        Lang::Strings::SETTINGS_SCREEN_BLACK_DEPTH_MEDIUM, Lang::Strings::SETTINGS_SCREEN_BLACK_DEPTH_STRONG};
+    s_ui.depth_seg = SettingsValetSegments(page, depths, 3, OnDepthClicked);
+    lv_obj_add_flag(s_ui.depth_seg, LV_OBJ_FLAG_HIDDEN);
+    s_ui.depth_hint = SettingsValetNote(page, Lang::Strings::SETTINGS_SCREEN_BLACK_DEPTH_HINT);
+    lv_obj_add_flag(s_ui.depth_hint, LV_OBJ_FLAG_HIDDEN);
+    s_ui.depth_timer = lv_timer_create([](lv_timer_t*) { RefreshDepth(); }, 500, nullptr);
+    lv_obj_add_event_cb(s_ui.depth_label, [](lv_event_t*) {
+        if (s_ui.depth_timer) lv_timer_delete(s_ui.depth_timer);
+        s_ui = {};
+    }, LV_EVENT_DELETE, nullptr);
+    RefreshValet();
+}
 } // namespace
 
 void SettingsFrontlightTab_Refresh() {
@@ -184,6 +337,9 @@ void SettingsFrontlightTab_Reset() {
 
 void SettingsFrontlightTab_Build(lv_obj_t* page) {
     SettingsFrontlightTab_Reset();
+    // The Valet layout replaces the stacked buttons and the slider; the handlers and storage are the same.
+    BuildValet(page);
+    return;
 
     auto* refresh_title=lv_label_create(page);
     lv_label_set_text(refresh_title,Lang::Strings::SETTINGS_SCREEN_REFRESH_TITLE);
