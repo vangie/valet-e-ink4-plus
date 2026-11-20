@@ -33,7 +33,12 @@
 #include "valet_setup/server.h"
 
 #include <esp_log.h>
+#include <cstdio>
 #include <cstring>
+#include <esp_app_desc.h>
+#include "SdCardManager.hpp"
+#include "metalio_power.h"
+#include "power_policy.h"
 #include <algorithm>
 
 #define TAG "SettingsScreen"
@@ -123,6 +128,7 @@ struct SettingsShellUi {
 };
 
 static SettingsShellUi s_ui;
+static lv_obj_t* s_status_battery = nullptr; // the status bar's battery text, kept current by the display
 static SettingsTab s_pending_tab = SettingsTab::kNetwork;
 static bool s_open_overview = true;
 static lv_obj_t* s_settings_scr = nullptr;
@@ -524,7 +530,11 @@ static void ShowGroup(int group) {
     s_ui.group = group;
     lv_label_set_text(s_ui.heading, Text(kGroups[group].zh, kGroups[group].en));
     switch (group) {
-        case 0: AddTab(SettingsTab::kConversation, Text("选择服务，管理自建助理", "Service and custom assistants")); break;
+        case 0:
+            ShowTab(TabIndexOf(SettingsTab::kConversation));
+            lv_obj_scroll_to_y(s_ui.content_page, 0, LV_ANIM_OFF);
+            s_ui.direct = true;
+            break;
         case 1:
             // One page in this group: open it directly, with the group's name as the title.
             ShowTab(TabIndexOf(SettingsTab::kNetwork));
@@ -566,9 +576,37 @@ static void ShowGroup(int group) {
             AddTab(SettingsTab::kPager, Text("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"));
             break;
         }
-        case 5:
-            AddTab(SettingsTab::kLanguage); AddTab(SettingsTab::kPower); AddTab(SettingsTab::kCharging);
-            AddTab(SettingsTab::kLog); AddTab(SettingsTab::kTest); AddTab(SettingsTab::kAbout); break;
+        case 5: {
+            // What the device is and how it is doing, then one row per thing to manage,
+            // each showing its current value.
+            char detail[96];
+            const char* battery = "--";
+            if (s_status_battery && lv_obj_is_valid(s_status_battery)) battery = lv_label_get_text(s_status_battery);
+            const bool card = SdCardManager::GetInstance().IsMounted();
+            std::snprintf(detail, sizeof(detail), "%s %s · %s", Text("电量", "Battery"), battery,
+                          card ? Text("SD 卡已插入", "SD card in") : Text("没有 SD 卡", "No SD card"));
+            SettingsValetCard(s_ui.content_page, "Metalio E-Ink4 Plus", detail, true, true);
+            SettingsValetGap(s_ui.content_page, 26);
+            auto* rule = lv_obj_create(s_ui.content_page);
+            lv_obj_remove_style_all(rule);
+            lv_obj_set_size(rule, lv_pct(100), 3);
+            lv_obj_set_style_bg_color(rule, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
+            const auto& power = PowerPolicy::GetInstance();
+            char line[96];
+            std::snprintf(line, sizeof(line), Text("空闲时 %d MHz · 5 分钟待机，30 分钟关机", "%d MHz idle · standby 5 min, off 30 min"),
+                          power.GetIdleCpuMhz());
+            AddTab(SettingsTab::kPower, line);
+            std::snprintf(line, sizeof(line), Text("充电电流 %d mA", "Charging current %d mA"), MetalioPower_GetChargeCurrentMa());
+            AddTab(SettingsTab::kCharging, line);
+            AddTab(SettingsTab::kLanguage, std::strcmp(Lang::Current(), "zh-CN") == 0 ? "简体中文" : "English");
+            AddTab(SettingsTab::kLog, Text("记录并上传运行日志", "Record and upload logs"));
+            AddTab(SettingsTab::kTest, Text("屏幕、触摸、电池、声音", "Screen, touch, battery, audio"));
+            const auto* app = esp_app_get_description();
+            std::snprintf(line, sizeof(line), "Valet %s", app ? app->version : "");
+            AddTab(SettingsTab::kAbout, line);
+            break;
+        }
     }
 }
 static void ShowOverview() {
@@ -618,6 +656,7 @@ static void OnScreenDeleted(lv_event_t* e) {
     TearDownActiveTab();
     s_ui = {};
     s_settings_scr = nullptr;
+    s_status_battery = nullptr;
 }
 
 static bool OnSettingsKey(const char* key) {
@@ -666,6 +705,7 @@ static lv_obj_t* CreateInternal() {
     lv_obj_add_event_cb(scr, OnScreenDeleted, LV_EVENT_DELETE, nullptr);
 
     EpdStatusBar status = ScreenCreateStatusBar(scr);
+    s_status_battery = status.battery_pct_label;
     const lv_coord_t body_h = LV_VER_RES - status.height;
 
     lv_obj_t* body = lv_obj_create(scr);
@@ -735,7 +775,10 @@ static lv_obj_t* CreateInternal() {
         s_ui.group = open_tab == SettingsTab::kConversation ? 0 : open_tab == SettingsTab::kNetwork ? 1 :
             (open_tab == SettingsTab::kBluetooth || open_tab == SettingsTab::kPager) ? 4 : 5;
         ShowTab(TabIndexOf(open_tab));
-        lv_label_set_text(s_ui.heading, kTabs[s_ui.active_tab].name());
+        const bool whole_group = open_tab == SettingsTab::kConversation || open_tab == SettingsTab::kNetwork;
+        s_ui.direct = whole_group;
+        lv_label_set_text(s_ui.heading, whole_group ? Text(kGroups[s_ui.group].zh, kGroups[s_ui.group].en)
+                                                    : kTabs[s_ui.active_tab].name());
     }
     s_open_overview = true;
     ESP_LOGI(TAG, "settings ready tabs=%d open=%d haptic=%d", kTabCount, (int)open_tab,

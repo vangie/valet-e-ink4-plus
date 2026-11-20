@@ -44,6 +44,11 @@ lv_obj_t* SettingsValetSegments(lv_obj_t* parent, const char* const* names, int 
                                 const intptr_t* values = nullptr, int columns = 0);
 /** @brief Mark the chosen segment (index within the frame; -1 for none). */
 void SettingsValetSelect(lv_obj_t* segments, int selected);
+/** @brief Status card: black when all is well, a dashed outline when something needs doing. Returns the card. */
+lv_obj_t* SettingsValetCard(lv_obj_t* parent, const char* title, const char* detail, bool ok = true,
+                            bool device_icon = false);
+/** @brief Outlined (or solid) button of the design's height; width is the caller's. */
+lv_obj_t* SettingsValetButton(lv_obj_t* parent, const char* text, lv_event_cb_t cb, intptr_t data = 0, bool solid = false);
 /** @brief Vertical space between two fields. */
 void SettingsValetGap(lv_obj_t* parent, int height = 38);
 

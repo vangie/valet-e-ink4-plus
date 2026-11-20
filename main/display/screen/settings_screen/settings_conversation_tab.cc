@@ -53,6 +53,9 @@ struct SettingsConversationUi {
     bool alive = false;
     bool known = false;
     bool enabled = true;
+    // Valet layout
+    lv_obj_t* provider_seg = nullptr;
+    lv_obj_t* speech_seg = nullptr;
 };
 
 static SettingsConversationUi s_ui;
@@ -74,10 +77,22 @@ static void RefreshAssistantList() {
     lv_obj_clean(s_assistants);
     BuildAssistants(s_assistants);
 }
+// Entering or leaving "add assistant" changes the whole page, not just the list.
+static void RebuildPage() {
+    if (!s_ui.alive || !s_assistants) return;
+    auto* page = lv_obj_get_parent(s_assistants);
+    if (s_setup_poll) { lv_timer_delete(s_setup_poll); s_setup_poll = nullptr; }
+    s_assistants = nullptr;
+    lv_obj_clean(page);
+    SettingsConversationTab_Build(page);
+    SettingsConversationTab_OnActivated();
+    lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+}
 static void StopSetupClicked(lv_event_t*) {
     s_setup_visible = false;
     valet::CloseSetupSession();
-    RefreshAssistantList();
+    // The button being tapped is inside the page; rebuild after this event returns.
+    lv_async_call([](void*) { RebuildPage(); }, nullptr);
 }
 static void StartSetupClicked(lv_event_t*) {
     if (s_setup_starting) return;
@@ -95,7 +110,7 @@ static void StartSetupClicked(lv_event_t*) {
             else valet::CloseSetupSession();
         }, expected)) { delete expected; s_setup_starting = false; valet::CloseSetupSession(); }
     }, Application::TaskDomain::Network)) s_setup_starting = false;
-    RefreshAssistantList();
+    lv_async_call([](void*) { RebuildPage(); }, nullptr);
 }
 static void OpenWifi(lv_event_t*) { ScreenNavigateTo(SettingsScreen::CreateNetwork); }
 static void AskRemove(lv_event_t* event) {
@@ -180,35 +195,102 @@ static void BuildAssistants(lv_obj_t* page) {
         return;
     }
     const auto profiles = valet::LoadAssistantProfiles();
-    auto* title = lv_label_create(page);
-    lv_label_set_text(title, CloudText("我的助理", "My assistants"));
+    const auto* small = fontpack_lv_font_get(25, 2);
+    if (!small) small = fontpack_lv_font_ui();
+    const auto* strong = fontpack_lv_font_get(30, 4);
+    if (!strong) strong = fontpack_lv_font_ui();
+    // Heading: how many, and the way to add one.
+    auto* head = lv_obj_create(page);
+    lv_obj_remove_style_all(head);
+    lv_obj_set_size(head, lv_pct(100), 78);
+    lv_obj_clear_flag(head, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(head, LV_OBJ_FLAG_CLICKABLE);
+    auto* title = lv_label_create(head);
+    lv_label_set_text_fmt(title, "%s · %u", CloudText("我的助理", "My assistants"), static_cast<unsigned>(profiles.items.size()));
+    lv_obj_set_style_text_font(title, strong, 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    if (profiles.items.size() < valet::kMaxAssistants) {
+        auto* add = SettingsValetButton(head, CloudText("+ 添加助理", "+ Add"), StartSetupClicked);
+        lv_obj_set_width(add, 210);
+        lv_obj_align(add, LV_ALIGN_RIGHT_MID, 0, 0);
+    }
+    auto* tip = lv_label_create(page);
+    lv_obj_set_width(tip, lv_pct(100));
+    lv_label_set_long_mode(tip, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(tip, small, 0);
+    lv_obj_set_style_text_line_space(tip, 6, 0);
+    lv_label_set_text(tip, profiles.items.empty()
+        ? CloudText("还没有助理。点「添加助理」，用手机或电脑完成连接。", "No assistants yet. Add one using your phone or computer.")
+        : CloudText("点「使用」切换。提问和通话都会用选中的助理，各自的对话记录分开保存。", "Choose Use to switch. Ask and Call both use the selected assistant; histories stay separate."));
     for (size_t i = 0; i < profiles.items.size(); ++i) {
         const auto& profile = profiles.items[i];
-        auto* name = lv_label_create(page);
         const bool current = profile.id == profiles.active_id;
-        lv_label_set_text_fmt(name, "%s%s · %s", current ? "● " : "", profile.name.c_str(),
-            profile.connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw");
-        lv_obj_set_width(name, lv_pct(100));
-        lv_label_set_long_mode(name, LV_LABEL_LONG_WRAP);
-        if (!current) SettingsCreateSelectableOption(page, CloudText("使用这个助理", "Use this assistant"), ApplyProfileChange, i);
-        if (s_remove_id == profile.id) {
-            SettingsCreateSelectableOption(page, CloudText("确认移除此设备保存的连接", "Confirm removal from this device"), ApplyProfileChange, -static_cast<intptr_t>(i) - 1);
-            SettingsCreateSelectableOption(page, CloudText("取消", "Cancel"), CancelRemove, 0);
-        } else SettingsCreateSelectableOption(page, CloudText("管理：移除此助理", "Remove assistant"), AskRemove, i);
+        const bool removing = s_remove_id == profile.id;
+        auto* card = lv_obj_create(page);
+        lv_obj_remove_style_all(card);
+        lv_obj_set_size(card, lv_pct(100), 262);
+        lv_obj_set_style_border_width(card, 3, 0);
+        lv_obj_set_style_border_color(card, lv_color_black(), 0);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+        if (current) {
+            // The one in use carries a thick bar on its left edge.
+            auto* bar = lv_obj_create(card);
+            lv_obj_remove_style_all(bar);
+            lv_obj_set_size(bar, 9, lv_pct(100));
+            lv_obj_set_style_bg_color(bar, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+            lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+        }
+        const int left = current ? 36 : 27;
+        auto* name = lv_label_create(card);
+        lv_label_set_text(name, profile.name.c_str());
+        lv_obj_set_style_text_font(name, strong, 0);
+        lv_obj_set_width(name, 540);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_obj_set_pos(name, left, 30);
+        auto* state = lv_label_create(card);
+        const char* backend = profile.connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw";
+        // Capabilities are recorded by a real handshake; say so when the call was not verified.
+        lv_label_set_text_fmt(state, "%s · %s%s", backend,
+            current ? CloudText("当前使用", "In use") : CloudText("已保存", "Saved"),
+            profile.live ? "" : CloudText(" · 通话未验证", " · call not verified"));
+        lv_obj_set_style_text_font(state, small, 0);
+        lv_obj_set_pos(state, left, 86);
+        const int inner = 617 - 6 - left - 27, half = (inner - 16) / 2, by = 152;
+        if (removing) {
+            auto* yes = SettingsValetButton(card, CloudText("确认移除", "Remove"), ApplyProfileChange, -static_cast<intptr_t>(i) - 1, true);
+            lv_obj_set_width(yes, half);
+            lv_obj_set_pos(yes, left, by);
+            auto* no = SettingsValetButton(card, CloudText("取消", "Cancel"), CancelRemove);
+            lv_obj_set_width(no, half);
+            lv_obj_set_pos(no, left + half + 16, by);
+            continue;
+        }
+        if (current) {
+            auto* using_now = lv_label_create(card);
+            lv_label_set_text(using_now, CloudText("正在使用", "In use"));
+            lv_obj_set_style_text_font(using_now, small, 0);
+            lv_obj_set_pos(using_now, left, by + 24);
+        } else {
+            auto* use = SettingsValetButton(card, CloudText("使用", "Use"), ApplyProfileChange, static_cast<intptr_t>(i));
+            lv_obj_set_width(use, half);
+            lv_obj_set_pos(use, left, by);
+        }
+        // The only thing to manage on the device is removal.
+        auto* remove = SettingsValetButton(card, CloudText("移除", "Remove"), AskRemove, static_cast<intptr_t>(i));
+        lv_obj_set_width(remove, half);
+        lv_obj_set_pos(remove, left + half + 16, by);
     }
-    if (profiles.items.size() < valet::kMaxAssistants) SettingsCreateSelectableOption(page, CloudText("添加助理", "Add assistant"), StartSetupClicked, 0);
-    if (profiles.items.empty()) {
-        auto* empty = lv_label_create(page);
-        lv_label_set_text(empty, CloudText("还没有助理。点添加，用手机或电脑配置。", "No assistants yet. Add one using your phone or computer."));
-        lv_obj_set_width(empty, lv_pct(100));
-        lv_label_set_long_mode(empty, LV_LABEL_LONG_WRAP);
+    if (!profiles.items.empty()) {
+        auto* note = lv_label_create(page);
+        lv_label_set_text(note, CloudText("已保存的连接不代表在线。首次使用时会签名认证；网关可能要求批准新设备。", "A saved connection is not an online check. First use authenticates the device; the gateway may ask you to approve it."));
+        lv_obj_set_width(note, lv_pct(100));
+        lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(note, small, 0);
+        lv_obj_set_style_text_line_space(note, 6, 0);
     }
-    auto* note = lv_label_create(page);
-    lv_label_set_text(note, CloudText("已保存的连接不代表在线。首次使用时会签名认证；网关可能要求批准新设备。", "A saved connection is not an online check. First use authenticates the device; approve its pending request on the gateway if needed."));
-    lv_obj_set_width(note, lv_pct(100));
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
 }
-
 struct SettingsTtsResultMsg {
     uint32_t generation = 0;
     bool ok = false;
@@ -222,6 +304,7 @@ static const char* CloudText(const char* zh, const char* en) {
 
 static void RefreshCloudOptions() {
     const auto saved = chat_cloud::SavedProvider();
+    if (s_ui.provider_seg) SettingsValetSelect(s_ui.provider_seg, saved == chat_cloud::Provider::Custom ? 1 : 0);
     for (int i = 0; i < chat_cloud::kProviderCount; ++i) {
         if (s_ui.cloud_btns[i]) {
             SettingsStyleSelectable(s_ui.cloud_btns[i], lv_obj_get_child(s_ui.cloud_btns[i], 0),
@@ -238,7 +321,7 @@ static void RefreshCloudOptions() {
             ? CloudText("正在保存…", "Saving...")
             : saved != chat_cloud::ActiveProvider()
             ? CloudText("已保存，正在重启…", "Saved. Restarting...")
-            : CloudText("切换云服务后自动重启", "Automatically restarts after switching cloud service."));
+            : CloudText("换一个会重启一次，读到哪一页会记住。", "Switching restarts the device; your place is kept."));
     }
 }
 
@@ -290,6 +373,7 @@ static void SetStatus(const char* text) {
 
 static void RefreshOptions() {
     RefreshCloudOptions();
+    if (s_ui.speech_seg) SettingsValetSelect(s_ui.speech_seg, !s_ui.known ? -1 : s_ui.enabled ? 0 : 1);
     for (int i = 0; i < kOptionCount; ++i) {
         if (s_ui.btns[i] == nullptr) {
             continue;
@@ -571,36 +655,67 @@ void SettingsConversationTab_OnActivated() {
     }
 }
 
+static std::string ProviderName(chat_cloud::Provider provider) {
+    switch (provider) {
+        case chat_cloud::Provider::Custom: return CloudText("自建", "Custom");
+        case chat_cloud::Provider::Xiaozhi: return CloudText("小智", "Xiaozhi");
+        case chat_cloud::Provider::Yunxin: return CloudText("网易", "NetEase");
+        default: return CloudText("百问", "Baiwen");
+    }
+}
+static void OnValetSpeech(lv_event_t* e) {
+    // Reuse the option handler: it takes 1 for on, 0 for off in the same user data.
+    OnOptionClicked(e);
+}
 void SettingsConversationTab_Build(lv_obj_t* page) {
     ++s_ui_generation;
     s_ui = {};
     s_ui.alive = true;
+    lv_obj_set_style_pad_row(page, 0, 0);
+    const bool custom = chat_cloud::IsCustom();
+    // While an assistant is being added the page does that one thing.
+    const bool adding = custom && s_setup_visible;
 
-    auto* cloud_title = lv_label_create(page);
-    lv_label_set_text(cloud_title, CloudText("云服务切换", "Cloud service"));
-    lv_obj_set_style_text_font(cloud_title, fontpack_lv_font_ui(), 0);
-    static const char* kCloudNames[][2] = {
-        {"百问AI", "Baiwen AI"}, {"小智AI", "Xiaozhi AI"},
-        {"网易AI", "NetEase AI"}, {"自建", "Custom"},
-    };
-    for (int i = 0; i < chat_cloud::kProviderCount; ++i) {
-        const auto provider = static_cast<chat_cloud::Provider>(i);
-        if (provider != chat_cloud::kDefaultProvider && provider != chat_cloud::Provider::Custom) continue;
-        s_ui.cloud_btns[i] = SettingsCreateSelectableOption(page,
-            CloudText(kCloudNames[i][0], kCloudNames[i][1]), OnCloudClicked, i);
+    // Who is answering right now.
+    if (!adding) {
+        const auto profiles = valet::LoadAssistantProfiles();
+        const auto* active = profiles.Active();
+        std::string title = ProviderName(chat_cloud::ActiveProvider()), detail;
+        bool ok = true;
+        if (!custom) detail = CloudText("官方订阅，正在用", "Official plan, in use");
+        else if (active) {
+            title = active->name + " · " + (active->connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw");
+            detail = CloudText("已保存连接", "Connection saved");
+        } else { detail = CloudText("还没有助理", "No assistant yet"); ok = false; }
+        SettingsValetCard(page, title.c_str(), detail.c_str(), ok);
+        SettingsValetGap(page, 30);
+        SettingsValetLabel(page, CloudText("谁来回答", "Who answers"));
+        const std::string official = ProviderName(chat_cloud::kDefaultProvider);
+        const char* const names[] = {official.c_str(), CloudText("自建", "Custom")};
+        static const intptr_t kValues[] = {static_cast<intptr_t>(chat_cloud::kDefaultProvider),
+                                           static_cast<intptr_t>(chat_cloud::Provider::Custom)};
+        s_ui.provider_seg = SettingsValetSegments(page, names, 2, OnCloudClicked, kValues);
+        s_ui.cloud_status = SettingsValetNote(page, "");
+        if (!custom) {
+            const std::string plan = official + CloudText("用的是随机送的订阅。只有按住说话，没有通话，也拿不到正在读的那一页。",
+                                                         " uses the bundled plan: hold to talk only, no calls, no reading context.");
+            // Its own paragraph: the line above is about switching, this one about the current service.
+            lv_obj_set_style_margin_top(SettingsValetNote(page, plan.c_str()), 14, 0);
+        }
+        SettingsValetGap(page, 30);
+    } else {
+        s_ui.cloud_status = SettingsValetNote(page, "");
+        lv_obj_add_flag(s_ui.cloud_status, LV_OBJ_FLAG_HIDDEN);
     }
-    s_ui.cloud_status = lv_label_create(page);
-    lv_obj_set_width(s_ui.cloud_status, lv_pct(100));
-    lv_label_set_long_mode(s_ui.cloud_status, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(s_ui.cloud_status, fontpack_lv_font_ui(), 0);
     RefreshCloudOptions();
-    if (chat_cloud::IsCustom()) {
+
+    if (custom) {
         s_assistants = lv_obj_create(page);
         lv_obj_remove_style_all(s_assistants);
         lv_obj_set_width(s_assistants, lv_pct(100));
         lv_obj_set_height(s_assistants, LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(s_assistants, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_row(s_assistants, UiSy(12), 0);
+        lv_obj_set_style_pad_row(s_assistants, 20, 0);
         lv_obj_clear_flag(s_assistants, LV_OBJ_FLAG_SCROLLABLE);
         BuildAssistants(s_assistants);
         s_setup_poll = lv_timer_create([](lv_timer_t*) {
@@ -611,55 +726,21 @@ void SettingsConversationTab_Build(lv_obj_t* page) {
             if (key != last) { last = key; RefreshAssistantList(); }
             if (!setup.running) valet::CloseSetupSession();
         }, 1000, nullptr);
+        if (!adding) SettingsValetGap(page, 30);
     }
-    if (chat_cloud::UsesXiaozhiProtocol() || chat_cloud::IsCustom()) {
+    if (chat_cloud::UsesXiaozhiProtocol() || custom) {
         s_ui.known = true;
         s_ui.enabled = chat_cloud::LocalTtsEnabled();
     }
+    if (adding) { RefreshOptions(); return; }
 
-    lv_obj_t* split = lv_obj_create(page);
-    lv_obj_remove_style_all(split);
-    lv_obj_set_size(split, lv_pct(100), kSettingsSplitLineW);
-    lv_obj_set_style_bg_color(split, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(split, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(split, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t* title = lv_label_create(page);
-    lv_label_set_text(title, Lang::Strings::SETTINGS_CONV_TITLE);
-    lv_obj_set_style_text_font(title, fontpack_lv_font_ui(), 0);
-    lv_obj_set_style_text_color(title, lv_color_black(), 0);
-    lv_obj_clear_flag(title, LV_OBJ_FLAG_CLICKABLE);
-
-    if (!chat_cloud::UsesXiaozhiProtocol() && !chat_cloud::IsCustom()) {
-        lv_obj_t* hint = lv_label_create(page);
-        lv_label_set_text(hint, Lang::Strings::SETTINGS_CONV_HINT);
-        lv_obj_set_width(hint, lv_pct(100));
-        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(hint, fontpack_lv_font_ui(), 0);
-        lv_obj_set_style_text_color(hint, lv_color_black(), 0);
-        lv_obj_clear_flag(hint, LV_OBJ_FLAG_CLICKABLE);
-    }
-
-    s_ui.status_lbl = lv_label_create(page);
-    lv_label_set_text(s_ui.status_lbl, "");
+    // Whether replies are spoken. For the official service this is a server-side
+    // preference, fetched and saved with its own requests by the existing handlers.
+    SettingsValetLabel(page, CloudText("助手回答时", "When the assistant answers"));
+    const char* const speech[] = {CloudText("念出来", "Speak"), CloudText("只看字", "Text only")};
+    static const intptr_t kSpeech[] = {1, 0};
+    s_ui.speech_seg = SettingsValetSegments(page, speech, 2, OnValetSpeech, kSpeech);
+    s_ui.status_lbl = SettingsValetNote(page, "");
     lv_obj_add_flag(s_ui.status_lbl, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_width(s_ui.status_lbl, lv_pct(100));
-    lv_label_set_long_mode(s_ui.status_lbl, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(s_ui.status_lbl, fontpack_lv_font_ui(), 0);
-    lv_obj_set_style_text_color(s_ui.status_lbl, lv_color_black(), 0);
-    lv_obj_clear_flag(s_ui.status_lbl, LV_OBJ_FLAG_CLICKABLE);
-
-    for (int i = 0; i < kOptionCount; ++i) {
-        s_ui.btns[i] = SettingsCreateSelectableOption(
-            page, OptionTitle(kOptions[i].enabled), OnOptionClicked,
-            static_cast<intptr_t>(kOptions[i].enabled ? 1 : 0));
-    }
-
-    s_ui.current_lbl = lv_label_create(page);
-    lv_label_set_text(s_ui.current_lbl, Lang::Strings::SETTINGS_CONV_CUR_DASH);
-    lv_obj_set_style_text_font(s_ui.current_lbl, fontpack_lv_font_ui(), 0);
-    lv_obj_set_style_text_color(s_ui.current_lbl, lv_color_black(), 0);
-    lv_obj_clear_flag(s_ui.current_lbl, LV_OBJ_FLAG_CLICKABLE);
-
     RefreshOptions();
 }
