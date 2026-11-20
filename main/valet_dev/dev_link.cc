@@ -8,10 +8,12 @@
 #include "display_orient.h"
 #include "epd_refresh.h"
 #include "epdiy.h"
+#include "lv_adapter_display.h"
 #include "lv_adapter_epdiy.h"
 #include "metalio_keys.h"
 #include "metalio_touch.h"
 #include "screen_common.h"
+#include "standby_screen/standby_classic.h"
 #include "standby_screen/standby_screen.h"
 #include "vk_key_handler.h"
 
@@ -267,6 +269,25 @@ void ValetDevLinkHandle(const char* json) {
         error = cJSON_IsString(name) ? PressKey(name->valuestring, ms) : "MISSING_NAME";
     } else if (!strcmp(cmd, "home")) {
         ScreenRequestHome();
+    } else if (!strcmp(cmd, "preview")) {
+        // Draw a page that cannot be reached while the USB link is up (standby takes the
+        // port down) on a throwaway screen, so it can be captured. `home` leaves it.
+        const auto* name = cJSON_GetObjectItemCaseSensitive(root, "name");
+        if (!cJSON_IsString(name) || strcmp(name->valuestring, "standby")) error = "UNKNOWN_PREVIEW";
+        else if (!ScreenLvAsync([](void*) {
+            ScreenNavigateTo([]() -> lv_obj_t* {
+                auto* screen = lv_obj_create(nullptr);
+                // This screen has no status bar. The display must not keep the previous
+                // screen's status labels, which are deleted with it (the real standby
+                // path clears them the same way).
+                if (auto* display = LVAdapterDisplay::Instance())
+                    display->BindStatusWidgets(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+                StandbyClassic_Build(screen, true);
+                StandbyClassic_StartRuntime();
+                lv_obj_add_event_cb(screen, [](lv_event_t*) { StandbyClassic_Teardown(); }, LV_EVENT_DELETE, nullptr);
+                return screen;
+            });
+        })) error = "BUSY";
     } else error = "UNKNOWN_COMMAND";
     cJSON_Delete(root);
     if (replied) return;

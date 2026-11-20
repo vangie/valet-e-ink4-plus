@@ -1,3 +1,4 @@
+#include "fontpack_lvgl.h"
 #include "assets/lang_screen.h"
 #include "assets/lang_config.h"
 // assistant_ptt.cc — split from assistant_screen.cc
@@ -197,6 +198,9 @@ lv_obj_t* Assistant_CreateTouchPttHitLayer(lv_obj_t* scr) {
     lv_obj_add_event_cb(hit, OnTouchPttEvent, LV_EVENT_PRESS_LOST, nullptr);
     auto* label = lv_label_create(hit);
     lv_label_set_text(label, Lang::Strings::SETTINGS_TEST_AUDIO_HOLD);
+    // The bar's one line of text: bold, like the design's talk bar.
+    if (const auto* strong = fontpack_lv_font_get(30, 4)) lv_obj_set_style_text_font(label, strong, 0);
+    lv_obj_set_style_text_letter_space(label, 3, 0);
     lv_obj_center(label);
     Assistant_State().ptt.touch_ptt_label = label;
     return hit;

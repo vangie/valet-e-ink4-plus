@@ -20,6 +20,11 @@
 #include "book_screen/book_text_util.h"
 #include "book_screen/reader/book_toc_footer.h"
 #include "book_screen/book_nav.h"
+#include "assistant_screen/assistant_screen.h"
+#include "chat_cloud.h"
+#include "valet_protocol.h"
+#include "valet_reading_context.h"
+#include <string>
 #include "book_screen/reader/book_reader_body.h"
 #include "book_screen/reader/book_reader_overlay.h"
 
@@ -1769,13 +1774,51 @@ static void BuildSheetBookmarks(lv_obj_t* body) {
     }
 }
 
+// Valet: asking about the page starts from the reading card. One solid button for
+// Ask; next to it "talk about it" when a call is possible (an assistant of your own).
+constexpr int kValetAskRowH = 96;
+static void ValetAskFromCard(lv_event_t* e) {
+    const bool live = lv_event_get_user_data(e) != nullptr;
+    if (live) {
+        // Same checks as Ask; then the assistant page opens straight into the call.
+        if (Book_State().reader.opening || ReaderPageWorkPending()) { ScreenShowToast("请等待正文翻页完成"); return; }
+        if (!valet::SelectBookContext()) { ScreenShowToast("当前页没有可提问的正文，请等待页面加载"); return; }
+        ValetProtocol::SetLive(true);
+        ScreenNavigateTo(AssistantScreen::Create);
+        return;
+    }
+    RequestOpenAssistantFromReader();
+}
+static void BuildValetAskRow(lv_obj_t* body, int width) {
+    const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+    const bool custom = chat_cloud::IsCustom(), call = chat_cloud::HasCallEntry();
+    auto* row = SheetBox(body, width, kValetAskRowH);
+    const int gap = 14, ask_w = call ? (width - gap) * 3 / 5 : width;
+    const std::string ask_text = custom ? (zh ? "问这一页" : "Ask this page")
+        : std::string(zh ? "问" : "Ask ") + AssistantScreen::DisplayName();
+    for (int i = 0; i < (call ? 2 : 1); ++i) {
+        auto* button = SheetBox(row, i ? width - ask_w - gap : ask_w, 76);
+        lv_obj_set_pos(button, i ? ask_w + gap : 0, 10);
+        lv_obj_set_style_border_width(button, 3, 0);
+        lv_obj_set_style_border_color(button, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(button, i ? lv_color_white() : lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+        lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(button);
+        lv_obj_add_event_cb(button, ValetAskFromCard, LV_EVENT_CLICKED, i ? reinterpret_cast<void*>(1) : nullptr);
+        auto* label = SheetLabel(button, i ? (zh ? "聊这一页" : "Talk about it") : ask_text.c_str(), SheetUiFont(30, i == 0));
+        lv_obj_set_style_text_color(label, i ? lv_color_black() : lv_color_white(), 0);
+        lv_obj_center(label);
+    }
+}
 static void BuildSheetDuration(lv_obj_t* body) {
     auto& session = *Book_State().reader.session;
     lv_obj_update_layout(body);
     const int width = lv_obj_get_content_width(body);
+    BuildValetAskRow(body, width);
     auto* bookmark = SheetButton(body, "", UiSx(34), UiSy(34), BookmarkActionEvent, kBookmarkAdd, session.CurrentPageBookmarkId() != 0);
     lv_obj_add_flag(bookmark, LV_OBJ_FLAG_FLOATING);
-    lv_obj_align(bookmark, LV_ALIGN_TOP_RIGHT, -UiSx(4), 6);
+    lv_obj_align(bookmark, LV_ALIGN_TOP_RIGHT, -UiSx(4), 6 + kValetAskRowH);
     lv_obj_set_style_radius(bookmark, LV_RADIUS_CIRCLE, 0);
     s_bookmark_button = bookmark;
     s_bookmark_icon = lv_image_create(bookmark);
@@ -1968,7 +2011,7 @@ void ResizeReadingBottomSheet() {
     const bool full = st.settings.reader_tab == 0 || st.settings.reader_tab == 2;
     const int header_h = std::min<int>(UiSy(56), LV_VER_RES / 8);
     const int nav_h = ReadingSheetNavReserve();
-    int desired = compact ? UiSy(220) :
+    int desired = compact ? UiSy(220) + kValetAskRowH :
         full ? LV_VER_RES :
         st.settings.reader_tab == 3 ? header_h + SettingsBodyHeight(st.settings.reader_settings_page) + nav_h : UiSy(430);
     if (st.settings.reader_tab == 1) desired = UiSy(440);

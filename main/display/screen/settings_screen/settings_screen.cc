@@ -33,6 +33,8 @@
 #include "valet_setup/server.h"
 
 #include <esp_log.h>
+#include "book_screen/reader/book_reader_orient.h"
+#include "book_screen/reader/book_reader_prefs.h"
 #include <cstdio>
 #include <cstring>
 #include <esp_app_desc.h>
@@ -548,16 +550,49 @@ static void ShowGroup(int group) {
             s_ui.direct = true;
             break;
         case 3: {
-            auto* note = lv_label_create(s_ui.content_page);
-            lv_label_set_text(note, Text("字号、字体、边距与行距在阅读中的排版菜单设置。扩展字库放入 SD 卡 metalio/e-ink/fonts/。", "Adjust font, size and spacing in the reader. Extended fonts belong in metalio/e-ink/fonts/ on the SD card."));
-            lv_obj_set_width(note, lv_pct(100));
-            lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-            AddRow(Text("打开阅读", "Open reading"), nullptr, OpenReading, 0);
+            // Reading settings that make sense outside a book. Font, margins and spacing are set
+            // on the page being read, where the change can be seen.
+            BookReaderPrefsEnsureLoaded();
+            SettingsValetLabel(s_ui.content_page, Text("翻页方式", "Page turn"));
+            const char* const turns[] = {Text("左右滑动", "Slide"), Text("水波纹", "Ripple"), Text("推白翻页", "Wipe")};
+            auto* turn = SettingsValetSegments(s_ui.content_page, turns, 3, [](lv_event_t* e) {
+                const int mode = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+                if (BookReaderPrefsPageTurn() != mode) BookReaderPrefsSetPageTurn(mode);
+                SettingsValetSelect(lv_obj_get_parent(static_cast<lv_obj_t*>(lv_event_get_target(e))), mode);
+            });
+            SettingsValetSelect(turn, BookReaderPrefsPageTurn());
+            SettingsValetGap(s_ui.content_page);
+            SettingsValetLabel(s_ui.content_page, Text("晃动翻页", "Shake to turn"));
+            const char* const onoff[] = {Text("关", "Off"), Text("开", "On")};
+            auto* shake = SettingsValetSegments(s_ui.content_page, onoff, 2, [](lv_event_t* e) {
+                const int on = lv_event_get_user_data(e) ? 1 : 0;
+                if ((BookReaderPrefsShakeTurn() != 0) != (on != 0)) { BookReaderPrefsSetShakeTurn(on); SyncReaderAutoOrient(); }
+                SettingsValetSelect(lv_obj_get_parent(static_cast<lv_obj_t*>(lv_event_get_target(e))), on);
+            });
+            SettingsValetSelect(shake, BookReaderPrefsShakeTurn() ? 1 : 0);
+            SettingsValetGap(s_ui.content_page);
+            SettingsValetLabel(s_ui.content_page, Text("晃动灵敏度", "Shake sensitivity"));
+            static const char* const kLevels[] = {"1", "2", "3", "4", "5"};
+            static const intptr_t kLevelValues[] = {1, 2, 3, 4, 5};
+            auto* level = SettingsValetSegments(s_ui.content_page, kLevels, 5, [](lv_event_t* e) {
+                const int value = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+                if (BookReaderPrefsShakeLevel() != value) BookReaderPrefsSetShakeLevel(value);
+                SettingsValetSelect(lv_obj_get_parent(static_cast<lv_obj_t*>(lv_event_get_target(e))), value - 1);
+            }, kLevelValues);
+            SettingsValetSelect(level, std::clamp(BookReaderPrefsShakeLevel(), 1, 5) - 1);
+            SettingsValetNote(s_ui.content_page, Text("数字越大越灵敏。", "Higher is more sensitive."));
+            SettingsValetGap(s_ui.content_page);
+            SettingsValetLabel(s_ui.content_page, Text("字体与排版", "Font and layout"));
+            SettingsValetNote(s_ui.content_page, Text(
+                "字号、字体、边距、行距在正文里点屏幕中间改，改了当场能看到。正文里出现方框是机内字库缺这个字：把 extended-fonts.fontpack 放进 SD 卡的 metalio/e-ink/fonts/，再重新打开书。",
+                "Font, size, margins and spacing are changed from the reading card, where you can see the result. Boxes in the text are missing glyphs: copy extended-fonts.fontpack to metalio/e-ink/fonts/ on the SD card and reopen the book."));
+            SettingsValetGap(s_ui.content_page, 20);
+            AddRow(Text("打开阅读", "Open reading"), Text("回到书架或上次读的书", "Shelf or the last book"), OpenReading, 0);
+            AddTab(SettingsTab::kPager, Text("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"));
             break;
         }
         case 4: {
-            // Volume and key haptics on the page itself; Bluetooth
-            // and the page turner have screens of their own behind two rows.
+            // Volume and key haptics on the page itself; Bluetooth has a screen of its own behind a row.
             SettingsValetLabel(s_ui.content_page, Text("音量", "Volume"));
             if (auto* codec = Board::GetInstance().GetAudioCodec()) {
                 auto* box = lv_obj_create(s_ui.content_page);
@@ -573,7 +608,6 @@ static void ShowGroup(int group) {
             SettingsHapticTab_BuildValet(s_ui.content_page);
             SettingsValetGap(s_ui.content_page);
             AddTab(SettingsTab::kBluetooth, Text("耳机、音箱、键盘与语音", "Headset, speaker, keys and voice"));
-            AddTab(SettingsTab::kPager, Text("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"));
             break;
         }
         case 5: {
@@ -645,7 +679,9 @@ static bool NavigateUp() {
     return false;
 }
 static void BackClicked(lv_event_t*) {
-    if (!NavigateUp()) ScreenRequestBack();
+    // From the overview, go back to where settings was opened from (the app page, or the
+    // home page's assistant row). ScreenRequestBack() would always go to the first home page.
+    if (!NavigateUp() && !ScreenLvAsync([](void*) { ScreenNavigateBack(); })) ScreenRequestBack();
 }
 
 static void OnScreenDeleted(lv_event_t* e) {
@@ -773,7 +809,7 @@ static lv_obj_t* CreateInternal() {
     if (s_open_overview) ShowOverview();
     else {
         s_ui.group = open_tab == SettingsTab::kConversation ? 0 : open_tab == SettingsTab::kNetwork ? 1 :
-            (open_tab == SettingsTab::kBluetooth || open_tab == SettingsTab::kPager) ? 4 : 5;
+            open_tab == SettingsTab::kPager ? 3 : open_tab == SettingsTab::kBluetooth ? 4 : 5;
         ShowTab(TabIndexOf(open_tab));
         const bool whole_group = open_tab == SettingsTab::kConversation || open_tab == SettingsTab::kNetwork;
         s_ui.direct = whole_group;

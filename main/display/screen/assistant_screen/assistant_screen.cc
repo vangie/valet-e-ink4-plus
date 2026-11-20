@@ -15,6 +15,7 @@
 #include "application.h"
 #include "firmware_memory.h"
 #include "assistant_boot_photo.h"
+#include "assets/lang_config.h"
 #include "assets/lang_screen.h"
 #include "fontpack_lvgl.h"
 #include "chat_cloud.h"
@@ -33,6 +34,9 @@
 #include "vk_page_repeat.h"
 
 #include <cstring>
+#include <string>
+#include "assistant_profiles.h"
+#include "custom_chat_config.h"
 #include <optional>
 #include <new>
 
@@ -143,6 +147,8 @@ void Assistant_OnAssistantLifecycle(lv_event_t* e) {
         Assistant_State().chrome.scr = nullptr;
         Assistant_State().chrome.content = nullptr;
         Assistant_State().chrome.page_label = nullptr;
+        Assistant_State().chrome.valet_pager = nullptr;
+        Assistant_State().chrome.valet_new = nullptr;
         Assistant_State().chrome.photo_action = nullptr;
         Assistant_State().chrome.photo_action_label = nullptr;
         Assistant_State().chrome.idle_hint = nullptr;
@@ -362,6 +368,135 @@ void ChangeReadingContext(lv_event_t*) {
 }
 }
 
+// ── Valet chrome: header band, context strip, talk bar, pager. Sizes are panel
+// pixels measured from sim/ (新设计 → 提问 / 通话).
+namespace {
+constexpr int kValetSide = 33, kValetHeadH = 94, kValetStripH = 132, kValetBarH = 100, kValetPagerH = 76;
+const lv_font_t* ValetSmall() { const auto* f = fontpack_lv_font_get(25, 2); return f ? f : fontpack_lv_font_ui(); }
+const lv_font_t* ValetStrong() { const auto* f = fontpack_lv_font_get(30, 4); return f ? f : fontpack_lv_font_ui(); }
+const char* ValetText(const char* zh, const char* en) { return std::strcmp(Lang::CODE, "zh-CN") == 0 ? zh : en; }
+lv_obj_t* ValetBox(lv_obj_t* parent, int x, int y, int w, int h) {
+    auto* box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_pos(box, x, y);
+    lv_obj_set_size(box, w, h);
+    lv_obj_clear_flag(box, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
+    return box;
+}
+void ValetLine(lv_layer_t* layer, int x1, int y1, int x2, int y2, int width, bool white = false) {
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = white ? lv_color_white() : lv_color_black();
+    line.width = width;
+    line.opa = LV_OPA_COVER;
+    line.round_start = line.round_end = 1;
+    line.p1 = {static_cast<lv_value_precise_t>(x1), static_cast<lv_value_precise_t>(y1)};
+    line.p2 = {static_cast<lv_value_precise_t>(x2), static_cast<lv_value_precise_t>(y2)};
+    lv_draw_line(layer, &line);
+}
+// Icons on the design's 24-unit grid; the UI font pack has no symbol glyphs.
+enum ValetIcon : intptr_t { kIconBack, kIconPrev, kIconNext, kIconCamera, kIconWave, kIconMic, kIconMicOff, kIconEnd, kIconWhite = 0x100 };
+void DrawValetIcon(lv_event_t* e) {
+    auto* layer = lv_event_get_layer(e);
+    lv_area_t a;
+    lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+    const intptr_t data = reinterpret_cast<intptr_t>(lv_event_get_user_data(e));
+    const bool white = (data & kIconWhite) != 0;
+    const int size = a.x2 - a.x1 + 1, w = size >= 44 ? 4 : 3;
+    auto L = [&](int x1, int y1, int x2, int y2) {
+        ValetLine(layer, a.x1 + x1 * size / 240, a.y1 + y1 * size / 240, a.x1 + x2 * size / 240, a.y1 + y2 * size / 240, w, white);
+    };
+    auto Arc = [&](int cx, int cy, int r, int from, int to) {
+        lv_draw_arc_dsc_t arc;
+        lv_draw_arc_dsc_init(&arc);
+        arc.color = white ? lv_color_white() : lv_color_black();
+        arc.width = w;
+        arc.opa = LV_OPA_COVER;
+        arc.rounded = 1;
+        arc.center = {static_cast<lv_value_precise_t>(a.x1 + cx * size / 240), static_cast<lv_value_precise_t>(a.y1 + cy * size / 240)};
+        arc.radius = r * size / 240 + w / 2;
+        arc.start_angle = from;
+        arc.end_angle = to;
+        lv_draw_arc(layer, &arc);
+    };
+    switch (data & 0xFF) {
+        case kIconBack: case kIconPrev: L(145, 50, 75, 120); L(75, 120, 145, 190); break;
+        case kIconNext: L(95, 50, 165, 120); L(165, 120, 95, 190); break;
+        case kIconCamera:
+            L(35, 80, 67, 80); L(67, 80, 83, 55); L(83, 55, 157, 55); L(157, 55, 173, 80); L(173, 80, 205, 80);
+            L(205, 80, 205, 190); L(205, 190, 35, 190); L(35, 190, 35, 80);
+            Arc(120, 132, 32, 0, 360);
+            break;
+        case kIconWave: L(35, 100, 35, 140); L(78, 65, 78, 175); L(120, 30, 120, 210); L(163, 65, 163, 175); L(205, 100, 205, 140); break;
+        case kIconMic: case kIconMicOff:
+            L(90, 55, 90, 110); L(150, 55, 150, 110); Arc(120, 55, 30, 180, 360); Arc(120, 110, 30, 0, 180);
+            Arc(120, 115, 70, 0, 180); L(120, 185, 120, 215);
+            if ((data & 0xFF) == kIconMicOff) L(40, 30, 200, 210);
+            break;
+        case kIconEnd: L(60, 60, 180, 180); L(180, 60, 60, 180); break;
+    }
+}
+lv_obj_t* ValetIconBox(lv_obj_t* parent, intptr_t icon, int size) {
+    auto* box = ValetBox(parent, 0, 0, size, size);
+    lv_obj_add_event_cb(box, DrawValetIcon, LV_EVENT_DRAW_MAIN, reinterpret_cast<void*>(icon));
+    return box;
+}
+// Back to where the page was opened from (the book, when asked from a book). Runs after the
+// tap event returns, since navigation rebuilds the screen. ScreenRequestBack() is not this:
+// despite its name it goes to the home screen.
+void ValetBack(lv_event_t*) {
+    VkPageRepeatStop();
+    if (!ScreenLvAsync([](void*) { ScreenNavigateBack(); })) ScreenShowToast(ValetText("操作繁忙，请重试", "Busy. Try again."));
+}
+// Start over: drop what is on screen and go back to the welcome page. The saved history is left alone.
+void ValetNewChat(lv_event_t*) {
+    if (!ScreenLvAsync([](void*) {
+        if (!AssistantScreen::IsActive()) return;
+        Application::GetInstance().AbortSpeaking(kAbortReasonNone);
+        Assistant_ClearSession();
+        Assistant_State().layout.has_a2ui_content = false;
+        Assistant_ShowIdleHint();
+        Assistant_UpdatePageIndicator();
+    })) ScreenShowToast(ValetText("操作繁忙，请重试", "Busy. Try again."));
+}
+void ValetTurn(lv_event_t* e) { Assistant_TurnPage(lv_event_get_user_data(e) ? 1 : -1); }
+// "这一页 / 随口问": the two halves of one slanted strip, like the home page's blocks.
+void DrawSubject(lv_event_t* e) {
+    const bool book = lv_event_get_user_data(e) != nullptr;
+    auto* layer = lv_event_get_layer(e);
+    lv_area_t a;
+    lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+    const int mid = (a.x1 + a.x2) / 2, slant = 18;
+    lv_draw_rect_dsc_t frame;
+    lv_draw_rect_dsc_init(&frame);
+    frame.bg_opa = LV_OPA_TRANSP;
+    frame.border_color = lv_color_black();
+    frame.border_width = 3;
+    lv_draw_rect(layer, &frame, &a);
+    lv_draw_triangle_dsc_t fill;
+    lv_draw_triangle_dsc_init(&fill);
+    fill.color = lv_color_black();
+    fill.opa = LV_OPA_COVER;
+    auto P = [](int x, int y) { return lv_point_precise_t{static_cast<lv_value_precise_t>(x), static_cast<lv_value_precise_t>(y)}; };
+    lv_point_precise_t q[4] = {P(mid + slant, a.y1), P(a.x2, a.y1), P(a.x2, a.y2), P(mid - slant, a.y2)};
+    if (book) { q[0] = P(a.x1, a.y1); q[1] = P(mid + slant, a.y1); q[2] = P(mid - slant, a.y2); q[3] = P(a.x1, a.y2); }
+    fill.p[0] = q[0]; fill.p[1] = q[1]; fill.p[2] = q[2];
+    lv_draw_triangle(layer, &fill);
+    fill.p[1] = q[2]; fill.p[2] = q[3];
+    lv_draw_triangle(layer, &fill);
+}
+}
+
+lv_coord_t Assistant_ValetBodyTop() { return Assistant_State().chrome.valet_body_top; }
+void Assistant_ValetSyncChrome() {
+    auto& chrome = Assistant_State().chrome;
+    if (!chrome.valet_new || !lv_obj_is_valid(chrome.valet_new)) return;
+    const bool has = Assistant_State().layout.has_a2ui_content;
+    if (has == !lv_obj_has_flag(chrome.valet_new, LV_OBJ_FLAG_HIDDEN)) return;
+    if (has) lv_obj_remove_flag(chrome.valet_new, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(chrome.valet_new, LV_OBJ_FLAG_HIDDEN);
+}
+
 lv_obj_t* AssistantScreen::Create() {
     RestoreContextHistory();
     ESP_LOGI(TAG, "launch AssistantScreen");
@@ -379,24 +514,98 @@ lv_obj_t* AssistantScreen::Create() {
     EpdStatusBar status = ScreenCreateStatusBar(scr);
     lv_coord_t header_h = status.height;
     lv_obj_t* context_header = nullptr;
-    if (chat_cloud::IsCustom()) {
-        const auto reading = valet::SelectedReadingContext();
-        auto* header = lv_button_create(scr);
-        context_header = header;
-        lv_obj_remove_style_all(header);
-        lv_obj_set_size(header, LV_HOR_RES, UiSy(52));
-        lv_obj_set_pos(header, 0, header_h);
-        lv_obj_set_style_border_width(header, 1, 0);
-        lv_obj_set_style_border_side(header, LV_BORDER_SIDE_BOTTOM, 0);
-        auto* label = lv_label_create(header);
-        lv_obj_set_width(label, LV_HOR_RES - UiSx(32));
-        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-        if (reading.Valid()) lv_label_set_text_fmt(label, "%s · %s · 第 %d 页%s · 点击切换", reading.title.c_str(), reading.chapter.c_str(), reading.page, reading.truncated ? "（节选）" : "");
-        else lv_label_set_text(label, "随口问 · 不带书本上下文（点击切换）");
-        lv_obj_center(label); lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(header, ChangeReadingContext, LV_EVENT_CLICKED, nullptr);
-        header_h += UiSy(52);
+    const bool custom = chat_cloud::IsCustom();
+    const bool live_now = custom && ValetProtocol::Live();
+    {
+        // Back, what this page is, who answers; "新对话" on the right while there is a conversation.
+        auto* head = ValetBox(scr, 0, header_h, LV_HOR_RES, kValetHeadH);
+        lv_obj_set_style_border_width(head, 3, 0);
+        lv_obj_set_style_border_side(head, LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_border_color(head, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(head, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(head, LV_OPA_COVER, 0);
+        auto* back = ValetBox(head, 0, 0, 96, 90);
+        lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(back);
+        lv_obj_add_event_cb(back, ValetBack, LV_EVENT_CLICKED, nullptr);
+        lv_obj_align(ValetIconBox(back, kIconBack, 44), LV_ALIGN_LEFT_MID, 28, 0);
+        auto* title = lv_label_create(head);
+        lv_label_set_text(title, live_now ? ValetText("通话", "Call") : ValetText("提问", "Ask"));
+        lv_obj_set_style_text_font(title, ValetStrong(), 0);
+        lv_obj_align(title, LV_ALIGN_LEFT_MID, 96, 0);
+        lv_obj_update_layout(title);
+        std::string who = AssistantScreen::DisplayName();
+        if (custom) {
+            const auto profiles = valet::LoadAssistantProfiles();
+            if (const auto* active = profiles.Active())
+                who = active->name + " · " + (active->connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw");
+        }
+        auto* sub = lv_label_create(head);
+        lv_label_set_text(sub, who.c_str());
+        lv_obj_set_style_text_font(sub, ValetSmall(), 0);
+        lv_obj_set_width(sub, LV_HOR_RES - 96 - lv_obj_get_width(title) - 18 - 150);
+        lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+        lv_obj_align(sub, LV_ALIGN_LEFT_MID, 96 + lv_obj_get_width(title) + 18, 3);
+        auto* fresh = ValetBox(head, 0, 0, 140, 90);
+        lv_obj_align(fresh, LV_ALIGN_RIGHT_MID, -kValetSide + 8, 0);
+        lv_obj_add_flag(fresh, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(fresh);
+        lv_obj_add_event_cb(fresh, ValetNewChat, LV_EVENT_CLICKED, nullptr);
+        auto* fresh_label = lv_label_create(fresh);
+        lv_label_set_text(fresh_label, ValetText("新对话", "New"));
+        lv_obj_set_style_text_font(fresh_label, ValetSmall(), 0);
+        lv_obj_set_style_text_decor(fresh_label, LV_TEXT_DECOR_UNDERLINE, 0);
+        lv_obj_align(fresh_label, LV_ALIGN_RIGHT_MID, -8, 0);
+        lv_obj_add_flag(fresh, LV_OBJ_FLAG_HIDDEN);
+        Assistant_State().chrome.valet_new = live_now ? nullptr : fresh;
+        context_header = head;
+        header_h += kValetHeadH;
     }
+    if (custom) {
+        // What the talk is about: this page of the book, or nothing in particular.
+        const auto reading = valet::SelectedReadingContext();
+        const bool book = reading.Valid();
+        auto* strip = ValetBox(scr, 0, header_h, LV_HOR_RES, book ? kValetStripH + 70 : kValetStripH - 44);
+        lv_obj_set_style_bg_color(strip, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(strip, LV_OPA_COVER, 0);
+        auto* subject = ValetBox(strip, kValetSide, 16, LV_HOR_RES - 2 * kValetSide, 70);
+        lv_obj_add_flag(subject, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(subject);
+        lv_obj_add_event_cb(subject, DrawSubject, LV_EVENT_DRAW_MAIN, book ? reinterpret_cast<void*>(1) : nullptr);
+        lv_obj_add_event_cb(subject, ChangeReadingContext, LV_EVENT_CLICKED, nullptr);
+        for (int i = 0; i < 2; ++i) {
+            auto* name = lv_label_create(subject);
+            lv_label_set_text(name, i == 0 ? ValetText("这一页", "This page") : ValetText("随口问", "Anything"));
+            const bool on = (i == 0) == book;
+            lv_obj_set_style_text_font(name, on ? ValetStrong() : fontpack_lv_font_ui(), 0);
+            lv_obj_set_style_text_color(name, on ? lv_color_white() : lv_color_black(), 0);
+            lv_obj_align(name, LV_ALIGN_CENTER, (i == 0 ? -1 : 1) * (LV_HOR_RES - 2 * kValetSide) / 4, 0);
+            lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
+        }
+        if (book) {
+            // Which page went along, with a bar down its left side like a quotation.
+            auto* quote = ValetBox(strip, kValetSide, 102, LV_HOR_RES - 2 * kValetSide, 88);
+            lv_obj_set_style_border_width(quote, 6, 0);
+            lv_obj_set_style_border_side(quote, LV_BORDER_SIDE_LEFT, 0);
+            lv_obj_set_style_border_color(quote, lv_color_black(), 0);
+            auto* where = lv_label_create(quote);
+            lv_label_set_text_fmt(where, ValetText("%s · %s · 第 %d 页%s", "%s · %s · p.%d%s"), reading.title.c_str(),
+                                  reading.chapter.c_str(), reading.page, reading.truncated ? ValetText("（节选）", " (excerpt)") : "");
+            lv_obj_set_style_text_font(where, ValetSmall(), 0);
+            lv_obj_set_width(where, LV_HOR_RES - 2 * kValetSide - 30);
+            lv_label_set_long_mode(where, LV_LABEL_LONG_DOT);
+            lv_obj_set_pos(where, 20, 4);
+            auto* text = lv_label_create(quote);
+            lv_label_set_text(text, reading.text.c_str());
+            lv_obj_set_style_text_font(text, fontpack_lv_font_ui(), 0);
+            lv_obj_set_width(text, LV_HOR_RES - 2 * kValetSide - 30);
+            lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
+            lv_obj_set_height(text, 36);
+            lv_obj_set_pos(text, 20, 44);
+        }
+        header_h += book ? kValetStripH + 70 : kValetStripH - 44;
+    }
+    Assistant_State().chrome.valet_body_top = header_h;
     const lv_coord_t body_h = LV_VER_RES - header_h - kFooterH - kPageIndicatorH;
     Assistant_State().layout.viewport_w = LV_HOR_RES - kContentPadX * 2;
     Assistant_State().layout.viewport_h = body_h - kContentPadY * 2;
@@ -439,12 +648,12 @@ lv_obj_t* AssistantScreen::Create() {
     lv_obj_move_foreground(status.overlay);
 
     // 录音波形叠在状态栏条带居中：高度约半栏偏矮、竖条更密；不改状态栏尺寸；按住说话时盖住时钟
-    Assistant_State().ptt.ptt_wave_max_h = header_h / 2;
+    Assistant_State().ptt.ptt_wave_max_h = status.height / 2;
     if (Assistant_State().ptt.ptt_wave_max_h < kPttWaveMinBarH) {
         Assistant_State().ptt.ptt_wave_max_h = kPttWaveMinBarH;
     }
     lv_obj_t* ptt_wave = Assistant_CreatePttWaveHost(scr, Assistant_State().ptt.ptt_wave_max_h);
-    lv_obj_align(ptt_wave, LV_ALIGN_TOP_MID, 0, (header_h - Assistant_State().ptt.ptt_wave_max_h) / 2);
+    lv_obj_align(ptt_wave, LV_ALIGN_TOP_MID, 0, (status.height - Assistant_State().ptt.ptt_wave_max_h) / 2);
     lv_obj_add_flag(ptt_wave, LV_OBJ_FLAG_HIDDEN);
 
     // 正文透明层只翻页，覆盖欢迎页但不覆盖顶栏或底栏。
@@ -457,46 +666,80 @@ lv_obj_t* AssistantScreen::Create() {
     HapticAttachClick(page_hit);
     lv_obj_add_event_cb(page_hit, OnTouchPageClicked, LV_EVENT_CLICKED, nullptr);
 
+    const int bar_w = LV_HOR_RES - 2 * kValetSide;
     auto* bar = lv_obj_create(scr);
     lv_obj_remove_style_all(bar);
-    lv_obj_set_size(bar, LV_HOR_RES - kFooterInset * 2, kFooterH - UiSy(8));
-    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -UiSy(4));
+    lv_obj_set_size(bar, bar_w, kValetBarH);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -24);
     lv_obj_set_style_pad_all(bar, 0, 0);
     lv_obj_set_style_radius(bar, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_clip_corner(bar, true, 0);
     lv_obj_set_style_bg_color(bar, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(bar, 2, 0);
+    lv_obj_set_style_border_width(bar, 3, 0);
+    lv_obj_set_style_border_color(bar, lv_color_black(), 0);
     Assistant_DisableScroll(bar);
     const bool custom_live = chat_cloud::IsCustom() && ValetProtocol::Live();
     if (custom_live) {
-        for (int i = 0; i < 2; ++i) {
-            auto* button = lv_button_create(bar);
-            lv_obj_set_size(button, (LV_HOR_RES - kFooterInset * 2) / 2, kFooterH - UiSy(8));
-            lv_obj_align(button, i == 0 ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0, 0);
+        // In a call the pill gives way to three boxes: mute, interrupt, end.
+        lv_obj_set_style_radius(bar, 0, 0);
+        lv_obj_set_style_border_width(bar, 0, 0);
+        lv_obj_set_height(bar, 112);
+        const int gap = 16, each = (bar_w - 2 * gap) / 3;
+        static lv_obj_t* s_mute_label = nullptr;
+        for (int i = 0; i < 3; ++i) {
+            const bool end = i == 2;
+            auto* button = ValetBox(bar, i * (each + gap), 0, each, 112);
+            lv_obj_set_style_border_width(button, 3, 0);
+            lv_obj_set_style_border_color(button, lv_color_black(), 0);
+            lv_obj_set_style_bg_color(button, end ? lv_color_black() : lv_color_white(), 0);
+            lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+            lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+            HapticAttachClick(button);
+            const intptr_t icon = (i == 0 ? (ValetProtocol::Muted() ? kIconMicOff : kIconMic) : i == 1 ? kIconEnd : kIconEnd) | (end ? kIconWhite : 0);
+            if (i != 1) lv_obj_align(ValetIconBox(button, icon, 40), LV_ALIGN_TOP_MID, 0, 16);
             auto* label = lv_label_create(button);
-            lv_label_set_text(label, i == 0 ? "静音 / 恢复" : "返回提问"); lv_obj_center(label);
-            lv_obj_set_style_bg_color(button, i == 0 ? lv_color_white() : lv_color_black(), 0);
-            lv_obj_set_style_text_color(button, i == 0 ? lv_color_black() : lv_color_white(), 0);
+            lv_label_set_text(label, i == 0 ? (ValetProtocol::Muted() ? ValetText("取消静音", "Unmute") : ValetText("静音", "Mute"))
+                                   : i == 1 ? ValetText("打断", "Interrupt") : ValetText("挂断", "End"));
+            lv_obj_set_style_text_font(label, ValetSmall(), 0);
+            lv_obj_set_style_text_color(label, end ? lv_color_white() : lv_color_black(), 0);
+            if (i == 1) lv_obj_center(label); else lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -14);
+            lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+            if (i == 0) s_mute_label = label;
             lv_obj_add_event_cb(button, [](lv_event_t* e) {
-                if (lv_event_get_user_data(e)) { ChangeTalkMode(nullptr); }
-                else { ValetProtocol::SetMuted(!ValetProtocol::Muted()); ScreenShowToast(ValetProtocol::Muted() ? "麦克风已静音" : "麦克风已恢复"); }
+                const intptr_t which = reinterpret_cast<intptr_t>(lv_event_get_user_data(e));
+                if (which == 2) { ChangeTalkMode(nullptr); return; }
+                if (which == 1) {
+                    // Stop what the assistant is saying; the call stays up.
+                    Application::GetInstance().AbortSpeaking(kAbortReasonNone);
+                    return;
+                }
+                ValetProtocol::SetMuted(!ValetProtocol::Muted());
+                if (s_mute_label && lv_obj_is_valid(s_mute_label))
+                    lv_label_set_text(s_mute_label, ValetProtocol::Muted() ? ValetText("取消静音", "Unmute") : ValetText("静音", "Mute"));
+                ScreenShowToast(ValetProtocol::Muted() ? ValetText("麦克风已静音", "Microphone muted") : ValetText("麦克风已恢复", "Microphone on"));
             }, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
         }
     }
     const bool baiwen = chat_cloud::ActiveProvider() == chat_cloud::Provider::Baiwen;
     const bool camera_available = baiwen && Board::GetInstance().GetCamera() != nullptr;
     // 百问固定预留拍照入口，检测完成只显示图标，不移动录音区域。
-    const lv_coord_t camera_w = baiwen ? kFooterActionW : 0;
+    // Camera on the left when there is one, the call wedge on the right when calls are possible;
+    // everything between is the hold-to-talk area.
+    const lv_coord_t camera_w = baiwen ? 106 : 0;
+    const bool call_entry = chat_cloud::HasCallEntry() && !custom_live;
+    const lv_coord_t action_w = call_entry ? 190 : 0;
     lv_obj_t* touch_ptt_hit = Assistant_CreateTouchPttHitLayer(bar);
-    lv_obj_set_pos(touch_ptt_hit, camera_w + UiSx(4), 0);
-    lv_obj_set_size(touch_ptt_hit, LV_HOR_RES - kFooterInset * 2 - camera_w - kFooterActionW - UiSx(8), kFooterH - UiSy(8));
-    lv_obj_set_style_text_font(touch_ptt_hit, fontpack_lv_font_ui(), 0);
+    lv_obj_set_pos(touch_ptt_hit, camera_w, 0);
+    lv_obj_set_size(touch_ptt_hit, bar_w - 6 - camera_w - action_w, kValetBarH - 6);
+    lv_obj_set_style_text_font(touch_ptt_hit, ValetStrong(), 0);
+    lv_obj_set_style_text_letter_space(touch_ptt_hit, 3, 0);
     if (baiwen) {
         auto* camera = lv_button_create(bar);
         lv_obj_remove_style_all(camera);
         lv_obj_add_flag(camera, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_size(camera, kFooterActionW, kFooterH - UiSy(8));
-        lv_obj_set_pos(camera, UiSx(4), 0);
+        lv_obj_set_size(camera, camera_w, kValetBarH - 6);
+        lv_obj_set_pos(camera, 0, 0);
         if (!camera_available) lv_obj_add_flag(camera, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_opa(camera, LV_OPA_TRANSP, 0);
         lv_obj_set_style_shadow_width(camera, 0, 0);
@@ -532,57 +775,64 @@ lv_obj_t* AssistantScreen::Create() {
         HapticAttachClick(camera);
         lv_obj_add_event_cb(camera, [](lv_event_t*) { AssistantBootPhoto_OnDoubleClick(); }, LV_EVENT_CLICKED, nullptr);
     }
+    // Right end of the pill: "send" while a photo is pending, otherwise the way into a call.
     auto* action = lv_obj_create(bar);
     lv_obj_remove_style_all(action);
-    lv_obj_set_size(action, kFooterActionW, kFooterH - UiSy(16));
-    lv_obj_align(action, LV_ALIGN_RIGHT_MID, -UiSx(4), 0);
-    lv_obj_set_style_radius(action, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_size(action, call_entry ? action_w : 150, kValetBarH - 6);
+    lv_obj_align(action, LV_ALIGN_RIGHT_MID, 0, 0);
     Assistant_DisableScroll(action);
-    lv_obj_clear_flag(action, LV_OBJ_FLAG_CLICKABLE);
-    HapticAttachClick(action);
-    lv_obj_add_event_cb(action, [](lv_event_t* event) {
-        if (AssistantPhoto_HasPending()) return;
-        lv_area_t area;
-        lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(event)), &area);
-        const int cx = (area.x1 + area.x2) / 2;
-        const int cy = (area.y1 + area.y2) / 2;
-        lv_draw_rect_dsc_t ink;
-        lv_draw_rect_dsc_init(&ink);
-        ink.bg_color = lv_color_black();
-        ink.bg_opa = LV_OPA_COVER;
-        ink.radius = LV_RADIUS_CIRCLE;
-        const int toes[][4] = {{-17,-9,7,9},{-7,-16,8,10},{5,-16,8,10},{15,-8,7,9}};
-        for (const auto& toe : toes) {
-            const int x = cx + UiSx(toe[0]);
-            const int y = cy + UiSy(toe[1]);
-            lv_area_t dot = {x - UiSx(toe[2]) / 2, y - UiSy(toe[3]) / 2,
-                             x + UiSx(toe[2]) / 2, y + UiSy(toe[3]) / 2};
-            lv_draw_rect(lv_event_get_layer(event), &ink, &dot);
-        }
-        lv_area_t pad = {cx - UiSx(12), cy, cx + UiSx(12), cy + UiSy(17)};
-        ink.radius = UiSx(10);
-        lv_draw_rect(lv_event_get_layer(event), &ink, &pad);
-    }, LV_EVENT_DRAW_MAIN, nullptr);
     lv_obj_add_event_cb(action, [](lv_event_t*) { AssistantPhoto_Send(); }, LV_EVENT_CLICKED, nullptr);
     if (custom_live) { lv_obj_add_flag(touch_ptt_hit, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(action, LV_OBJ_FLAG_HIDDEN); }
     auto* action_label = lv_label_create(action);
     lv_label_set_text(action_label, Lang::Strings::ASSISTANT_SEND);
-    lv_obj_set_style_text_font(action_label, fontpack_lv_font_ui(), 0);
+    lv_obj_set_style_text_font(action_label, ValetStrong(), 0);
     lv_obj_set_style_text_color(action_label, lv_color_white(), 0);
     lv_obj_center(action_label);
     lv_obj_add_flag(action_label, LV_OBJ_FLAG_HIDDEN);
-    if (chat_cloud::HasCallEntry() && !custom_live) {
+    if (call_entry) {
+        // A dark wedge cut on the same slant as the home page's blocks.
         lv_obj_add_flag(action, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(action);
+        lv_obj_add_event_cb(action, [](lv_event_t* e) {
+            lv_area_t a;
+            lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+            lv_draw_triangle_dsc_t fill;
+            lv_draw_triangle_dsc_init(&fill);
+            fill.color = lv_color_black();
+            fill.opa = LV_OPA_COVER;
+            auto P = [](int x, int y) { return lv_point_precise_t{static_cast<lv_value_precise_t>(x), static_cast<lv_value_precise_t>(y)}; };
+            fill.p[0] = P(a.x1 + 26, a.y1); fill.p[1] = P(a.x2, a.y1); fill.p[2] = P(a.x2, a.y2);
+            lv_draw_triangle(lv_event_get_layer(e), &fill);
+            fill.p[1] = P(a.x2, a.y2); fill.p[2] = P(a.x1, a.y2);
+            lv_draw_triangle(lv_event_get_layer(e), &fill);
+        }, LV_EVENT_DRAW_MAIN, nullptr);
         lv_obj_add_event_cb(action, ChangeTalkMode, LV_EVENT_CLICKED, nullptr);
-        lv_obj_add_flag(action_label, LV_OBJ_FLAG_HIDDEN);
-        auto* call_label = lv_label_create(action); lv_label_set_text(call_label, "通话"); lv_obj_center(call_label);
+        lv_obj_align(ValetIconBox(action, kIconWave | kIconWhite, 36), LV_ALIGN_LEFT_MID, 44, 0);
+        auto* call_label = lv_label_create(action);
+        lv_label_set_text(call_label, ValetText("通话", "Call"));
+        lv_obj_set_style_text_font(call_label, ValetStrong(), 0);
+        lv_obj_set_style_text_color(call_label, lv_color_white(), 0);
+        lv_obj_align(call_label, LV_ALIGN_LEFT_MID, 90, 0);
         lv_obj_clear_flag(call_label, LV_OBJ_FLAG_CLICKABLE);
     }
-    auto* footer = lv_label_create(scr);
-    lv_obj_set_size(footer, LV_HOR_RES, kPageIndicatorH);
-    lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -kFooterH);
+    // Pager above the bar: previous, "n / m", next. Only shown while there is an answer.
+    auto* pager = ValetBox(scr, 0, 0, 340, kValetPagerH);
+    lv_obj_align(pager, LV_ALIGN_BOTTOM_MID, 0, -24 - kValetBarH - 4);
+    for (int i = 0; i < 2; ++i) {
+        auto* turn = ValetBox(pager, 0, 0, 96, kValetPagerH);
+        lv_obj_align(turn, i ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_add_flag(turn, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(turn);
+        lv_obj_add_event_cb(turn, ValetTurn, LV_EVENT_CLICKED, i ? reinterpret_cast<void*>(1) : nullptr);
+        lv_obj_center(ValetIconBox(turn, i ? kIconNext : kIconPrev, 32));
+    }
+    lv_obj_add_flag(pager, LV_OBJ_FLAG_HIDDEN);
+    Assistant_State().chrome.valet_pager = pager;
+    auto* footer = lv_label_create(pager);
+    lv_obj_set_width(footer, 148);
+    lv_obj_center(footer);
     lv_obj_set_style_text_align(footer, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(footer, fontpack_lv_font_ui(), 0);
+    lv_obj_set_style_text_font(footer, ValetSmall(), 0);
     lv_label_set_text(footer, "");
     lv_obj_add_flag(footer, LV_OBJ_FLAG_HIDDEN);
 

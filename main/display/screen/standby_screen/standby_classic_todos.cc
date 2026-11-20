@@ -41,7 +41,7 @@ void StandbyClassic_RebuildTodoList() {
     lv_obj_clean(StandbyClassic_State().todo_host);
 
     const lv_font_t* font = StandbyClassic_TodoFont();
-    const lv_coord_t text_w = LV_HOR_RES - 2 * kSidePad - 2 * kTodoRowPad - 2 * kBorderW;
+    const lv_coord_t text_w = LV_HOR_RES - 2 * 33;
 
     if (StandbyClassic_todos.empty()) {
         lv_obj_t* empty = lv_label_create(StandbyClassic_State().todo_host);
@@ -49,7 +49,7 @@ void StandbyClassic_RebuildTodoList() {
         lv_obj_set_style_text_font(empty, font, 0);
         lv_obj_set_style_text_color(empty, lv_color_black(), 0);
         lv_obj_set_width(empty, text_w);
-        lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_clear_flag(empty, LV_OBJ_FLAG_CLICKABLE);
         return;
     }
@@ -65,9 +65,9 @@ void StandbyClassic_RebuildTodoList() {
         lv_obj_set_style_bg_color(row, lv_color_white(), 0);
         lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
         lv_obj_set_style_border_color(row, lv_color_black(), 0);
-        lv_obj_set_style_border_width(row, kBorderW, 0);
-        lv_obj_set_style_radius(row, 8, 0);
-        lv_obj_set_style_pad_all(row, kTodoRowPad, 0);
+        lv_obj_set_style_border_width(row, 1, 0);
+        lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_pad_ver(row, 12, 0);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -122,8 +122,8 @@ void StandbyClassic_SetTodoHint(const char* text) {
     lv_label_set_text(hint, text != nullptr ? text : "");
     lv_obj_set_style_text_font(hint, StandbyClassic_TodoFont(), 0);
     lv_obj_set_style_text_color(hint, lv_color_black(), 0);
-    lv_obj_set_width(hint, LV_HOR_RES - 2 * kSidePad - 2 * kTodoRowPad - 2 * kBorderW);
-    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(hint, LV_HOR_RES - 2 * 33);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_clear_flag(hint, LV_OBJ_FLAG_CLICKABLE);
 }
 

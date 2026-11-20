@@ -290,11 +290,19 @@ void Assistant_UpdatePageIndicator() {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%d / %d", page, pages > 0 ? pages : 1);
     lv_label_set_text(Assistant_State().chrome.page_label, buf);
+    // The Valet pager (arrows + label) shows only when there is more than one page to turn.
+    auto* pager = Assistant_State().chrome.valet_pager;
+    const bool show = Assistant_State().layout.has_a2ui_content && pages > 1;
+    if (pager && lv_obj_is_valid(pager)) {
+        if (show) lv_obj_remove_flag(pager, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(pager, LV_OBJ_FLAG_HIDDEN);
+    }
     if (!Assistant_State().layout.has_a2ui_content) {
         lv_obj_add_flag(Assistant_State().chrome.page_label, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_remove_flag(Assistant_State().chrome.page_label, LV_OBJ_FLAG_HIDDEN);
     }
+    Assistant_ValetSyncChrome();
 }
 
 void Assistant_RenderCurrentPage() {

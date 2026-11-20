@@ -16,6 +16,7 @@ socket. The port is never reopened on its own — after the device drops off USB
     valetdev.py swipe 342 900 342 300
     valetdev.py key home|prev|next|ai|vol_up|vol_down|power [--ms 800]
     valetdev.py home               # ask the UI to return to the home screen
+    valetdev.py preview standby    # draw the standby page on a throwaway screen (`home` leaves it)
     valetdev.py log -n 80          # recent device log (credentials masked)
     valetdev.py flash              # write build-devtest app to ota_0, reattach
     valetdev.py stop
@@ -285,6 +286,7 @@ def main():
     p = sub.add_parser("serve"); p.add_argument("--port")
     sub.add_parser("info"); sub.add_parser("status"); sub.add_parser("stop")
     sub.add_parser("release"); sub.add_parser("attach"); sub.add_parser("home"); sub.add_parser("settle")
+    p = sub.add_parser("preview"); p.add_argument("name", choices=["standby"])
     p = sub.add_parser("shot"); p.add_argument("path"); p.add_argument("--now", action="store_true")
     p = sub.add_parser("tap"); p.add_argument("x", type=int); p.add_argument("y", type=int)
     p.add_argument("--ms", type=int, default=100)
@@ -322,6 +324,8 @@ def main():
         time.sleep(args.ms / 1000 + 0.05)
     elif args.command == "home":
         dev({"cmd": "home"})
+    elif args.command == "preview":
+        dev({"cmd": "preview", "name": args.name})
     elif args.command == "log":
         lines = LOG.read_bytes().decode("utf-8", "replace").splitlines() if LOG.exists() else []
         if args.grep:

@@ -30,10 +30,10 @@ constexpr uint16_t kUiFontBpp = 2;
 constexpr uint16_t kUiFontBoldBpp = 4;
 
 // 源值对齐 397 assistant_screen；经 UiSx/UiSy 同比例到 470
-constexpr lv_coord_t kContentPadX = UiSx(8);
-constexpr lv_coord_t kContentPadY = UiSy(8);
-constexpr lv_coord_t kFooterH = UiSy(64);
-constexpr lv_coord_t kPageIndicatorH = UiSy(28);
+constexpr lv_coord_t kContentPadX = 33; // the design's page margin
+constexpr lv_coord_t kContentPadY = 26; // air between the header rule and the first line
+constexpr lv_coord_t kFooterH = 130; // Valet talk bar (100) with its margins
+constexpr lv_coord_t kPageIndicatorH = 76; // Valet pager row above the talk bar
 constexpr lv_coord_t kFooterInset = UiSx(12);
 constexpr lv_coord_t kFooterActionW = UiSx(64);
 constexpr lv_coord_t kBlockGap = UiSy(8); // 与 a2ui Column 默认 pad_row 一致，分页高度估算才准
@@ -180,6 +180,9 @@ struct AssistantUiState {
         lv_obj_t* photo_action = nullptr; // 底栏猫爪或发送按钮。
         lv_obj_t* photo_action_label = nullptr; // 有照片时显示的发送文案。
         lv_obj_t* idle_hint = nullptr;  // 无会话时 LVGL 欢迎页
+        lv_obj_t* valet_pager = nullptr;  // Valet footer: previous / "n / m" / next above the talk bar
+        lv_obj_t* valet_new = nullptr;    // Valet header: "新对话", shown while there is a conversation
+        lv_coord_t valet_body_top = 0;    // y of the area under the Valet header band
         lv_obj_t* status_label = nullptr;       // 状态栏居中时钟/文案
         lv_obj_t* notification_label = nullptr;
     } chrome;
@@ -284,6 +287,10 @@ void Assistant_RenderCurrentPage();
 /** @brief 请求异步重绘当前页 */
 void Assistant_RequestRenderCurrentPage();
 /** @brief 清空当前会话 flow/pages 与相关 UI */
+/** @brief y of the area under the Valet header (and context strip), for the welcome page. */
+lv_coord_t Assistant_ValetBodyTop();
+/** @brief Show the header's "新对话" only while there is something to clear. */
+void Assistant_ValetSyncChrome();
 void Assistant_ClearSession();
 /** @brief 流式分片：排队或立即展示 */
 void Assistant_QueueOrShowChunk(FlowList&& chunk, bool jump_to_new);

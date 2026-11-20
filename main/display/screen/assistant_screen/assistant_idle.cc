@@ -2,6 +2,8 @@
 #include "assets/lang_config.h"
 #include "chat_cloud.h"
 #include "fontpack_lvgl.h"
+#include "home_screen/home_valet_font.h"
+#include "valet_reading_context.h"
 
 #include <cstring>
 #include <algorithm>
@@ -146,65 +148,56 @@ void Assistant_ShowIdleHint() {
     }
 }
 
+// Welcome page in the Valet design: a headline that says what this page is
+// for, one line on how to use it, and what it can do listed above the talk bar.
+// `host` covers the screen; the header band on top and the talk bar at the
+// bottom are drawn by the screen, so this page only fills the area between.
 void Assistant_BuildIdleHint(lv_obj_t* host) {
     const bool en = IsEnglish();
-    const auto provider = chat_cloud::ActiveProvider();
-    const bool baiwen = provider == chat_cloud::Provider::Baiwen;
+    const bool custom = chat_cloud::IsCustom();
+    const bool book = custom && valet::SelectedReadingContext().Valid();
     lv_obj_update_layout(host);
     const int width = lv_obj_get_width(host);
     const int height = lv_obj_get_height(host);
-    auto x = [width](int value) { return value * width / kReferenceWidth; };
-    auto y = [height](int value) { return value * height / kReferenceHeight; };
-    const lv_font_t* regular = fontpack_lv_font_ui(); // Existing 25px UI font.
-    if (!regular) regular = Assistant_UiFont();
+    constexpr int kSide = 33;
+    const lv_font_t* small = fontpack_lv_font_get(25, 2);
+    if (!small) small = fontpack_lv_font_ui();
+    const lv_font_t* regular = fontpack_lv_font_ui();
     const lv_font_t* bold = Assistant_UiFontBold();
     lv_obj_set_style_bg_color(host, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(host, LV_OPA_COVER, 0);
-    Label(host, AssistantScreen::DisplayName(), x(25), y(85), x(370), bold);
-    Label(host, en ? "Hello,\nI'm your AI assistant" : "你好，\n我是你的智能助手",
-          x(25), y(185), x(405), bold);
-    Label(host, en ? "How can I help you?" : "有什么可以帮你？",
-          x(25), y(280), x(420), regular);
-    // Content width preserves explicit line breaks without splitting English words.
-    lv_obj_t* talk = Label(host, en ? "Hold\nto talk" : "长\n按\n对\n话",
-                           0, y(135), LV_SIZE_CONTENT, regular);
-    lv_obj_set_style_text_align(talk, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_update_layout(talk);
-    const int short_line_x = width - kTalkRightMargin - kRuleWidth;
-    const int long_line_x = short_line_x - 12;
-    lv_obj_set_x(talk, long_line_x - 7 - lv_obj_get_width(talk));
-    const int talk_center = lv_obj_get_y(talk) + lv_obj_get_height(talk) / 2;
-    Rule(host, long_line_x, talk_center - y(32), kRuleWidth, y(64));
-    Rule(host, short_line_x, talk_center - y(18), kRuleWidth, y(36));
-    const int first = baiwen ? 0 : 1;
+
+    const int top = Assistant_ValetBodyTop();
+    lv_obj_t* headline = Label(host, book ? (en ? "Ask about this page" : "问这一页")
+                                         : (en ? "What's on your mind?" : "想问什么？"),
+                               kSide, top + 44, width - 2 * kSide, &kValetTitleFont);
+    lv_obj_update_layout(headline);
+    Label(host, !custom ? (en ? "Hold to talk, release to send." : "按住说话，松开发送。")
+                : book ? (en ? "The page is attached; no need to read it out." : "正文已经带上，不用念给我听。")
+                       : (en ? "No book attached. To-dos, weather, anything." : "不带书。待办、天气，随便聊。"),
+          kSide, lv_obj_get_y(headline) + lv_obj_get_height(headline) + 14, width - 2 * kSide, small);
+
+    // What it can do: ruled rows sitting directly on the talk bar.
+    const int first = chat_cloud::ActiveProvider() == chat_cloud::Provider::Baiwen ? 0 : 1;
     const int count = 4 - first;
-    // Extra space above and below the centered content keeps it off the rules.
-    // Keep the four-row list inside the bottom margin of the welcome page.
-    const int list_top = y(330);
-    const int list_bottom = height - kFooterH - kPageIndicatorH - y(8);
-    const int row_height = (list_bottom - list_top) / count;
+    constexpr int kRowH = 104;
+    const int list_bottom = height - kFooterH - 14;
+    const int list_top = list_bottom - count * kRowH;
+    Rule(host, kSide, list_top, width - 2 * kSide, kRuleWidth);
     for (int row = 0; row < count; ++row) {
         const int i = first + row;
-        const int top = list_top + row * row_height;
-        const int row_bottom = top + row_height;
-        lv_obj_t* item = PlainObject(host, x(425), row_bottom - top);
-        lv_obj_set_pos(item, x(25), top);
-        lv_obj_t* icon = PlainObject(item, std::min(x(52), y(52)), std::min(x(52), y(52)));
-        lv_obj_align(icon, LV_ALIGN_LEFT_MID, x(30), 0);
-        lv_obj_add_event_cb(icon, DrawIcon, LV_EVENT_DRAW_MAIN,
-                            reinterpret_cast<void*>(static_cast<intptr_t>(i)));
-        // Center the actual wrapped title + description block inside each fixed
-        // row, so one-line and two-line descriptions both have balanced spacing.
-        lv_obj_t* text = PlainObject(item, x(310), LV_SIZE_CONTENT);
-        lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_row(text, 4, 0);
-        Label(text, en ? kFeatures[i].title_en : kFeatures[i].title_zh,
-              0, 0, x(310), bold);
-        Label(text, en ? kFeatures[i].detail_en : kFeatures[i].detail_zh,
-              0, 0, x(310), regular);
-        lv_obj_align(text, LV_ALIGN_LEFT_MID, x(115), 0);
-        if (row + 1 < count) {
-            Rule(host, x(25), row_bottom - 1, x(425), kRuleWidth);
-        }
+        lv_obj_t* item = PlainObject(host, width - 2 * kSide, kRowH);
+        lv_obj_set_pos(item, kSide, list_top + row * kRowH);
+        lv_obj_t* icon = PlainObject(item, 48, 48);
+        lv_obj_align(icon, LV_ALIGN_LEFT_MID, 6, 0);
+        lv_obj_add_event_cb(icon, DrawIcon, LV_EVENT_DRAW_MAIN, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
+        lv_obj_t* title = Label(item, en ? kFeatures[i].title_en : kFeatures[i].title_zh, 78, 0, width - 2 * kSide - 84, bold);
+        lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+        lv_obj_align(title, LV_ALIGN_LEFT_MID, 78, -20);
+        lv_obj_t* detail = Label(item, en ? kFeatures[i].detail_en : kFeatures[i].detail_zh, 78, 0, width - 2 * kSide - 84, small);
+        lv_label_set_long_mode(detail, LV_LABEL_LONG_DOT);
+        lv_obj_align(detail, LV_ALIGN_LEFT_MID, 78, 22);
+        Rule(host, kSide, list_top + (row + 1) * kRowH - 1, width - 2 * kSide, row + 1 < count ? 1 : kRuleWidth);
     }
+    (void)regular;
 }

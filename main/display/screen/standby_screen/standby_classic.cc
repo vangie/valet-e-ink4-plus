@@ -13,75 +13,116 @@
 #include <lvgl.h>
 
 #include "assets/lang_config.h"
+#include "board.h"
+#include "fontpack_lvgl.h"
+#include "home_screen/home_valet_font.h"
 #include "haptic_feedback.h"
 #include "home_icon_source.h"
 
+// Valet standby page. The panel is drawn once when the device goes to sleep and
+// is not redrawn until it wakes, so the page shows what stays true for the whole
+// sleep: the date (large, where the design has a clock), the weekday and lunar
+// date, the weather with the battery level, and the open to-dos.
+namespace {
+constexpr int kValetSide = 33;
+lv_obj_t* s_valet_weekday = nullptr;
+lv_obj_t* s_valet_battery = nullptr;
+const lv_font_t* ValetSmall() { const auto* f = fontpack_lv_font_get(25, 2); return f ? f : fontpack_lv_font_ui(); }
+const lv_font_t* ValetStrong() { const auto* f = fontpack_lv_font_get(30, 4); return f ? f : fontpack_lv_font_ui(); }
+lv_obj_t* ValetLabel(lv_obj_t* parent, const char* text, const lv_font_t* font) {
+    auto* label = lv_label_create(parent);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_font(label, font, 0);
+    lv_obj_set_style_text_color(label, lv_color_black(), 0);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    return label;
+}
+lv_obj_t* ValetRule(lv_obj_t* parent, int y) {
+    auto* rule = lv_obj_create(parent);
+    lv_obj_remove_style_all(rule);
+    lv_obj_set_size(rule, LV_HOR_RES - 2 * kValetSide, 3);
+    lv_obj_set_pos(rule, kValetSide, y);
+    lv_obj_set_style_bg_color(rule, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(rule, LV_OBJ_FLAG_CLICKABLE);
+    return rule;
+}
+// The slanted stroke between month and day, as on the home page's clock.
+void DrawDateSlash(lv_event_t* e) {
+    lv_area_t a;
+    lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = lv_color_black();
+    line.width = 3;
+    line.opa = LV_OPA_COVER;
+    line.round_start = line.round_end = 1;
+    line.p1 = {static_cast<lv_value_precise_t>(a.x1), static_cast<lv_value_precise_t>(a.y2 - 2)};
+    line.p2 = {static_cast<lv_value_precise_t>(a.x2), static_cast<lv_value_precise_t>(a.y1 + 2)};
+    lv_draw_line(lv_event_get_layer(e), &line);
+}
+}
+
 void StandbyClassic_RefreshDateOnce() {
-    if (StandbyClassic_State().date_lbl == nullptr) {
+    auto& ui = StandbyClassic_State();
+    if (ui.date_lbl == nullptr) {
         return;
     }
     time_t now = time(nullptr);
     struct tm tm_info = {};
     if (localtime_r(&now, &tm_info) == nullptr || tm_info.tm_year < (2020 - 1900)) {
-        lv_label_set_text(StandbyClassic_State().date_lbl, Lang::Strings::STANDBY_DATE_PLACEHOLDER);
+        lv_label_set_text(ui.date_lbl, "--");
+        lv_label_set_text(ui.lunar_lbl, "--");
+        if (s_valet_weekday) lv_label_set_text(s_valet_weekday, "");
         return;
     }
-    char date_str[48];
-    std::snprintf(date_str, sizeof(date_str), Lang::Strings::STANDBY_DATE_FMT, tm_info.tm_mon + 1,
-                  tm_info.tm_mday);
-    lv_label_set_text(StandbyClassic_State().date_lbl, date_str);
+    char text[8];
+    std::snprintf(text, sizeof(text), "%02d", tm_info.tm_mon + 1);
+    lv_label_set_text(ui.date_lbl, text);
+    std::snprintf(text, sizeof(text), "%02d", tm_info.tm_mday);
+    lv_label_set_text(ui.lunar_lbl, text);
+    static const char* const kZh[] = {"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"};
+    static const char* const kEn[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+    if (s_valet_weekday) {
+        const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+        // The title font holds the Chinese weekday characters only; English uses the UI font.
+        lv_obj_set_style_text_font(s_valet_weekday, zh ? &kValetTitleFont : ValetStrong(), 0);
+        lv_label_set_text(s_valet_weekday, (zh ? kZh : kEn)[tm_info.tm_wday]);
+    }
+    if (s_valet_battery) {
+        char battery[32] = "";
+        int level = 0;
+        bool charging = false, discharging = false;
+        if (Board::GetInstance().GetBatteryLevel(level, charging, discharging))
+            std::snprintf(battery, sizeof(battery), "%s %d%%", std::strcmp(Lang::Current(), "zh-CN") == 0 ? "电量" : "Battery", level);
+        lv_label_set_text(s_valet_battery, battery);
+    }
 }
 
 void StandbyClassic_ApplyWeatherUi() {
-    if (!StandbyClassic_alive || StandbyClassic_State().weather_row == nullptr) {
+    auto& ui = StandbyClassic_State();
+    if (!StandbyClassic_alive || ui.weather_temp == nullptr) {
         return;
     }
     const WeatherSnap snap = StandbyClassic_WeatherRamCopy();
-    if (!snap.valid) {
-        lv_obj_add_flag(StandbyClassic_State().weather_row, LV_OBJ_FLAG_HIDDEN);
-        if (StandbyClassic_State().meta_split != nullptr) {
-            lv_obj_add_flag(StandbyClassic_State().meta_split, LV_OBJ_FLAG_HIDDEN);
-        }
-        if (StandbyClassic_State().lunar_lbl != nullptr) {
-            lv_label_set_text(StandbyClassic_State().lunar_lbl, "");
-        }
-        return;
+    char lunar[24] = "";
+    if (snap.valid && std::strcmp(Lang::Current(), "zh-CN") == 0) StandbyClassic_FormatLunarOrWeekday(lunar, sizeof(lunar), snap.lunar);
+    // The lunar font holds only the characters lunar dates are made of.
+    bool covered = true;
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(lunar); *p && covered;) {
+        uint32_t cp = *p;
+        int extra = cp >= 0xF0 ? 3 : cp >= 0xE0 ? 2 : cp >= 0xC0 ? 1 : 0;
+        cp &= extra == 3 ? 0x07 : extra == 2 ? 0x0F : extra == 1 ? 0x1F : 0x7F;
+        for (++p; extra > 0 && *p; --extra, ++p) cp = (cp << 6) | (*p & 0x3F);
+        lv_font_glyph_dsc_t glyph{};
+        covered = lv_font_get_glyph_dsc(&kValetLunarFont, &glyph, cp, 0) && !glyph.is_placeholder;
     }
-
-    if (StandbyClassic_State().lunar_lbl != nullptr) {
-        char sub[24];
-        StandbyClassic_FormatLunarOrWeekday(sub, sizeof(sub), snap.lunar);
-        lv_label_set_text(StandbyClassic_State().lunar_lbl, sub);
-    }
-    if (StandbyClassic_State().weather_text != nullptr) {
-        lv_label_set_text(StandbyClassic_State().weather_text, StandbyClassic_LocalizedPhenomText(snap));
-    }
-    if (StandbyClassic_State().weather_temp != nullptr) {
-        if (snap.has_temp) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%d℃", snap.temp);
-            lv_label_set_text(StandbyClassic_State().weather_temp, buf);
-        } else {
-            lv_label_set_text(StandbyClassic_State().weather_temp, "");
-        }
-    }
-    if (StandbyClassic_State().weather_icon != nullptr) {
-        if (snap.icon_code[0] != '\0') {
-            char path[48];
-            std::snprintf(path, sizeof(path), "A:ic_s_weather_%s.spng", snap.icon_code);
-            if (HomeIconSetFullSource(StandbyClassic_State().weather_icon, path)) {
-                lv_obj_remove_flag(StandbyClassic_State().weather_icon, LV_OBJ_FLAG_HIDDEN);
-            } else {
-                lv_obj_add_flag(StandbyClassic_State().weather_icon, LV_OBJ_FLAG_HIDDEN);
-            }
-        } else {
-            lv_obj_add_flag(StandbyClassic_State().weather_icon, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    lv_obj_remove_flag(StandbyClassic_State().weather_row, LV_OBJ_FLAG_HIDDEN);
-    if (StandbyClassic_State().meta_split != nullptr) {
-        lv_obj_remove_flag(StandbyClassic_State().meta_split, LV_OBJ_FLAG_HIDDEN);
-    }
+    lv_obj_set_style_text_font(ui.weather_text, covered ? &kValetLunarFont : ValetStrong(), 0);
+    lv_label_set_text(ui.weather_text, lunar);
+    char weather[64] = "";
+    if (snap.valid && snap.has_temp) std::snprintf(weather, sizeof(weather), "%s %d°", StandbyClassic_LocalizedPhenomText(snap), snap.temp);
+    else if (snap.valid) std::snprintf(weather, sizeof(weather), "%s", StandbyClassic_LocalizedPhenomText(snap));
+    lv_label_set_text(ui.weather_temp, weather);
 }
 
 void StandbyClassic_BuildUi(lv_obj_t* root) {
@@ -90,194 +131,59 @@ void StandbyClassic_BuildUi(lv_obj_t* root) {
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_set_style_border_width(root, 0, 0);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
-
     StandbyClassic_todos.clear();
+    auto& ui = StandbyClassic_State();
+    const int width = LV_HOR_RES;
 
-    const lv_coord_t content_w = LV_HOR_RES - 2 * kSidePad;
-    const lv_coord_t content_h = LV_VER_RES - kTopPad;
+    // Month over day, the day shifted right, a rising stroke between them.
+    ui.date_lbl = ValetLabel(root, "--", &kValetBigDateFont);
+    lv_obj_set_pos(ui.date_lbl, kValetSide + 14, 108);
+    ui.lunar_lbl = ValetLabel(root, "--", &kValetBigDateFont);   // the day of the month
+    lv_obj_set_pos(ui.lunar_lbl, kValetSide + 30, 336);
+    auto* slash = lv_obj_create(root);
+    lv_obj_remove_style_all(slash);
+    lv_obj_set_size(slash, 250, 52);
+    lv_obj_set_pos(slash, kValetSide + 16, 300);
+    lv_obj_clear_flag(slash, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(slash, DrawDateSlash, LV_EVENT_DRAW_MAIN, nullptr);
 
-    lv_obj_t* center = lv_obj_create(root);
-    lv_obj_remove_style_all(center);
-    lv_obj_set_size(center, content_w, content_h);
-    lv_obj_align(center, LV_ALIGN_TOP_MID, 0, kTopPad);
-    lv_obj_set_style_bg_opa(center, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(center, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(center, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(center, 0, 0);
-    lv_obj_clear_flag(center, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(center, LV_OBJ_FLAG_CLICKABLE);
-    // 猫图宽=可绘区，略宽于 center 侧边距；允许溢出绘制
-    lv_obj_add_flag(center, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    // Right column: lunar date over the weekday, sitting on the day's baseline.
+    auto* column = lv_obj_create(root);
+    lv_obj_remove_style_all(column);
+    lv_obj_set_size(column, 320, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(column, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_row(column, 10, 0);
+    lv_obj_clear_flag(column, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    ui.weather_text = ValetLabel(column, "", &kValetLunarFont);    // lunar date
+    s_valet_weekday = ValetLabel(column, "", &kValetTitleFont);
+    lv_obj_update_layout(column);
+    lv_obj_align(column, LV_ALIGN_TOP_RIGHT, -kValetSide, 562 - 116);
 
-    lv_obj_t* spacer = lv_obj_create(center);
-    lv_obj_remove_style_all(spacer);
-    lv_obj_set_width(spacer, lv_pct(100));
-    lv_obj_set_flex_grow(spacer, 1);
-    lv_obj_set_style_bg_opa(spacer, LV_OPA_TRANSP, 0);
-    lv_obj_clear_flag(spacer, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(spacer, LV_OBJ_FLAG_SCROLLABLE);
+    // Weather on the left, battery on the right, between two rules.
+    ValetRule(root, 644);
+    ui.weather_temp = ValetLabel(root, "", ValetStrong());
+    lv_obj_set_pos(ui.weather_temp, kValetSide, 678);
+    s_valet_battery = ValetLabel(root, "", fontpack_lv_font_ui());
+    lv_obj_align(s_valet_battery, LV_ALIGN_TOP_RIGHT, -kValetSide, 678);
+    ValetRule(root, 750);
 
-    lv_obj_t* meta_row = lv_obj_create(center);
-    lv_obj_remove_style_all(meta_row);
-    lv_obj_set_width(meta_row, lv_pct(100));
-    lv_obj_set_height(meta_row, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(meta_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(meta_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(meta_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(meta_row, kMetaGap, 0);
-    lv_obj_set_style_margin_bottom(meta_row, kSectionGap, 0);
-    lv_obj_clear_flag(meta_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(meta_row, LV_OBJ_FLAG_CLICKABLE);
+    auto* caption = ValetLabel(root, std::strcmp(Lang::Current(), "zh-CN") == 0 ? "今日待办" : "To-do today", ValetSmall());
+    lv_obj_set_pos(caption, kValetSide, 784);
+    ui.todo_host = lv_obj_create(root);
+    lv_obj_remove_style_all(ui.todo_host);
+    lv_obj_set_size(ui.todo_host, width - 2 * kValetSide, LV_SIZE_CONTENT);
+    lv_obj_set_pos(ui.todo_host, kValetSide, 830);
+    lv_obj_set_flex_flow(ui.todo_host, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(ui.todo_host, 14, 0);
+    lv_obj_clear_flag(ui.todo_host, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
 
-    lv_obj_t* date_row = lv_obj_create(meta_row);
-    lv_obj_remove_style_all(date_row);
-    lv_obj_set_size(date_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(date_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(date_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(date_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(date_row, kCalendarGap, 0);
-    lv_obj_clear_flag(date_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(date_row, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t* cal_icon = lv_image_create(date_row);
-    lv_image_set_src(cal_icon, HomeIconSource("A:ic_s_standby_calendar.spng"));
-    lv_obj_set_size(cal_icon, kCalendarIconW, kCalendarIconH);
-    lv_image_set_inner_align(cal_icon, LV_IMAGE_ALIGN_CONTAIN);
-    lv_obj_clear_flag(cal_icon, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t* date_col = lv_obj_create(date_row);
-    lv_obj_remove_style_all(date_col);
-    lv_obj_set_size(date_col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(date_col, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(date_col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(date_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(date_col, 4, 0);
-    lv_obj_clear_flag(date_col, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(date_col, LV_OBJ_FLAG_CLICKABLE);
-
-    const lv_font_t* wfont = StandbyClassic_WeatherFont();
-    StandbyClassic_State().date_lbl = lv_label_create(date_col);
-    lv_label_set_text(StandbyClassic_State().date_lbl, Lang::Strings::STANDBY_DATE_PLACEHOLDER);
-    lv_obj_set_style_text_font(StandbyClassic_State().date_lbl, wfont, 0);
-    lv_obj_set_style_text_color(StandbyClassic_State().date_lbl, lv_color_black(), 0);
-    lv_obj_set_style_text_align(StandbyClassic_State().date_lbl, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_clear_flag(StandbyClassic_State().date_lbl, LV_OBJ_FLAG_CLICKABLE);
-
-    StandbyClassic_State().lunar_lbl = lv_label_create(date_col);
-    lv_label_set_text(StandbyClassic_State().lunar_lbl, "");
-    lv_obj_set_style_text_font(StandbyClassic_State().lunar_lbl, wfont, 0);
-    lv_obj_set_style_text_color(StandbyClassic_State().lunar_lbl, lv_color_black(), 0);
-    lv_obj_set_style_text_align(StandbyClassic_State().lunar_lbl, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_clear_flag(StandbyClassic_State().lunar_lbl, LV_OBJ_FLAG_CLICKABLE);
-
-    StandbyClassic_State().meta_split = lv_obj_create(meta_row);
-    lv_obj_remove_style_all(StandbyClassic_State().meta_split);
-    lv_obj_set_size(StandbyClassic_State().meta_split, kMetaSplitW, kWeatherIcon);
-    lv_obj_set_style_bg_color(StandbyClassic_State().meta_split, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(StandbyClassic_State().meta_split, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(StandbyClassic_State().meta_split, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(StandbyClassic_State().meta_split, LV_OBJ_FLAG_HIDDEN);
-
-    StandbyClassic_State().weather_row = lv_obj_create(meta_row);
-    lv_obj_remove_style_all(StandbyClassic_State().weather_row);
-    lv_obj_set_size(StandbyClassic_State().weather_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(StandbyClassic_State().weather_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(StandbyClassic_State().weather_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(StandbyClassic_State().weather_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(StandbyClassic_State().weather_row, kWeatherGap, 0);
-    lv_obj_clear_flag(StandbyClassic_State().weather_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(StandbyClassic_State().weather_row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(StandbyClassic_State().weather_row, LV_OBJ_FLAG_HIDDEN);
-
-    StandbyClassic_State().weather_icon = lv_image_create(StandbyClassic_State().weather_row);
-    lv_obj_set_size(StandbyClassic_State().weather_icon, kWeatherIcon, kWeatherIcon);
-    lv_image_set_inner_align(StandbyClassic_State().weather_icon, LV_IMAGE_ALIGN_CONTAIN);
-    lv_obj_clear_flag(StandbyClassic_State().weather_icon, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t* meta = lv_obj_create(StandbyClassic_State().weather_row);
-    lv_obj_remove_style_all(meta);
-    lv_obj_set_size(meta, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(meta, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(meta, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(meta, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(meta, 4, 0);
-    lv_obj_clear_flag(meta, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(meta, LV_OBJ_FLAG_CLICKABLE);
-
-    StandbyClassic_State().weather_text = lv_label_create(meta);
-    lv_label_set_text(StandbyClassic_State().weather_text, "");
-    lv_obj_set_style_text_font(StandbyClassic_State().weather_text, wfont, 0);
-    lv_obj_set_style_text_color(StandbyClassic_State().weather_text, lv_color_black(), 0);
-    lv_obj_clear_flag(StandbyClassic_State().weather_text, LV_OBJ_FLAG_CLICKABLE);
-
-    StandbyClassic_State().weather_temp = lv_label_create(meta);
-    lv_label_set_text(StandbyClassic_State().weather_temp, "");
-    lv_obj_set_style_text_font(StandbyClassic_State().weather_temp, wfont, 0);
-    lv_obj_set_style_text_color(StandbyClassic_State().weather_temp, lv_color_black(), 0);
-    lv_obj_clear_flag(StandbyClassic_State().weather_temp, LV_OBJ_FLAG_CLICKABLE);
-
-    StandbyClassic_State().todo_host = lv_obj_create(center);
-    lv_obj_remove_style_all(StandbyClassic_State().todo_host);
-    lv_obj_set_width(StandbyClassic_State().todo_host, lv_pct(100));
-    lv_obj_set_height(StandbyClassic_State().todo_host, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(StandbyClassic_State().todo_host, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(StandbyClassic_State().todo_host, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(StandbyClassic_State().todo_host, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(StandbyClassic_State().todo_host, kTodoGap, 0);
-    lv_obj_set_style_margin_bottom(StandbyClassic_State().todo_host, kSectionGap, 0);
-    lv_obj_clear_flag(StandbyClassic_State().todo_host, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(StandbyClassic_State().todo_host, LV_OBJ_FLAG_CLICKABLE);
-
-    StandbyClassic_State().home_btn = lv_obj_create(center);
-    lv_obj_remove_style_all(StandbyClassic_State().home_btn);
-    lv_obj_set_size(StandbyClassic_State().home_btn, content_w, kHomeBtnH);
-    lv_obj_set_style_bg_color(StandbyClassic_State().home_btn, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(StandbyClassic_State().home_btn, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(StandbyClassic_State().home_btn, lv_color_black(), 0);
-    lv_obj_set_style_border_width(StandbyClassic_State().home_btn, kBorderW, 0);
-    lv_obj_set_style_radius(StandbyClassic_State().home_btn, 8, 0);
-    lv_obj_set_style_margin_bottom(StandbyClassic_State().home_btn, kHeroSectionGap, 0);
-    lv_obj_clear_flag(StandbyClassic_State().home_btn, LV_OBJ_FLAG_SCROLLABLE);
-    if (!StandbyClassic_as_overlay) {
-        lv_obj_add_flag(StandbyClassic_State().home_btn, LV_OBJ_FLAG_CLICKABLE);
-        HapticAttachClick(StandbyClassic_State().home_btn);
-        lv_obj_add_event_cb(StandbyClassic_State().home_btn, StandbyClassic_OnHomeBtnClicked, LV_EVENT_CLICKED, nullptr);
-    } else {
-        lv_obj_add_flag(StandbyClassic_State().home_btn, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(StandbyClassic_State().home_btn, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_style_margin_bottom(StandbyClassic_State().home_btn, 0, 0);
-    }
-
-    lv_obj_t* menu_icon = lv_image_create(StandbyClassic_State().home_btn);
-    lv_image_set_src(menu_icon, "A:ic_s_standby_menu.spng");
-    lv_obj_set_size(menu_icon, kMenuIcon, kMenuIcon);
-    lv_obj_center(menu_icon);
-    lv_obj_clear_flag(menu_icon, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t* hero = lv_obj_create(center);
-    lv_obj_remove_style_all(hero);
-    lv_obj_set_width(hero, content_w);
-    lv_obj_set_height(hero, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(hero, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(hero, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(hero, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(hero, kHeroInnerGap, 0);
-    lv_obj_clear_flag(hero, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(hero, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(hero, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-
-    lv_obj_t* bubble = lv_image_create(hero);
-    lv_image_set_src(bubble, "A:ic_s_standby_bubble.spng");
-    lv_obj_set_size(bubble, kBubbleW, kBubbleH);
-    lv_obj_clear_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t* cat = lv_image_create(hero);
-    lv_image_set_src(cat, "A:ic_s_standby_cat.spng");
-    lv_obj_set_size(cat, kCatW, kCatH);
-    lv_obj_clear_flag(cat, LV_OBJ_FLAG_CLICKABLE);
+    // How to get out of standby, at the bottom.
+    auto* hint = ValetLabel(root, std::strcmp(Lang::Current(), "zh-CN") == 0
+        ? "按电源键醒来 · 长按 AI 唤醒键，醒来直接提问" : "Power key wakes · hold the AI key to wake and ask", ValetSmall());
+    lv_obj_set_width(hint, width - 2 * kValetSide);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, kValetSide, -44);
 }
 
 void StandbyClassic_StartOverlayRuntime() {
