@@ -16,6 +16,7 @@
 #include "settings_language_tab.h"
 #include "settings_network_tab.h"
 #include "settings_power_tab.h"
+#include "settings_proxy_page.h"
 #include "settings_charging_tab.h"
 #include "assets/lang_charging.h"
 #include "settings_test/settings_test_tab.h"
@@ -129,6 +130,7 @@ struct SettingsShellUi {
     lv_obj_t* heading = nullptr;
     int group = -1;
     bool direct = false; // the open page is the whole group, with no list in between
+    bool proxy = false;  // the proxy page (网络 → 代理) is showing
 };
 
 static SettingsShellUi s_ui;
@@ -520,6 +522,7 @@ static void AddTab(SettingsTab tab, const char* detail = nullptr) {
 }
 static void ClearContent() {
     TearDownActiveTab();
+    if (s_ui.proxy) { SettingsProxyPage_Reset(); s_ui.proxy = false; }
     s_ui.direct = false;
     // 分组列表自身也有控件（不归旧页签生命周期管理）。
     lv_obj_clean(s_ui.content_page);
@@ -575,6 +578,16 @@ static void BuildFontPackCard() {
         lv_obj_scroll_to_y(s_ui.content_page, scroll, LV_ANIM_OFF);
     }, 1000, nullptr);
     valet::fonts::Refresh();
+}
+static void ShowProxy() {
+    ClearContent();
+    s_ui.group = 1;
+    s_ui.proxy = true;
+    lv_label_set_text(s_ui.heading, Text("代理", "Proxy"));
+    SettingsProxyPage_Build(s_ui.content_page);
+}
+void SettingsScreen_OpenProxy() {
+    if (s_settings_scr && s_ui.content_page) ShowProxy();
 }
 static void ShowGroup(int group) {
     if (group < 0 || group >= 6) return;
@@ -723,6 +736,8 @@ static void ShowOverview() {
     for (int i = 0; i < 6; ++i) AddRow(Text(kGroups[i].zh, kGroups[i].en), descriptions[i], OpenGroup, i, kGroupGlyphs[i]);
 }
 static bool NavigateUp() {
+    // The proxy page: first out of its text editor, then back to the network page.
+    if (s_ui.proxy) { if (!SettingsProxyPage_CloseEditor()) ShowGroup(1); return true; }
     // A page opened directly from the overview goes back to the overview.
     if (s_ui.content_built && s_ui.direct) { ShowOverview(); return true; }
     if (s_ui.content_built) { ShowGroup(s_ui.group < 0 ? 5 : s_ui.group); return true; }
@@ -741,6 +756,7 @@ static void OnScreenDeleted(lv_event_t* e) {
     }
     SettingsLogUpload_Teardown();
     TearDownActiveTab();
+    if (s_ui.proxy) SettingsProxyPage_Reset();
     s_ui = {};
     s_settings_scr = nullptr;
     s_status_battery = nullptr;
@@ -751,6 +767,8 @@ static bool OnSettingsKey(const char* key) {
     if (key && strcmp(key, "vk_home") == 0 && BluetoothScreen::DismissOverlay()) return true;
     if (SettingsLogUpload_OnVkKey(key)) return true;
     if (!key) return false;
+    // Any bezel key first leaves the proxy page's text editor.
+    if (s_ui.proxy && SettingsProxyPage_CloseEditor()) return true;
     if (std::strcmp(key, "vk_home") == 0) return NavigateUp();
     if (std::strcmp(key, "vk_prev") == 0 || std::strcmp(key, "vk_next") == 0) {
         auto* page = s_ui.content_page;
@@ -780,6 +798,7 @@ static lv_obj_t* CreateInternal() {
     if (s_settings_scr) {
         SettingsLogUpload_Teardown();
         TearDownActiveTab();
+        if (s_ui.proxy) SettingsProxyPage_Reset();
     }
     s_ui = {};
 

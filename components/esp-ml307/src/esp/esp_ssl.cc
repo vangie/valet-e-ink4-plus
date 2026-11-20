@@ -1,4 +1,6 @@
 #include "esp_ssl.h"
+#include "net_proxy.h"
+#include <unistd.h>
 #include <esp_log.h>
 #include <esp_crt_bundle.h>
 #include <cstring>
@@ -47,6 +49,34 @@ bool EspSsl::Connect(const std::string& host, int port) {
         cfg.timeout_ms = int(remaining_ms);
     }
 
+    if (net_proxy::Applies(host)) {
+        int open_error = 0;
+        const int fd = net_proxy::Open(host, port, request_deadline_us_, &open_error);
+        if (fd < 0) {
+            last_error_ = open_error;
+            esp_tls_conn_destroy(tls_client_);
+            tls_client_ = nullptr;
+            return false;
+        }
+        // esp-tls sets these on a socket it opens itself; without them a silent peer blocks the handshake for ever.
+        if (cfg.timeout_ms <= 0) cfg.timeout_ms = 20000;
+        timeval limit{};
+        limit.tv_sec = cfg.timeout_ms / 1000;
+        limit.tv_usec = (cfg.timeout_ms % 1000) * 1000;
+        if (limit.tv_sec == 0 && limit.tv_usec == 0) limit.tv_usec = 1000;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof(limit));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, sizeof(limit));
+        // The socket now belongs to the TLS context: esp_tls_conn_destroy closes it. Starting
+        // from "connecting" makes esp-tls skip its own connect and go straight to the handshake.
+        if (esp_tls_set_conn_sockfd(tls_client_, fd) != ESP_OK ||
+            esp_tls_set_conn_state(tls_client_, ESP_TLS_CONNECTING) != ESP_OK) {
+            close(fd);
+            last_error_ = -1;
+            esp_tls_conn_destroy(tls_client_);
+            tls_client_ = nullptr;
+            return false;
+        }
+    }
     int ret = esp_tls_conn_new_sync(host.c_str(), host.length(), port, &cfg, tls_client_);
     if (ret != 1) {
         esp_tls_error_handle_t last_error;

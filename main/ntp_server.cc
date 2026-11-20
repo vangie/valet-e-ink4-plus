@@ -1,3 +1,4 @@
+#include "net_proxy.h"
 #include "ntp_server.h"
 
 #include "board.h"
@@ -75,6 +76,10 @@ bool NtpServer::QueryTimezone(const std::string& ip, std::string& timezone, int&
         ESP_LOGE(TAG, "Timezone HTTP allocation failed");
         return false;
     }
+    // The answer depends on where the request is seen to come from. Through a proxy that would be
+    // the proxy's exit, and a proxy leaving from another country would move the clock: ask directly.
+    // When that fails, the time zone already stored stays.
+    net_proxy::ScopedConfig direct{net_proxy::Config{}};
     http->SetTimeout(8000);
     http->SetRequestDeadline(esp_timer_get_time() + 8000000);
     http->SetHeader("Accept", "application/json");

@@ -430,3 +430,5 @@ div.v-row { box-sizing: border-box; }
 .v2 .calibration { margin: 12px 0; }
 .v2 .calibration h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; }
 .v2 .calibration .note { margin: 6px 0; font-size: 12px; }
+/* 代理页的测试按钮占满一行，和设备上一样。 */
+.v-fld > .v-line.is-full { width: 100%; }

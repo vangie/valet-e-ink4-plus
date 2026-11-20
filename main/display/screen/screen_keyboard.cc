@@ -429,6 +429,14 @@ void ScreenKeyboardReset(lv_obj_t* root) {
     kb->Rebuild();
 }
 
+void ScreenKeyboardShowSymbols(lv_obj_t* root) {
+    if (root == nullptr) return;
+    auto* kb = static_cast<Keyboard*>(lv_obj_get_user_data(root));
+    kb->mode = KbMode::kSym;
+    kb->upper = false;
+    kb->Rebuild();
+}
+
 void ScreenKeyboardPause(lv_obj_t* root) {
     if (root == nullptr) return;
     auto* kb = static_cast<Keyboard*>(lv_obj_get_user_data(root));

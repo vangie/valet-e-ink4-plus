@@ -1,4 +1,5 @@
 #include "http_client.h"
+#include "net_proxy.h"
 #include "network_interface.h"
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -132,7 +133,13 @@ std::string HttpClient::BuildHttpRequest() {
     std::string request;
 
     // 请求行
-    request += method_ + " " + path_ + " HTTP/1.1\r\n";
+    if (via_http_proxy_) {
+        request += method_ + " http://" + host_;
+        if (port_ != 80) request += ":" + std::to_string(port_);
+        request += path_ + " HTTP/1.1\r\n";
+    } else {
+        request += method_ + " " + path_ + " HTTP/1.1\r\n";
+    }
 
     // Host 头
     request += "Host: " + host_;
@@ -140,6 +147,10 @@ std::string HttpClient::BuildHttpRequest() {
         request += ":" + std::to_string(port_);
     }
     request += "\r\n";
+
+    if (via_http_proxy_ && !proxy_auth_.empty()) {
+        request += "Proxy-Authorization: " + proxy_auth_ + "\r\n";
+    }
 
     // 用户自定义头部（使用原始key输出）
     for (const auto& [lower_key, header_entry] : headers_) {
@@ -229,7 +240,12 @@ bool HttpClient::Open(const std::string& method, const std::string& url) {
             OnTcpDisconnected();
         });
         
-        if (!tcp_->Connect(host_, port_)) {
+        // https goes through a tunnel that the connection opens by itself; plain http through an
+        // HTTP proxy has no tunnel: connect to the proxy and ask it for the absolute address.
+        net_proxy::Config proxy;
+        via_http_proxy_ = protocol_ == "http" && net_proxy::ForwardsPlainHttp(host_, &proxy);
+        proxy_auth_ = via_http_proxy_ ? net_proxy::BasicAuth(proxy) : std::string();
+        if (!tcp_->Connect(via_http_proxy_ ? proxy.host : host_, via_http_proxy_ ? proxy.port : port_)) {
             last_error_ = tcp_->GetLastError();
             ESP_LOGE(TAG, "TCP connection failed, code=0x%x", last_error_);
             return false;

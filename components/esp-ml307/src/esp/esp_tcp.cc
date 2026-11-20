@@ -1,4 +1,5 @@
 #include "esp_tcp.h"
+#include "net_proxy.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -15,7 +16,6 @@
 #include <mutex>
 
 static const char *TAG = "EspTcp";
-constexpr int kConnectTimeoutSec = 15;
 
 EspTcp::EspTcp() {
     event_group_ = xEventGroupCreate();
@@ -54,69 +54,14 @@ bool EspTcp::Connect(const std::string& host, int port) {
         connected_ = false;
     }
 
-    struct sockaddr_in server_addr;
-    bzero(&server_addr, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    // host is domain
-    struct hostent *server = gethostbyname(host.c_str());
-    if (server == NULL) {
-        last_error_ = h_errno;
+    // Direct, or through the configured proxy (a tunnel that ends at host:port).
+    int open_error = 0;
+    const int fd = net_proxy::Open(host, port, request_deadline_us_, &open_error);
+    if (fd < 0) {
+        last_error_ = open_error;
         return false;
     }
-    memcpy(&server_addr.sin_addr, server->h_addr, server->h_length);
-
-    tcp_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (tcp_fd_ < 0) {
-        last_error_ = errno;
-        ESP_LOGE(TAG, "Failed to create socket");
-        return false;
-    }
-
-    const int flags = fcntl(tcp_fd_, F_GETFL, 0);
-    if (flags >= 0) {
-        fcntl(tcp_fd_, F_SETFL, flags | O_NONBLOCK);
-    }
-
-    int ret = connect(tcp_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr));
-    const int connect_error = ret < 0 ? errno : 0;
-    if (ret < 0 && (connect_error == EINPROGRESS || connect_error == EWOULDBLOCK)) {
-        fd_set wfds;
-        FD_ZERO(&wfds);
-        FD_SET(tcp_fd_, &wfds);
-        struct timeval tv;
-        const int64_t wait_us = request_deadline_us_ ?
-            std::max<int64_t>(0, std::min<int64_t>(kConnectTimeoutSec * 1000000LL, request_deadline_us_ - esp_timer_get_time())) : kConnectTimeoutSec * 1000000LL;
-        tv.tv_sec = wait_us / 1000000;
-        tv.tv_usec = wait_us % 1000000;
-        ret = select(tcp_fd_ + 1, nullptr, &wfds, nullptr, &tv);
-        const int select_error = ret < 0 ? errno : 0;
-        if (ret <= 0) {
-            last_error_ = (ret == 0) ? ETIMEDOUT : select_error;
-            close(tcp_fd_);
-            tcp_fd_ = -1;
-            return false;
-        }
-        int so_error = 0;
-        socklen_t so_len = sizeof(so_error);
-        const int socket_result = getsockopt(tcp_fd_, SOL_SOCKET, SO_ERROR, &so_error, &so_len);
-        const int socket_error = socket_result < 0 ? errno : 0;
-        if (socket_result < 0 || so_error != 0) {
-            last_error_ = socket_result < 0 ? socket_error : so_error;
-            close(tcp_fd_);
-            tcp_fd_ = -1;
-            return false;
-        }
-    } else if (ret < 0) {
-        last_error_ = connect_error;
-        close(tcp_fd_);
-        tcp_fd_ = -1;
-        return false;
-    }
-
-    if (flags >= 0) {
-        fcntl(tcp_fd_, F_SETFL, flags);
-    }
+    tcp_fd_ = fd;
 
     {
         std::lock_guard<std::mutex> lock(mutex_);

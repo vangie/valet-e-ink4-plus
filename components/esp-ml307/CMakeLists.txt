@@ -15,6 +15,7 @@ idf_component_register(
         "src/esp/esp_ssl.cc"
         "src/esp/esp_tcp.cc"
         "src/esp/esp_udp.cc"
+        "src/esp/net_proxy.cc"
         "src/web_socket.cc"
         "src/http_client.cc"
     INCLUDE_DIRS

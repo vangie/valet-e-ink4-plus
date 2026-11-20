@@ -85,6 +85,12 @@ const state = {
   tts: true,
   idleMhz: 320,
   netGrace: 30,
+  proxyWifi: false,  // 连 Wi-Fi 时走代理
+  proxyCell: false,  // 用 4G 时走代理
+  proxyKind: "http", // http | socks5
+  proxyAddr: "",     // 地址:端口，空 = 没设置
+  proxyUser: "",     // 账号，空 = 不用
+  proxyTest: "",     // 上一次测试的结果
   refresh: "fast",
   shakeTurn: false,
   shakeLevel: 3,

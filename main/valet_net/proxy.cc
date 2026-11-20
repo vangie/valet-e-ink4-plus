@@ -1,0 +1,175 @@
+#include "proxy.h"
+
+#include "application.h"
+#include "assets/lang_config.h"
+#include "board.h"
+#include "dual_network_board.h"
+#include "http.h"
+#include "power_policy.h"
+#include "settings.h"
+
+#include <cstdio>
+#include <cstring>
+#include <mutex>
+
+#include <esp_log.h>
+#include <esp_timer.h>
+
+namespace valet::proxy {
+namespace {
+constexpr char TAG[] = "Proxy";
+constexpr char kStore[] = "proxy";
+// Small, public, and a place this firmware needs to reach anyway (the font pack lives there).
+// It answers with a redirect and no body.
+constexpr char kTestUrl[] = "https://github.com/vangie/valet-e-ink4-plus/releases/download/fonts-1/SHA256SUMS.txt";
+constexpr int kErrNoNetwork = 2001;
+constexpr int kErrNoAddress = 2002;
+constexpr int kErrBadAnswer = 2003;
+
+std::mutex s_mutex;
+Prefs s_prefs;
+
+const char* Text(const char* zh, const char* en) {
+    return std::strcmp(Lang::Current(), "zh-CN") == 0 ? zh : en;
+}
+
+net_proxy::Config ToConfig(const Prefs& prefs) {
+    net_proxy::Config config;
+    config.kind = prefs.kind;
+    config.host = prefs.host;
+    config.port = prefs.port;
+    config.user = prefs.user;
+    config.password = prefs.password;
+    return config;
+}
+
+bool InForceFor(const Prefs& prefs) {
+    return prefs.HasAddress() && prefs.kind != net_proxy::Kind::kNone && (OnWifi() ? prefs.on_wifi : prefs.on_cell);
+}
+
+void Apply(const Prefs& prefs) {
+    const bool on = InForceFor(prefs);
+    net_proxy::Set(on ? ToConfig(prefs) : net_proxy::Config{});
+    // The address and the login stay out of the log.
+    ESP_LOGI(TAG, "%s", !on ? "off" : prefs.kind == net_proxy::Kind::kHttp ? "HTTP proxy in force" : "SOCKS5 proxy in force");
+}
+}  // namespace
+
+bool OnWifi() {
+    auto* dual = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
+    return dual ? dual->GetNetworkType() == NetworkType::WIFI : true;
+}
+
+void Init() {
+    Prefs loaded;
+    {
+        Settings store(kStore, false);
+        loaded.on_wifi = store.GetInt("wifi", 0) != 0;
+        loaded.on_cell = store.GetInt("cell", 0) != 0;
+        loaded.kind = store.GetInt("kind", 1) == 2 ? net_proxy::Kind::kSocks5 : net_proxy::Kind::kHttp;
+        loaded.host = store.GetString("host");
+        loaded.port = store.GetInt("port", 0);
+        loaded.user = store.GetString("user");
+        loaded.password = store.GetString("pass");
+    }
+    if (loaded.port < 1 || loaded.port > 65535) loaded.port = 0;
+    {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        s_prefs = loaded;
+    }
+    Apply(loaded);
+}
+
+Prefs Get() {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    return s_prefs;
+}
+
+bool Update(const Prefs& prefs) {
+    // NVS is written from the storage worker: this may be called from the UI task.
+    if (!Application::GetInstance().Schedule([prefs]() {
+        Settings store(kStore, true);
+        store.SetInt("wifi", prefs.on_wifi ? 1 : 0);
+        store.SetInt("cell", prefs.on_cell ? 1 : 0);
+        store.SetInt("kind", prefs.kind == net_proxy::Kind::kSocks5 ? 2 : 1);
+        store.SetString("host", prefs.host);
+        store.SetInt("port", prefs.port);
+        store.SetString("user", prefs.user);
+        store.SetString("pass", prefs.password);
+        if (!store.Commit()) ESP_LOGE(TAG, "the proxy choice was not saved");
+    }, Application::TaskDomain::Storage)) return false;
+    {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        s_prefs = prefs;
+    }
+    Apply(prefs);
+    return true;
+}
+
+bool InForce() { return InForceFor(Get()); }
+
+TestResult Test(const Prefs& prefs) {
+    TestResult result;
+    if (!prefs.HasAddress()) { result.error = kErrNoAddress; return result; }
+    // Keep the radio up for the request; it is parked soon after the last use.
+    PowerNeedHold hold(PowerNeed::OtaDownload);
+    if (!Board::GetInstance().EnsureNetworkReady(20000)) { result.error = kErrNoNetwork; return result; }
+    auto* network = Board::GetInstance().GetNetwork();
+    auto http = network ? network->CreateHttp(0) : nullptr;
+    if (!http) { result.error = kErrNoNetwork; return result; }
+    // For this task only: the proxy being tested, whether or not its switch is on.
+    net_proxy::ScopedConfig scoped(ToConfig(prefs));
+    const int64_t start = esp_timer_get_time();
+    http->SetTimeout(15000);
+    http->SetRequestDeadline(start + 20000000);
+    http->SetHeader("User-Agent", "valet-e-ink");
+    http->SetHeader("Accept", "*/*");
+    http->SetHeader("Connection", "close");
+    if (!http->Open("GET", kTestUrl)) {
+        result.error = http->GetLastError();
+        if (result.error == 0) result.error = -1;
+        http->Close();
+        return result;
+    }
+    result.status = http->GetStatusCode();
+    http->Close();
+    result.ms = static_cast<int>((esp_timer_get_time() - start) / 1000);
+    result.ok = result.status >= 200 && result.status < 400;
+    if (!result.ok) result.error = kErrBadAnswer;
+    ESP_LOGI(TAG, "test: %s status=%d error=%d %d ms", result.ok ? "ok" : "failed", result.status, result.error, result.ms);
+    return result;
+}
+
+std::string Describe(const TestResult& result) {
+    char text[200];
+    if (result.ok) {
+        std::snprintf(text, sizeof(text), Text("通了：经代理连到 GitHub 用了 %d.%d 秒。", "Works: reached GitHub through the proxy in %d.%d s."),
+                      result.ms / 1000, result.ms % 1000 / 100);
+        return text;
+    }
+    switch (result.error) {
+        case kErrNoAddress: return Text("还没填代理的地址。", "No proxy address yet.");
+        case kErrNoNetwork: return Text("设备自己还没连上网。", "The device itself is not online.");
+        case net_proxy::kErrProxyUnreachable:
+            return Text("连不上代理。看看地址和端口对不对，代理有没有允许别的设备来连。",
+                        "Cannot reach the proxy. Check the address and port, and that it accepts other devices.");
+        case net_proxy::kErrProxyAuth:
+            return Text("代理要账号和密码，或者填的不对。", "The proxy wants a user name and password, or these are wrong.");
+        case net_proxy::kErrProxyRefused:
+            return Text("代理连上了，但它没能连到 GitHub。", "The proxy answered but could not reach GitHub.");
+        case net_proxy::kErrProxyNoAnswer:
+            return Text("代理连上了，但一直不回话。类型（HTTP / SOCKS5）可能选反了。",
+                        "Connected to the proxy, but it never answered. The type (HTTP / SOCKS5) may be the other one.");
+        case net_proxy::kErrProxyProtocol:
+            return Text("那个端口回的不是这种代理的话。类型（HTTP / SOCKS5）是不是选反了？",
+                        "That port does not speak this kind of proxy. Is the type (HTTP / SOCKS5) the other one?");
+        case kErrBadAnswer:
+            std::snprintf(text, sizeof(text), Text("经代理连到了，但 GitHub 回的是 %d。", "Reached through the proxy, but GitHub answered %d."), result.status);
+            return text;
+        default:
+            std::snprintf(text, sizeof(text), Text("代理接通了，后面的加密连接没建成（代码 %d）。", "The proxy opened the connection, but the secure connection failed (code %d)."), result.error);
+            return text;
+    }
+}
+
+}  // namespace valet::proxy

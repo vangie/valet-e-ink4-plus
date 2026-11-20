@@ -116,6 +116,8 @@ private:
     std::string host_;
     std::string path_;
     int port_ = 80;
+    bool via_http_proxy_ = false;   // plain http sent to an HTTP proxy: absolute URI in the request line
+    std::string proxy_auth_;        // Proxy-Authorization value for that case
     std::optional<std::string> content_ = std::nullopt;
     std::map<std::string, HeaderEntry> response_headers_;  // key为小写，用于快速查找
     

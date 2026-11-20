@@ -154,6 +154,7 @@ idf_component_register(
         "protocols/valet_protocol.cc"
         "valet_dev/dev_link.cc"
         "valet_fonts/extended_fonts.cc"
+        "valet_net/proxy.cc"
         "protocols/valet_wire.cc"
         "haptic_feedback.cc"
         "assets/lang_home.cc"

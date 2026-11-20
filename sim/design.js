@@ -177,7 +177,7 @@ function openSetting(id) {
   v2.direct = id;
   render();
 }
-const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "device", about: "device" };
+const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "device", about: "device", proxy: "net" };
 // 返回 true = 这次返回已经在设置里往上走了一级。
 function v2Back() {
   if (state.screen !== "settings") return false;
@@ -559,8 +559,19 @@ function v2SettingsPane(id) {
   if (id === "net") {
     const sim = state.link === "4G" ? v2Fld(L("用哪张卡", "SIM"), v2Seg([["int", L("内置卡", "Built-in")], ["ext", L("外置卡", "External")]], state.sim, "data-sim")) : "";
     return `${v2Fld(L("怎么上网", "Connection"), v2Seg([["4G", "4G"], ["wifi", "Wi-Fi"]], state.link, "data-link"), L("换上网方式或换卡，设备会重启一次。", "Switching restarts the device."))}${sim}
-      <nav class="v-rows">${`<button class="v-row" data-go="wifi"><span><b>Wi-Fi</b><em>${state.link === "wifi" ? "Metalio-Home · " + L("已连接", "connected") : L("没在用。点这里选网络", "Not in use. Tap to choose")}</em></span>${ic("go", "chev")}</button>`}</nav>
+      <nav class="v-rows">${`<button class="v-row" data-go="wifi"><span><b>Wi-Fi</b><em>${state.link === "wifi" ? "Metalio-Home · " + L("已连接", "connected") : L("没在用。点这里选网络", "Not in use. Tap to choose")}</em></span>${ic("go", "chev")}</button>`}
+        <button class="v-row" data-setting="proxy"><span><b>${L("代理", "Proxy")}</b><em>${proxySummary()}</em></span>${ic("go", "chev")}</button></nav>
       ${v2Fld(L("不用网时，多久断开", "Disconnect when idle after"), v2Seg([["30", L("30 秒", "30 s")], ["60", L("1 分钟", "1 min")], ["120", L("2 分钟", "2 min")], ["0", L("不断", "Never")]], state.netGrace, "data-grace"), L("断得快更省电，下一次提问要多等一两秒连网。", "Sooner saves battery; the next question waits to reconnect."))}`;
+  }
+  if (id === "proxy") {
+    const onoff = [["off", L("直连", "Direct")], ["on", L("走代理", "Use proxy")]];
+    return `${v2Fld(L("连 Wi-Fi 时", "On Wi-Fi"), v2Seg(onoff, state.proxyWifi ? "on" : "off", "data-proxy-wifi"))}
+      ${v2Fld(L("用 4G 时", "On 4G"), v2Seg(onoff, state.proxyCell ? "on" : "off", "data-proxy-cell"), L("4G 下连不到家里局域网里的代理。", "On 4G a proxy on the home network cannot be reached."))}
+      ${v2Fld(L("代理类型", "Proxy type"), v2Seg([["http", "HTTP"], ["socks5", "SOCKS5"]], state.proxyKind, "data-proxy-kind"))}
+      <nav class="v-rows"><button class="v-row" data-proxy-addr><span><b>${L("地址", "Address")}</b><em>${state.proxyAddr || L("还没填。点这里输入", "Not set. Tap to enter")}</em></span>${ic("go", "chev")}</button>
+        <button class="v-row" data-proxy-user><span><b>${L("账号和密码", "Login")}</b><em>${state.proxyUser ? state.proxyUser + L("，密码已填", ", password set") : L("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one")}</em></span>${ic("go", "chev")}</button></nav>
+      <div class="v-fld"><button class="v-line is-full" data-proxy-test>${L("测试这个代理", "Test this proxy")}</button>${state.proxyTest ? `<p>${state.proxyTest}</p>` : ""}
+        <p>${L("不走代理的：对时、局域网里的地址、上传日志。", "Not proxied: time sync, local addresses, log upload.")}</p></div>`;
   }
   if (id === "screen") {
     const hint = { clear: L("细节最清楚，残影最少，翻页慢一点。", "Sharpest, slowest."), balanced: L("画质和速度各让一步。", "A balance of both."), fast: L("翻页最快，残影会多一些。", "Fastest, more ghosting.") }[state.refresh];
@@ -619,13 +630,22 @@ function v2SettingsPane(id) {
   if (id === "diag") return `<div class="v-old">${pane("log")}<h3>${L("测试", "Tests")}</h3><div class="v-grid2">${pane("test")}</div></div>`;
   return `<div class="v-old">${pane(id)}</div>`;
 }
+// 网络页「代理」一行的说明：没设置 / 没开 / 在用 / 只在另一种上网方式下才走。
+function proxySummary() {
+  if (!state.proxyAddr) return L("没设置。点这里填", "Not set. Tap to set up");
+  const where = `${state.proxyKind === "socks5" ? "SOCKS5" : "HTTP"} ${state.proxyAddr}`;
+  const wifi = state.link === "wifi";
+  if (wifi ? state.proxyWifi : state.proxyCell) return L("在用 · ", "In use · ") + where;
+  if (!state.proxyWifi && !state.proxyCell) return L("没开 · ", "Off · ") + where;
+  return (state.proxyWifi ? L("连 Wi-Fi 时才走 · ", "Only on Wi-Fi · ") : L("用 4G 时才走 · ", "Only on 4G · ")) + where;
+}
 function v2Settings() {
   const id = state.settingsScreen;
   const titles = {
     list: L("设置", "Settings"), talk: L("助手", "Assistant"), net: L("网络", "Network"), screen: L("显示", "Display"),
     read: L("阅读与字库", "Reading & fonts"), sound: L("声音与蓝牙", "Sound & Bluetooth"), device: L("设备", "Device"),
     power: L("电池与省电", "Battery & power"), storage: L("存储与 U 盘", "Storage & USB"), lang: L("语言", "Language"),
-    diag: L("诊断", "Diagnostics"), about: L("关于", "About"),
+    diag: L("诊断", "Diagnostics"), about: L("关于", "About"), proxy: L("代理", "Proxy"),
   };
   const body = id === "list" ? v2SettingsHome() : v2SettingsPane(id);
   return `${bar()}<main class="v-page v-set">${v2Head(titles[id] || titles.list)}<div class="v-pane">${body}</div></main>`;
@@ -745,6 +765,36 @@ panel.addEventListener("click", (e) => {
     state.sheet = true;
     state.sheetTab = 1;
     log("点了页脚的缺字提示：打开阅读卡片的字体页。");
+    return render();
+  }
+  // 代理页。设备上地址和账号用屏幕键盘输入（账号、密码各一个框）；这里点一下填上示例，再点一下清空。
+  if ((el = hit("[data-proxy-wifi]")) || (el = hit("[data-proxy-cell]"))) {
+    const wifi = "proxyWifi" in el.dataset;
+    const on = (wifi ? el.dataset.proxyWifi : el.dataset.proxyCell) === "on";
+    if (on && !state.proxyAddr) return toast(L("先填代理的地址", "Enter the proxy address first"));
+    state[wifi ? "proxyWifi" : "proxyCell"] = on;
+    state.proxyTest = "";
+    return render();
+  }
+  if ((el = hit("[data-proxy-kind]"))) { state.proxyKind = el.dataset.proxyKind; state.proxyTest = ""; return render(); }
+  if (hit("[data-proxy-addr]")) {
+    state.proxyAddr = state.proxyAddr ? "" : "192.168.1.20:7890";
+    if (!state.proxyAddr) state.proxyWifi = state.proxyCell = false;
+    state.proxyTest = "";
+    log(state.proxyAddr ? "假的：当作在键盘上输入了代理地址。" : "假的：清空了代理地址，两个开关跟着关掉。");
+    return render();
+  }
+  if (hit("[data-proxy-user]")) {
+    state.proxyUser = state.proxyUser ? "" : "valet";
+    state.proxyTest = "";
+    log(state.proxyUser ? "假的：当作在两个框里输入了账号和密码。" : "假的：清空了账号和密码。");
+    return render();
+  }
+  if (hit("[data-proxy-test]")) {
+    if (!state.proxyAddr) return toast(L("先填代理的地址", "Enter the proxy address first"));
+    state.proxyTest = state.link === "4G"
+      ? L("连不上代理。看看地址和端口对不对，代理有没有允许别的设备来连。", "Cannot reach the proxy. Check the address and port, and that it accepts other devices.")
+      : L("通了：经代理连到 GitHub 用了 1.1 秒。", "Works: reached GitHub through the proxy in 1.1 s.");
     return render();
   }
   if (hit("[data-fontpack]")) {

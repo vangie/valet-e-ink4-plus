@@ -10,6 +10,7 @@
 #include "websocket_protocol.h"
 #include "mqtt_protocol.h"
 #include "valet_protocol.h"
+#include "valet_net/proxy.h"
 #include "assets/lang_config.h"
 #include "assets/lang_bluetooth.h"
 #include "mcp_server.h"
@@ -1796,6 +1797,7 @@ void Application::Start() {
     // The 470 SD logger exports crashes on its existing internal-stack worker.
 
     auto& board = Board::GetInstance();
+    valet::proxy::Init();   // before anything goes online
     SetDeviceState(kDeviceStateStarting);
     // 在本地启动阶段检测摄像头，不依赖联网或云端初始化。
     board.GetCamera();

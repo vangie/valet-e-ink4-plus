@@ -15,3 +15,5 @@ lv_obj_t* ScreenKeyboardCreate(lv_obj_t* parent, ScreenKeyboardCallback callback
 void ScreenKeyboardReset(lv_obj_t* keyboard);
 /** @brief 停止输入反馈并取消待处理确认，保留键盘对象 */
 void ScreenKeyboardPause(lv_obj_t* keyboard);
+/** @brief 切到数字符号布局并重建按键（输入地址、端口时用） */
+void ScreenKeyboardShowSymbols(lv_obj_t* keyboard);

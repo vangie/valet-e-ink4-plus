@@ -24,4 +24,5 @@ public:
 void SettingsScreen_OnEnterStandby();
 /** @brief 退出待机后恢复设置页实时刷新（前光等） */
 void SettingsScreen_OnResumeFromStandby();
-
+/** @brief 在已打开的设置页里显示 网络 → 代理 */
+void SettingsScreen_OpenProxy();

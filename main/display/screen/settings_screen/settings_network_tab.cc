@@ -1,6 +1,8 @@
 #include "assets/lang_cellular.h"
 #include "settings_network_tab.h"
 #include "settings_network_signal.h"
+#include "settings_proxy_page.h"
+#include "settings_screen.h"
 
 #include "application.h"
 #include "board.h"
@@ -64,6 +66,7 @@ struct NetworkUi {
     lv_obj_t* sim_seg = nullptr;
     lv_obj_t* grace_seg = nullptr;
     lv_obj_t* wifi_row_detail = nullptr;
+    lv_obj_t* proxy_row_detail = nullptr;
 };
 
 NetworkUi s_ui;
@@ -258,6 +261,10 @@ void RefreshValet() {
             : WifiStation::GetInstance().IsConnected() ? ValetText("已连接。点这里换网络", "Connected. Tap to change")
             : ValetText("没连上。点这里选网络", "Not connected. Tap to choose");
         if (std::strcmp(lv_label_get_text(s_ui.wifi_row_detail), detail) != 0) lv_label_set_text(s_ui.wifi_row_detail, detail);
+    }
+    if (s_ui.proxy_row_detail) {
+        const std::string summary = SettingsProxyPage_Summary();
+        if (std::strcmp(lv_label_get_text(s_ui.proxy_row_detail), summary.c_str()) != 0) lv_label_set_text(s_ui.proxy_row_detail, summary.c_str());
     }
 }
 
@@ -766,6 +773,44 @@ void OnValetWifiRow(lv_event_t* e) {
     }
     OnEnterWifiConfigClicked(e);
 }
+void OnValetProxyRow(lv_event_t*) {
+    // This row is on the page that is about to be replaced: switch after the event has returned.
+    lv_async_call([](void*) { SettingsScreen_OpenProxy(); }, nullptr);
+}
+// A ruled row: name, current state under it, and a mark that it opens something. Returns the state label.
+lv_obj_t* AddValetRow(lv_obj_t* page, const char* title, lv_event_cb_t callback, bool first) {
+    auto* row = lv_obj_create(page);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), first ? 124 : 122);
+    lv_obj_set_style_border_width(row, 2, 0);
+    lv_obj_set_style_border_side(row, static_cast<lv_border_side_t>(LV_BORDER_SIDE_BOTTOM | (first ? LV_BORDER_SIDE_TOP : LV_BORDER_SIDE_NONE)), 0);
+    lv_obj_set_style_border_color(row, lv_color_black(), 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    HapticAttachClick(row);
+    lv_obj_add_event_cb(row, callback, LV_EVENT_CLICKED, nullptr);
+    auto* name = lv_label_create(row);
+    lv_label_set_text(name, title);
+    const auto* strong = fontpack_lv_font_get(30, 4);
+    lv_obj_set_style_text_font(name, strong ? strong : fontpack_lv_font_ui(), 0);
+    lv_obj_align(name, LV_ALIGN_LEFT_MID, 4, -20);
+    lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
+    auto* detail = lv_label_create(row);
+    lv_label_set_text(detail, "");
+    const auto* small = fontpack_lv_font_get(25, 2);
+    lv_obj_set_style_text_font(detail, small ? small : fontpack_lv_font_ui(), 0);
+    lv_obj_set_width(detail, lv_pct(100));
+    lv_obj_set_style_pad_right(detail, 52, 0);
+    lv_label_set_long_mode(detail, LV_LABEL_LONG_DOT);
+    lv_obj_align(detail, LV_ALIGN_LEFT_MID, 4, 22);
+    lv_obj_clear_flag(detail, LV_OBJ_FLAG_CLICKABLE);
+    auto* go = lv_label_create(row);
+    lv_label_set_text(go, ">");
+    lv_obj_set_style_text_font(go, small ? small : fontpack_lv_font_ui(), 0);
+    lv_obj_align(go, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_obj_clear_flag(go, LV_OBJ_FLAG_CLICKABLE);
+    return detail;
+}
 // Signal and ICCID are diagnostics; keep them at the bottom, out of the way of the choices.
 void BuildValet(lv_obj_t* page) {
     lv_obj_set_style_pad_row(page, 0, 0);
@@ -781,34 +826,9 @@ void BuildValet(lv_obj_t* page) {
         s_ui.sim_seg = SettingsValetSegments(page, sims, 2, OnValetSim);
     }
     SettingsValetGap(page);
-    // Wi-Fi: one ruled row that leads to the network list.
-    auto* row = lv_obj_create(page);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, lv_pct(100), 124);
-    lv_obj_set_style_border_width(row, 2, 0);
-    lv_obj_set_style_border_side(row, static_cast<lv_border_side_t>(LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_BOTTOM), 0);
-    lv_obj_set_style_border_color(row, lv_color_black(), 0);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    HapticAttachClick(row);
-    lv_obj_add_event_cb(row, OnValetWifiRow, LV_EVENT_CLICKED, nullptr);
-    auto* name = lv_label_create(row);
-    lv_label_set_text(name, "Wi-Fi");
-    const auto* strong = fontpack_lv_font_get(30, 4);
-    lv_obj_set_style_text_font(name, strong ? strong : fontpack_lv_font_ui(), 0);
-    lv_obj_align(name, LV_ALIGN_LEFT_MID, 4, -20);
-    lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
-    s_ui.wifi_row_detail = lv_label_create(row);
-    lv_label_set_text(s_ui.wifi_row_detail, "");
-    const auto* small = fontpack_lv_font_get(25, 2);
-    lv_obj_set_style_text_font(s_ui.wifi_row_detail, small ? small : fontpack_lv_font_ui(), 0);
-    lv_obj_align(s_ui.wifi_row_detail, LV_ALIGN_LEFT_MID, 4, 22);
-    lv_obj_clear_flag(s_ui.wifi_row_detail, LV_OBJ_FLAG_CLICKABLE);
-    auto* go = lv_label_create(row);
-    lv_label_set_text(go, ">");
-    lv_obj_set_style_text_font(go, small ? small : fontpack_lv_font_ui(), 0);
-    lv_obj_align(go, LV_ALIGN_RIGHT_MID, -6, 0);
-    lv_obj_clear_flag(go, LV_OBJ_FLAG_CLICKABLE);
+    // Two ruled rows that lead elsewhere: the Wi-Fi network list, and the proxy page.
+    s_ui.wifi_row_detail = AddValetRow(page, "Wi-Fi", OnValetWifiRow, true);
+    s_ui.proxy_row_detail = AddValetRow(page, ValetText("代理", "Proxy"), OnValetProxyRow, false);
     SettingsValetGap(page);
     SettingsValetLabel(page, ValetText("不用网时，多久断开", "Disconnect when idle after"));
     const char* const graces[] = {ValetText("30 秒", "30 s"), ValetText("1 分钟", "1 min"), ValetText("2 分钟", "2 min"), ValetText("不断", "Never")};
