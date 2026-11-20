@@ -76,6 +76,19 @@ body { font-family: "PingFang SC", "Avenir Next", "Helvetica Neue", sans-serif; 
 .v-call b { margin-right: -2px; }
 .v-ask span, .v-call span { margin-top: 3px; font-size: 9px; white-space: nowrap; }
 .v-call span { background: var(--paper); }
+/* 没有通话时右边这块是「接着读」：同一个位置、同一种排法，多一条进度。 */
+.v-read-block { width: 100px; }
+.v-read-block .v-track { position: absolute; right: 0; top: 46px; width: 58px; height: 4px; }
+.v-read-block span { max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+.v-todos { flex: none; margin-top: 4px; width: 100%; padding: 0; border: 0; border-top: 1.2px solid var(--ink); background: none; display: flex; flex-direction: column; text-align: left; }
+.v-todos-head { height: 28px; display: flex; align-items: center; gap: 8px; }
+.v-todos-head b { font-size: 10.8px; font-weight: 600; }
+.v-todos-head em { flex: 1; font-style: normal; font-size: 9px; color: var(--g1); }
+.v-todos-head .ic { width: 9px; height: 9px; }
+.v-todos-item { height: 28px; padding: 0 1px; border-top: 1px solid var(--g2); display: flex; align-items: center; gap: 8px; font-size: 10.8px; }
+.v-todos-item > i { flex: none; width: 9px; height: 9px; box-sizing: border-box; border: 1.2px solid var(--ink); }
+.v-todos-item > span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.v-todos-none { height: 28px; border-top: 1px solid var(--g2); display: flex; align-items: center; font-size: 9px; color: var(--g1); }
 
 .v-who { flex: none; margin-top: 6px; width: 100%; height: 24px; padding: 0 1px; border: 0; background: none; display: flex; align-items: center; gap: 6px; font-size: 9px; text-align: left; }
 .v-who > i { flex: none; width: 7px; height: 7px; box-sizing: border-box; border: 1.2px solid var(--ink); border-radius: 50%; }

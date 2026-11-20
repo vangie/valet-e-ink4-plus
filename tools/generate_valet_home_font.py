@@ -1,4 +1,4 @@
-"""生成随行首页的两套小字库（2bpp）：时钟数字（MiSans ExtraLight）和「提问 / 通话」标题（MiSans Demibold）。
+"""生成随行首页的两套小字库（2bpp）：时钟数字（MiSans ExtraLight）和首页两块的标题（提问 / 通话 / 接着读 / 阅读）（MiSans Demibold）。
 
 界面字库最大只有 30 px 的中文，标题要 40 px，所以只为这几个字单独生成。
 
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     clock, clock_bytes, cap = font_source("kValetClockFont", "ExtraLight", 132, "0123456789")
-    title, title_bytes, _ = font_source("kValetTitleFont", "Demibold", 40, "提问通话AskCal")
+    title, title_bytes, _ = font_source("kValetTitleFont", "Demibold", 40, "提问通话接着读阅AskCalRed")
     header = ("// 由 tools/generate_valet_home_font.py 生成；源字体 tools/ttf-fonts/MiSans\n"
               "#pragma once\n#include <lvgl.h>\n" + clock + "\n" + title + "\n")
     Path(args.output).write_text(header, encoding="utf-8", newline="")

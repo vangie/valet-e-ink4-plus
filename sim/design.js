@@ -249,14 +249,26 @@ function v2Home() {
   const liveOk = agent && agentReady() && assistantCaps().live;
   const open = state.todos.filter((x) => !x.done);
   const pct = Math.round(((state.page + 1) / pages.length) * 100);
-  // 有自己的助理：提问和通话两块。没有：只有提问，占满整行，斜边留在右侧。
-  const pairArt = callEntry()
-    ? `<polygon class="dark" data-ask points="0.6,0.6 127,0.6 96,133.4 0.6,133.4" />
-        <polygon class="${liveOk ? "" : "off"}" data-live points="134,0.6 221.4,0.6 221.4,133.4 103,133.4" />`
-    : `<polygon class="dark" data-ask points="0.6,0.6 221.4,0.6 190.4,133.4 0.6,133.4" />`;
-  const callBlock = callEntry()
+  // 首页永远是两块斜切。有自己的助理：提问和通话。没有：通话那块换成「接着读」，
+  // 下面原来放接着读的位置让给待办，一次看到三条。
+  const call = callEntry();
+  const pairArt = `<polygon class="dark" data-ask points="0.6,0.6 127,0.6 96,133.4 0.6,133.4" />
+        <polygon ${call ? `class="${liveOk ? "" : "off"}" data-live` : `data-go="reader"`} points="134,0.6 221.4,0.6 221.4,133.4 103,133.4" />`;
+  const callBlock = call
     ? `<div class="v-call${liveOk ? "" : " off"}">${ic("wave")}<b>${L("通话", "Call")}</b><span>${liveOk ? L("接通就聊", "Just talk") : L("还没配置通话", "Call not set up")}</span></div>`
-    : "";
+    : `<div class="v-call v-read-block">${ic("book")}<i class="v-track"><i style="width:${pct}%"></i></i><b>${L("接着读", "Read")}</b><span>${L("三国演义 · 第", "Three Kingdoms · p.")} ${state.page + 1} ${L("页", "")}</span></div>`;
+  const bookCard = `<button class="v-book" data-go="reader">
+      <span class="v-cover">三国<br>演义</span>
+      <span class="v-book-main"><b>三国演义</b><em>${L("第一回 · 第", "Ch. 1 · p.")} ${state.page + 1} / ${pages.length} ${L("页", "")}</em><i class="v-track"><i style="width:${pct}%"></i></i></span>
+      <span class="v-wedge">${L("接着读", "Read")}${ic("go")}</span>
+    </button>
+    <button class="v-todo" data-go="tasks"><b>${open.length}</b><span>${open.length ? esc(open[0].text) : L("今天没有待办", "Nothing to do today")}</span>${open.length > 1 ? `<em>${L(`还有 ${open.length - 1} 条`, `+${open.length - 1}`)}</em>` : ""}${ic("go")}</button>`;
+  const todoList = `<button class="v-todos" data-go="tasks">
+      <span class="v-todos-head"><b>${L("今天的待办", "Today")}</b><em>${open.length ? L(`${open.length} 条没做`, `${open.length} open`) : ""}</em>${ic("go")}</span>
+      ${open.length
+        ? open.slice(0, 3).map((x) => `<span class="v-todos-item"><i></i><span>${esc(x.text)}</span></span>`).join("")
+        : `<span class="v-todos-none">${L("今天没有待办", "Nothing to do today")}</span>`}
+    </button>`;
   return `${bar()}<main class="v-home">
     <section class="v-hero">
       <div class="v-clock"><span>10</span><i></i><span>48</span></div>
@@ -271,12 +283,7 @@ function v2Home() {
       ${callBlock}
     </section>
     <button class="v-who" data-setting="talk"><i class="${!agent || liveOk ? "on" : ""}"></i><span>${v2Who()}</span>${ic("go")}</button>
-    <button class="v-book" data-go="reader">
-      <span class="v-cover">三国<br>演义</span>
-      <span class="v-book-main"><b>三国演义</b><em>${L("第一回 · 第", "Ch. 1 · p.")} ${state.page + 1} / ${pages.length} ${L("页", "")}</em><i class="v-track"><i style="width:${pct}%"></i></i></span>
-      <span class="v-wedge">${L("接着读", "Read")}${ic("go")}</span>
-    </button>
-    <button class="v-todo" data-go="tasks"><b>${open.length}</b><span>${open.length ? esc(open[0].text) : L("今天没有待办", "Nothing to do today")}</span>${open.length > 1 ? `<em>${L(`还有 ${open.length - 1} 条`, `+${open.length - 1}`)}</em>` : ""}${ic("go")}</button>
+    ${call ? bookCard : todoList}
     <footer class="v-foot">${v2Dots()}<button data-homepage="1">${L("全部应用", "All apps")}${ic("go")}</button></footer>
   </main>`;
 }

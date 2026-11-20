@@ -64,6 +64,13 @@ struct Ui {
     lv_obj_t* todo_count = nullptr;
     lv_obj_t* todo_text = nullptr;
     lv_obj_t* todo_more = nullptr;
+    lv_obj_t* todo_rows[3] = {};          // list layout: one row per open item
+    lv_obj_t* todo_labels[3] = {};
+    lv_obj_t* todo_none = nullptr;
+    bool todo_list = false;               // list under the two blocks (no call entry) or the single row
+    bool book_block = false;              // reading is the right-hand block (no call entry) or the card
+    int book_track_w = 0;
+    std::string book_name;
     lv_timer_t* timer = nullptr;
     int book_progress = -1;               // 0..1000, -1 unknown
     char last_minute[8] = {};
@@ -108,6 +115,11 @@ lv_obj_t* Label(lv_obj_t* parent, const char* text, const lv_font_t* font, bool 
     lv_obj_set_style_text_color(label, white ? lv_color_white() : lv_color_black(), 0);
     lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
     return label;
+}
+// Setting the same text again still redraws the label, and on this panel a
+// redraw is a refresh; the once-a-second update must leave unchanged text alone.
+void SetText(lv_obj_t* label, const char* text) {
+    if (std::strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
 }
 void Line(lv_layer_t* layer, int x1, int y1, int x2, int y2, int width, bool white = false, bool round = false) {
     lv_draw_line_dsc_t line;
@@ -190,14 +202,14 @@ void RefreshWeather() {
     const bool weather = StandbyClassic_CopyWeatherView(&view) && view.valid;
     char lunar[24] = {};
     if (weather && zh) StandbyClassic_FormatLunarOrWeekday(lunar, sizeof(lunar), view.lunar);
-    lv_label_set_text(s.lunar, lunar);
+    SetText(s.lunar, lunar);
     if (lunar[0]) lv_obj_remove_flag(s.lunar, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(s.lunar, LV_OBJ_FLAG_HIDDEN);
     char line[80] = {};
     const char* day = valid ? (zh ? kZh : kEn)[local.tm_wday] : "";
     if (weather && view.has_temp) std::snprintf(line, sizeof(line), "%s · %s %d°", day, view.text, view.temp);
     else if (weather) std::snprintf(line, sizeof(line), "%s · %s", day, view.text);
     else std::snprintf(line, sizeof(line), "%s", day);
-    lv_label_set_text(s.weather, line);
+    SetText(s.weather, line);
 }
 void BuildHero(lv_obj_t* root) {
     // Hours over minutes, minutes shifted right, a thin rising stroke between them.
@@ -225,21 +237,22 @@ void BuildHero(lv_obj_t* root) {
     lv_obj_set_y(column, kHeroH - 20 - lv_obj_get_height(column));
 }
 
-// ── Ask / Call
+// ── The two blocks: Ask and Call, or Ask and Read when there is no assistant of your own
+enum Choice : intptr_t { kChoiceCall, kChoiceAsk, kChoiceRead };
+std::string BookTitle(const std::string& path);
+void RefreshBook();
 void DrawChoice(lv_event_t* e) {
     auto* obj = static_cast<lv_obj_t*>(lv_event_get_target(e));
     const intptr_t kind = reinterpret_cast<intptr_t>(lv_event_get_user_data(e));
-    const bool ask = kind != 0, alone = kind == 2;
     auto* layer = lv_event_get_layer(e);
     lv_area_t a;
     lv_obj_get_coords(obj, &a);
-    // Design polygons on a 222 x 134 grid: ask (0,0)(127,0)(96,134)(0,134), call (134,0)(222,0)(222,134)(103,134).
-    // Without a call entry Ask takes the whole row and keeps the slant on its right: (0,0)(222,0)(190,134)(0,134).
+    // Design polygons on a 222 x 134 grid: left (0,0)(127,0)(96,134)(0,134), right (134,0)(222,0)(222,134)(103,134).
     const int w = a.x2 - a.x1, h = a.y2 - a.y1;
     auto px = [&](int v) { return static_cast<lv_value_precise_t>(a.x1 + v * w / 222); };
     const lv_value_precise_t top = a.y1, bottom = a.y1 + h;
-    if (ask) {
-        const lv_point_precise_t p[4] = {{px(0), top}, {px(alone ? 222 : 127), top}, {px(alone ? 190 : 96), bottom}, {px(0), bottom}};
+    if (kind == kChoiceAsk) {
+        const lv_point_precise_t p[4] = {{px(0), top}, {px(127), top}, {px(96), bottom}, {px(0), bottom}};
         Quad(layer, p, true);
         // Microphone: capsule, cradle, stem.
         const int ix = a.x1 + 60, iy = a.y1 + 32;
@@ -264,38 +277,74 @@ void DrawChoice(lv_event_t* e) {
         arc.end_angle = 180;
         lv_draw_arc(layer, &arc);
         Line(layer, ix, iy + 50, ix, iy + 60, 5, true, true);
-    } else {
-        const lv_point_precise_t p[4] = {{px(134), top}, {px(222), top}, {px(222), bottom}, {px(103), bottom}};
-        for (int i = 0; i < 4; ++i)
-            Line(layer, p[i].x, p[i].y, p[(i + 1) % 4].x, p[(i + 1) % 4].y, 3);
+        return;
+    }
+    const lv_point_precise_t p[4] = {{px(134), top}, {px(222), top}, {px(222), bottom}, {px(103), bottom}};
+    for (int i = 0; i < 4; ++i) Line(layer, p[i].x, p[i].y, p[(i + 1) % 4].x, p[(i + 1) % 4].y, 3);
+    const int ix = a.x2 - 60, iy = a.y1 + 62;
+    if (kind == kChoiceCall) {
         // Sound wave: five bars.
-        const int ix = a.x2 - 60, iy = a.y1 + 62;
         static const int kHalf[5] = {7, 18, 30, 18, 7};
         for (int i = 0; i < 5; ++i)
             Line(layer, ix + (i - 2) * 13, iy - kHalf[i], ix + (i - 2) * 13, iy + kHalf[i], 5, false, true);
+    } else {
+        // Open book, on the 24-unit grid the design draws its icons on.
+        auto B = [&](int x1, int y1, int x2, int y2) {
+            Line(layer, ix + (x1 - 120) * 60 / 240, iy + (y1 - 125) * 60 / 240,
+                 ix + (x2 - 120) * 60 / 240, iy + (y2 - 125) * 60 / 240, 5, false, true);
+        };
+        B(120, 65, 120, 205); B(120, 65, 75, 45); B(75, 45, 30, 45); B(30, 45, 30, 185); B(30, 185, 75, 185);
+        B(75, 185, 120, 205); B(120, 65, 165, 45); B(165, 45, 210, 45); B(210, 45, 210, 185);
+        B(210, 185, 165, 185); B(165, 185, 120, 205);
     }
 }
 void BuildPair(lv_obj_t* root) {
     auto* pair = Box(root, kSide, kPairY, kWidth, kPairH);
-    // No assistant of your own, no Call: Ask alone, across the whole row.
+    // The page is always two slanted blocks. Without an assistant of your own
+    // there is no Call, so the second block is the other thing the device is
+    // for: the book you are reading.
     const bool call = chat_cloud::HasCallEntry();
-    for (int i = 0; i < (call ? 2 : 1); ++i) {
+    const std::string path = call ? std::string() : reader::book_home_snapshot::LoadLatestAbsPath();
+    for (int i = 0; i < 2; ++i) {
         const bool ask = i == 0;
+        const Choice kind = ask ? kChoiceAsk : call ? kChoiceCall : kChoiceRead;
         // Each half owns its side of the cut; the art is drawn over the whole pair.
         auto* art = Box(pair, 0, 0, kWidth, kPairH);
-        lv_obj_add_event_cb(art, DrawChoice, LV_EVENT_DRAW_MAIN,
-                            reinterpret_cast<void*>(static_cast<intptr_t>(!ask ? 0 : call ? 1 : 2)));
-        auto* hit = Box(pair, ask ? 0 : kWidth / 2 + 8, 0, ask && !call ? kWidth : kWidth / 2 - 8, kPairH,
-                        ask ? Ask : Call);
-        auto* title = Label(hit, ask ? Text("提问", "Ask") : Text("通话", "Call"), &kValetTitleFont, ask);
+        lv_obj_add_event_cb(art, DrawChoice, LV_EVENT_DRAW_MAIN, reinterpret_cast<void*>(static_cast<intptr_t>(kind)));
+        auto* hit = Box(pair, ask ? 0 : kWidth / 2 + 8, 0, kWidth / 2 - 8, kPairH, ask ? Ask : call ? Call : Read);
+        const char* name = ask ? Text("提问", "Ask") : call ? Text("通话", "Call") :
+            path.empty() ? Text("阅读", "Read") : Text("接着读", "Read");
+        auto* title = Label(hit, name, &kValetTitleFont, ask);
         lv_obj_set_style_text_letter_space(title, 4, 0);
-        auto* note = Label(hit, ask ? Text("按住，说一句", "Hold and say it") : Text("接通就聊", "Just talk"), Small(), ask);
+        auto* note = Label(hit, ask ? Text("按住，说一句", "Hold and say it") : call ? Text("接通就聊", "Just talk") :
+            path.empty() ? Text("去书架挑一本", "Pick a book") : "", Small(), ask);
         if (ask) {
             lv_obj_align(title, LV_ALIGN_BOTTOM_LEFT, 36, -70);
             lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, 36, -30);
-        } else {
-            lv_obj_align(title, LV_ALIGN_BOTTOM_RIGHT, -32, -70);
-            lv_obj_align(note, LV_ALIGN_BOTTOM_RIGHT, -36, -30);
+            continue;
+        }
+        lv_obj_align(title, LV_ALIGN_BOTTOM_RIGHT, -32, -70);
+        if (kind == kChoiceRead) {
+            lv_obj_set_width(note, 240);
+            lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
+            lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_RIGHT, 0);
+        }
+        lv_obj_align(note, LV_ALIGN_BOTTOM_RIGHT, -36, -30);
+        if (kind == kChoiceRead && !path.empty()) {
+            // How far in, under the icon; the same bar the reading card uses.
+            auto* track = Box(hit, 0, 0, 124, 12);
+            lv_obj_align(track, LV_ALIGN_TOP_RIGHT, -36, 108);
+            lv_obj_set_style_border_width(track, 2, 0);
+            lv_obj_set_style_border_color(track, lv_color_black(), 0);
+            s.book_track = Box(track, 0, 0, 0, 8);
+            lv_obj_set_style_bg_color(s.book_track, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(s.book_track, LV_OPA_COVER, 0);
+            s.book_track_w = 120;
+            s.book_block = true;
+            s.book_name = BookTitle(path);
+            s.book_sub = note;
+            s.book_progress = -2;
+            RefreshBook();
         }
     }
 }
@@ -386,11 +435,18 @@ void RefreshBook() {
     const int progress = known && peek.progress_x10 >= 0 ? std::clamp(peek.progress_x10, 0, 1000) : -1;
     if (progress == s.book_progress) return;
     s.book_progress = progress;
-    char text[40];
-    if (progress >= 0) std::snprintf(text, sizeof(text), Text("读到 %d.%d%%", "%d.%d%% read"), progress / 10, progress % 10);
-    else std::snprintf(text, sizeof(text), "%s", Text("接着上次的位置", "Where you left off"));
+    char text[160];
+    if (s.book_block) {
+        // In the block the title is the action, so the line under it names the book.
+        if (progress >= 0) std::snprintf(text, sizeof(text), "%s · %d.%d%%", s.book_name.c_str(), progress / 10, progress % 10);
+        else std::snprintf(text, sizeof(text), "%s", s.book_name.c_str());
+    } else if (progress >= 0) {
+        std::snprintf(text, sizeof(text), Text("读到 %d.%d%%", "%d.%d%% read"), progress / 10, progress % 10);
+    } else {
+        std::snprintf(text, sizeof(text), "%s", Text("接着上次的位置", "Where you left off"));
+    }
     lv_label_set_text(s.book_sub, text);
-    lv_obj_set_width(s.book_track, std::max(0, progress) * 236 / 1000);
+    lv_obj_set_width(s.book_track, std::max(0, progress) * s.book_track_w / 1000);
 }
 void BuildBook(lv_obj_t* root) {
     const std::string path = reader::book_home_snapshot::LoadLatestAbsPath();
@@ -411,6 +467,7 @@ void BuildBook(lv_obj_t* root) {
     lv_obj_set_style_border_width(track, 2, 0);
     lv_obj_set_style_border_color(track, lv_color_black(), 0);
     s.book_track = Box(track, 0, 0, 0, 10);
+    s.book_track_w = 236;
     lv_obj_set_style_bg_color(s.book_track, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s.book_track, LV_OPA_COVER, 0);
     if (path.empty()) lv_obj_add_flag(track, LV_OBJ_FLAG_HIDDEN);
@@ -421,24 +478,42 @@ void BuildBook(lv_obj_t* root) {
     if (!path.empty()) RefreshBook();
 }
 
-// ── To-do
+// ── To-do: one row under the reading card, or a short list when the card's place is free
 void RefreshTodo() {
-    if (!s.todo_text) return;
+    if (!s.todo_more) return;
     // Items live in PSRAM; this task's stack is too small for a copy of the list.
-    constexpr size_t kMax = 2;
+    constexpr size_t kMax = 3;
     auto* items = static_cast<checklist_cache_item_t*>(
         heap_caps_calloc(kMax, sizeof(checklist_cache_item_t), MALLOC_CAP_SPIRAM));
     size_t pending = 0, done = 0, today = 0;
     const bool ready = checklist_cache_counts(nullptr, &today, &done, &pending);
     const size_t copied = items && ready ? checklist_cache_copy_pending(items, kMax) : 0;
-    char count[8];
-    std::snprintf(count, sizeof(count), "%u", static_cast<unsigned>(ready ? pending : 0));
-    lv_label_set_text(s.todo_count, count);
-    lv_label_set_text(s.todo_text, copied ? items[0].title :
-        ready ? Text("今天没有待办", "Nothing to do today") : Text("今天的待办", "Today's to-dos"));
     char more[24] = {};
-    if (pending > 1) std::snprintf(more, sizeof(more), Text("还有 %u 条", "+%u"), static_cast<unsigned>(pending - 1));
-    lv_label_set_text(s.todo_more, more);
+    if (s.todo_list) {
+        for (size_t i = 0; i < kMax; ++i) {
+            if (i < copied) {
+                SetText(s.todo_labels[i], items[i].title);
+                lv_obj_remove_flag(s.todo_rows[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(s.todo_rows[i], LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        if (copied) {
+            lv_obj_add_flag(s.todo_none, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            SetText(s.todo_none, ready ? Text("今天没有待办", "Nothing to do today") : Text("待办还没同步", "Not synced yet"));
+            lv_obj_remove_flag(s.todo_none, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (pending) std::snprintf(more, sizeof(more), Text("%u 条没做", "%u open"), static_cast<unsigned>(pending));
+    } else {
+        char count[8];
+        std::snprintf(count, sizeof(count), "%u", static_cast<unsigned>(ready ? pending : 0));
+        SetText(s.todo_count, count);
+        SetText(s.todo_text, copied ? items[0].title :
+            ready ? Text("今天没有待办", "Nothing to do today") : Text("今天的待办", "Today's to-dos"));
+        if (pending > 1) std::snprintf(more, sizeof(more), Text("还有 %u 条", "+%u"), static_cast<unsigned>(pending - 1));
+    }
+    SetText(s.todo_more, more);
     heap_caps_free(items);
 }
 void BuildTodo(lv_obj_t* root) {
@@ -459,6 +534,40 @@ void BuildTodo(lv_obj_t* root) {
     s.todo_more = Label(row, "", Small());
     lv_obj_align(s.todo_more, LV_ALIGN_RIGHT_MID, -44, -2);
     lv_obj_align(Chevron(row, 24), LV_ALIGN_RIGHT_MID, 0, -2);
+    RefreshTodo();
+}
+void BuildTodoList(lv_obj_t* root) {
+    constexpr int kHeadH = 62, kItemH = 60;
+    // One touch target for the whole list: it opens the to-do page.
+    auto* list = Box(root, kSide, kWhoY + kWhoH + 8, kWidth, kHeadH + 3 * kItemH, Tasks);
+    lv_obj_set_style_border_width(list, 3, 0);
+    lv_obj_set_style_border_side(list, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_border_color(list, lv_color_black(), 0);
+    auto* head = Box(list, 0, 0, kWidth, kHeadH);
+    auto* title = Label(head, Text("今天的待办", "Today"), Strong());
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 2, 0);
+    lv_obj_update_layout(title);
+    s.todo_more = Label(head, "", Small());
+    lv_obj_align(s.todo_more, LV_ALIGN_LEFT_MID, lv_obj_get_width(title) + 22, 2);
+    lv_obj_align(Chevron(head, 24), LV_ALIGN_RIGHT_MID, 0, 0);
+    for (int i = 0; i < 3; ++i) {
+        auto* row = Box(list, 0, kHeadH + i * kItemH, kWidth, kItemH);
+        lv_obj_set_style_border_width(row, 1, 0);
+        lv_obj_set_style_border_side(row, LV_BORDER_SIDE_TOP, 0);
+        lv_obj_set_style_border_color(row, lv_color_black(), 0);
+        auto* box = Box(row, 0, 0, 20, 20);
+        lv_obj_align(box, LV_ALIGN_LEFT_MID, 4, 0);
+        lv_obj_set_style_border_width(box, 2, 0);
+        lv_obj_set_style_border_color(box, lv_color_black(), 0);
+        s.todo_labels[i] = Label(row, "", Body());
+        lv_obj_set_width(s.todo_labels[i], kWidth - 50);
+        lv_label_set_long_mode(s.todo_labels[i], LV_LABEL_LONG_DOT);
+        lv_obj_align(s.todo_labels[i], LV_ALIGN_LEFT_MID, 42, 0);
+        s.todo_rows[i] = row;
+    }
+    s.todo_none = Label(list, "", Small());
+    lv_obj_set_pos(s.todo_none, 2, kHeadH + 16);
+    s.todo_list = true;
     RefreshTodo();
 }
 
@@ -642,8 +751,13 @@ void HomeValet_Build(lv_obj_t* screen, lv_coord_t status_height) {
     BuildHero(s.root);
     BuildPair(s.root);
     BuildWho(s.root);
-    BuildBook(s.root);
-    BuildTodo(s.root);
+    if (chat_cloud::HasCallEntry()) {
+        BuildBook(s.root);
+        BuildTodo(s.root);
+    } else {
+        // Reading moved up into the second block; its place goes to the to-do list.
+        BuildTodoList(s.root);
+    }
     BuildFoot(s.root, height);
     RefreshClock(true);
     RefreshWeather();
