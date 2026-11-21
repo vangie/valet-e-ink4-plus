@@ -16,6 +16,12 @@
 #include <esp_timer.h>
 #include <freertos/idf_additions.h>
 #include <freertos/queue.h>
+#include <soc/usb_serial_jtag_struct.h>
+#if CONFIG_VALET_DEV_LINK
+#include <esp_rom_sys.h>
+#include <soc/cnnt_sys_struct.h>
+#include <soc/hp_sys_clkrst_struct.h>
+#endif
 #include <atomic>
 #include <chrono>
 #include <charconv>
@@ -275,6 +281,63 @@ static void RecordResult(const char* error) {
     ++s_state.revision;
 }
 
+// USB 数据线短暂断开时（如开机时 GPIO36 被拉低，见 epd_board_metalio_eink4_plus_ana_sw_set），
+// 主机若正在发数据，芯片的接收 FIFO 会错位：之后每包的末尾几个字节留在 FIFO 里，
+// "空"标志为 0，但"有数据"标志为 0、也不来中断。SDK 驱动只在中断里、且"有数据"置位时才读，
+// 所以单独一条命令永远收不全，直到下一包把它顶出来；芯片复位后仍然如此，刷机工具也连不上。
+// 按"空"标志把字节取出，既能收到数据，也让 FIFO 恢复正常。
+// 所以驱动一段时间没收到数据时，自己去 FIFO 里看一眼。worker 与驱动中断在同一个核上，
+// 临界区内中断插不进来；中断之前已放进缓冲的数据更早，先交出去。
+static portMUX_TYPE s_usb_rx_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static int TakeStrandedUsbBytes(uint8_t* bytes, size_t size) {
+    if (USB_SERIAL_JTAG.ser_afifo_config.serial_out_afifo_rempty) return 0;
+    uint8_t late[64];
+    size_t taken = 0;
+    portENTER_CRITICAL(&s_usb_rx_lock);
+    if (!USB_SERIAL_JTAG.int_st.serial_out_recv_pkt_int_st) {      // set: the handler runs right after us
+        while (taken < sizeof(late) && !USB_SERIAL_JTAG.ser_afifo_config.serial_out_afifo_rempty)
+            late[taken++] = static_cast<uint8_t>(USB_SERIAL_JTAG.ep1.val);
+    }
+    portEXIT_CRITICAL(&s_usb_rx_lock);
+    if (!taken) return 0;
+    static int s_logged = 0;
+    if (s_logged < 5) { ++s_logged; ESP_LOGW(TAG, "usb receive: %u bytes were held back in the fifo", (unsigned)taken); }
+    const int queued = usb_serial_jtag_read_bytes(bytes, size - taken, 0);
+    std::memcpy(bytes + queued, late, taken);
+    return queued + static_cast<int>(taken);
+}
+
+#if CONFIG_VALET_DEV_LINK
+// 仅测试版。2026-11-21 出现过一次：开机几秒后芯片 USB 模块完全失效而应用照常运行，
+// 没有日志、调试器连不上、也看不到主机，插着线进了待机，之后未再复现。
+// 主机消失或重新出现时记下模块寄存器；日志也写入 SD 卡，下次再出现能留下证据。
+static void LogUsbLink(const char* step) {
+    const uint32_t frame0 = USB_SERIAL_JTAG.fram_num.val;
+    esp_rom_delay_us(3000);
+    const uint32_t frame1 = USB_SERIAL_JTAG.fram_num.val;
+    ESP_LOGW(TAG, "usblink %s: host=%d conf0=%08x raw=%04x ena=%04x frame=%u->%u apbclk=%08x devctrl=%08x "
+                  "ep1conf=%02x out=%08x in=%08x afifo=%02x", step, usb_serial_jtag_is_connected() ? 1 : 0,
+             (unsigned)USB_SERIAL_JTAG.conf0.val, (unsigned)USB_SERIAL_JTAG.int_raw.val,
+             (unsigned)USB_SERIAL_JTAG.int_ena.val, (unsigned)frame0, (unsigned)frame1,
+             (unsigned)HP_SYS_CLKRST.usb_device_ctrl0.val, (unsigned)CNNT_SYS_REG.sys_hp_usb_device_ctrl.val,
+             (unsigned)USB_SERIAL_JTAG.ep1_conf.val, (unsigned)USB_SERIAL_JTAG.out_ep1_st.val,
+             (unsigned)USB_SERIAL_JTAG.in_ep1_st.val, (unsigned)USB_SERIAL_JTAG.ser_afifo_config.val);
+}
+
+static void WatchUsbLink() {
+    static int64_t checked_us = 0;
+    static bool was = true;
+    const int64_t now = esp_timer_get_time();
+    if (now - checked_us < 1000000) return;
+    checked_us = now;
+    const bool host = usb_serial_jtag_is_connected();
+    if (host == was) return;
+    was = host;
+    LogUsbLink(host ? "host seen again" : "host lost");
+}
+#endif
+
 static void Worker(void*) {
     // 等待启动复位与模式初始化完成后读取；此时不依赖任何页面。
     Request boot{};
@@ -297,8 +360,12 @@ static void Worker(void*) {
             NotifyResult(request.write, error);
             if (request.id) Reply(request.id, error ? error : "OK", error ? s_stage : "done");
         }
-        uint8_t bytes[64];
-        const int count = s_usb ? usb_serial_jtag_read_bytes(bytes, sizeof(bytes), pdMS_TO_TICKS(50)) : 0;
+        uint8_t bytes[128];
+        int count = s_usb ? usb_serial_jtag_read_bytes(bytes, 64, pdMS_TO_TICKS(50)) : 0;
+        if (s_usb && count == 0) count = TakeStrandedUsbBytes(bytes, sizeof(bytes));
+#if CONFIG_VALET_DEV_LINK
+        if (s_usb) WatchUsbLink();
+#endif
         if (!s_usb) vTaskDelay(pdMS_TO_TICKS(50));
         for (int i = 0; i < count; ++i) {
             if (bytes[i] == '\r' || bytes[i] == '\n') {
@@ -321,6 +388,9 @@ void PanelVcomInit() {
     usb_serial_jtag_driver_config_t config = {.tx_buffer_size = 1024, .rx_buffer_size = 1024};
     const esp_err_t err = usb_serial_jtag_driver_install(&config);
     s_usb = err == ESP_OK;
+#if CONFIG_VALET_DEV_LINK
+    if (s_usb) LogUsbLink("boot");
+#endif
     if (!s_usb) ESP_LOGE(TAG, "USB service unavailable err=%d", static_cast<int>(err));
     s_busy.store(true);
     if (xTaskCreatePinnedToCoreWithCaps(Worker, "panel_vcom", 6144, nullptr, 4, nullptr, 0,

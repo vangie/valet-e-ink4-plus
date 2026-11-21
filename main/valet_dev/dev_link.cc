@@ -13,6 +13,7 @@
 #include "metalio_keys.h"
 #include "metalio_touch.h"
 #include "screen_common.h"
+#include "sd_log_writer.h"
 #include "standby_screen/standby_classic.h"
 #include "standby_screen/standby_screen.h"
 #include "vk_key_handler.h"
@@ -162,6 +163,54 @@ const char* PressKey(const char* name, int ms) {
     return "UNKNOWN_KEY";
 }
 
+// ---- A blob back to the host ------------------------------------------------
+
+// Deflate `data`, announce it in the reply to `id`, then send it as base64 @DEVD lines.
+// `extra` is appended to the reply (may be empty); it starts with a comma.
+void SendBlob(uint32_t id, const uint8_t* data, size_t raw, const char* extra) {
+    uLongf packed = compressBound(raw);
+    auto* out = static_cast<uint8_t*>(heap_caps_malloc(packed, MALLOC_CAP_SPIRAM));
+    if (!out) { Reply(id, false, ",\"code\":\"NO_MEMORY\""); return; }
+    if (compress2(out, &packed, data, raw, 1) != Z_OK) {
+        heap_caps_free(out);
+        Reply(id, false, ",\"code\":\"COMPRESS\"");
+        return;
+    }
+    const unsigned chunks = static_cast<unsigned>((packed + kChunk - 1) / kChunk);
+    Reply(id, true, ",\"raw\":%u,\"z\":%lu,\"crc\":%lu,\"chunks\":%u%s", static_cast<unsigned>(raw),
+          static_cast<unsigned long>(packed), static_cast<unsigned long>(crc32(0, data, raw)), chunks, extra);
+    static char line[800];
+    for (unsigned i = 0; i < chunks; ++i) {
+        const size_t offset = static_cast<size_t>(i) * kChunk;
+        const size_t take = packed - offset < kChunk ? packed - offset : kChunk;
+        int n = snprintf(line, sizeof(line), "@DEVD %lu %u ", static_cast<unsigned long>(id), i);
+        size_t written = 0;
+        if (mbedtls_base64_encode(reinterpret_cast<unsigned char*>(line + n), sizeof(line) - n, &written,
+                                  out + offset, take) != 0 || !WriteLine(line, n + written)) {
+            ESP_LOGW(TAG, "blob aborted at chunk %u/%u", i, chunks);
+            break;
+        }
+    }
+    heap_caps_free(out);
+}
+
+// ---- The device's own log --------------------------------------------------
+
+// The runtime log the firmware keeps on the SD card (one circular file). It also holds
+// what happened while nothing was listening on USB: a start that stayed silent, standby,
+// a power-off. Read-only.
+void SdLog(uint32_t id) {
+    SdLogSnapshot snapshot;
+    const auto result = SdLogWriter_Snapshot(snapshot);
+    if (result != SdLogSnapshotResult::Ok) {
+        Reply(id, false, ",\"code\":\"%s\"", result == SdLogSnapshotResult::NoFile ? "NO_FILE" :
+              result == SdLogSnapshotResult::NoMemory ? "NO_MEMORY" :
+              result == SdLogSnapshotResult::IoError ? "IO_ERROR" : "UNAVAILABLE");
+        return;
+    }
+    SendBlob(id, snapshot.data, snapshot.size, "");
+}
+
 // ---- Screenshot -----------------------------------------------------------
 
 // Sends the frame the UI last drew (native 4 bpp, landscape), deflated and
@@ -256,6 +305,7 @@ void ValetDevLinkHandle(const char* json) {
     int x1, y1, x2, y2, ms;
     if (!strcmp(cmd, "info")) { Info(id); replied = true; }
     else if (!strcmp(cmd, "shot")) { Screenshot(id); replied = true; }
+    else if (!strcmp(cmd, "sdlog")) { SdLog(id); replied = true; }
     else if (!strcmp(cmd, "tap") || !strcmp(cmd, "swipe")) {
         const bool swipe = cmd[0] == 's';
         if (!Int(root, "x", &x1, 0, true) || !Int(root, "y", &y1, 0, true) ||

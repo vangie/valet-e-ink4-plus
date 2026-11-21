@@ -14,6 +14,8 @@ public:
     static lv_obj_t* CreatePager();
     /** @brief 创建设置→蓝牙子页入口 */
     static lv_obj_t* CreateBluetooth();
+    /** @brief 设置 → 设备 → 存储与 U 盘 (where coming back from Transfer lands) */
+    static lv_obj_t* CreateStorage();
     /** @brief 创建设置→测试子页入口 */
     static lv_obj_t* CreateTest();
     /** @brief 切换语言后重建设置页文案与布局 */

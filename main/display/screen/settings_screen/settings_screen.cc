@@ -171,6 +171,7 @@ static ScreenFactory FactoryForTab(SettingsTab id) {
     }
     #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
     if (id == SettingsTab::kLog) return SettingsScreen::CreateTest;   // 诊断 holds the tests
+    if (id == SettingsTab::kStorage) return SettingsScreen::CreateStorage;   // coming back from Transfer
     #endif
     return SettingsScreen::Create;
 }
@@ -953,6 +954,11 @@ lv_obj_t* SettingsScreen::CreatePager() {
 lv_obj_t* SettingsScreen::CreateBluetooth() {
     s_open_overview = false;
     s_pending_tab = SettingsTab::kBluetooth;
+    return CreateInternal();
+}
+lv_obj_t* SettingsScreen::CreateStorage() {
+    s_open_overview = false;
+    s_pending_tab = SettingsTab::kStorage;
     return CreateInternal();
 }
 lv_obj_t* SettingsScreen::CreateTest() {

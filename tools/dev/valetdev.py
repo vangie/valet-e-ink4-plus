@@ -18,6 +18,7 @@ socket. The port is never reopened on its own — after the device drops off USB
     valetdev.py home               # ask the UI to return to the home screen
     valetdev.py preview standby    # draw the standby page on a throwaway screen (`home` leaves it)
     valetdev.py log -n 80          # recent device log (credentials masked)
+    valetdev.py sdlog out.txt      # the log the device keeps on its SD card (covers times nothing was listening)
     valetdev.py flash              # write build-devtest app to ota_0, reattach
     valetdev.py stop
 
@@ -44,6 +45,7 @@ SOCK = STATE / "valetdev.sock"
 LOG = STATE / "device.log"
 APP = REPO / "build-devtest" / "Metalio-E-Ink4-Plus.bin"
 OTA0 = 0x80000  # partitions/v1/16m.csv; the official image stays in ota_1
+PUSH = 16     # newlines after each command; 8 were enough when measured
 SECRET = re.compile(r"(?i)(token|secret|password|passwd|authorization|api[_-]?key|code)(\"?\s*[=:]\s*\"?)[^\s\",&}]+")
 
 
@@ -142,7 +144,13 @@ class Link:
                 return {"ok": False, "code": "DETACHED", "note": self.note}
             rid, self.next_id = self.next_id, self.next_id + 1
             request = dict(request, id=rid)
-            self.port.write(b"\n@DEV " + json.dumps(request, separators=(",", ":")).encode() + b"\n")
+            # The device can hold a line back until a few more bytes arrive (seen on 2026-11-21: a
+            # command sent alone was only handled when the next one came, so every reply was one
+            # command late and was thrown away as unexpected). Trailing newlines are empty lines to
+            # the firmware and push the command through.
+            self.port.write(b"\n@DEV " + json.dumps(request, separators=(",", ":")).encode() + b"\n" * PUSH)
+            with self.cond:
+                self.replies.clear()      # a reply left over from a command that timed out is not ours
             deadline = time.time() + timeout
             with self.cond:
                 while rid not in self.replies:
@@ -152,7 +160,7 @@ class Link:
                                 "note": "no answer: is this firmware built with the dev link?"}
                     self.cond.wait(min(left, 0.5))
                 reply = self.replies.pop(rid)
-                if request["cmd"] == "shot" and reply.get("ok"):
+                if request["cmd"] in ("shot", "sdlog") and reply.get("ok"):
                     count = reply["chunks"]
                     deadline = time.time() + 20
                     while len(self.chunks.get(rid, {})) < count:
@@ -296,6 +304,7 @@ def main():
     p.add_argument("--ms", type=int, default=400)
     p = sub.add_parser("key"); p.add_argument("name"); p.add_argument("--ms", type=int, default=100)
     p = sub.add_parser("log"); p.add_argument("-n", type=int, default=60); p.add_argument("--grep")
+    p = sub.add_parser("sdlog"); p.add_argument("path")
     p = sub.add_parser("flash"); p.add_argument("--image", default=str(APP))
     args = parser.parse_args()
 
@@ -332,6 +341,14 @@ def main():
             lines = [line for line in lines if re.search(args.grep, line)]
         for line in lines[-args.n:]:
             print(SECRET.sub(r"\1\2***", line))
+    elif args.command == "sdlog":
+        reply = dev({"cmd": "sdlog"})
+        data = zlib.decompress(base64.b64decode(reply["data"]))
+        if len(data) != reply["raw"] or zlib.crc32(data) != reply["crc"]:
+            sys.exit("log damaged in transit; try again")
+        # The file is circular: the oldest bytes follow the newest. Keep the bytes as they are on the card.
+        Path(args.path).write_bytes(data)
+        print(f"{args.path}  {len(data)} bytes")
     elif args.command == "flash":
         image = Path(args.image)
         if not image.exists():
@@ -346,8 +363,9 @@ def main():
         result = subprocess.run([sys.executable, "-m", "esptool", "--chip", "esp32s31", "--port", status["port"],
                                  "--before", "usb-reset", "--after", "hard-reset", "--no-stub",
                                  "write-flash", hex(OTA0), str(image)])
-        # The device re-enumerates about two seconds into boot; attach after that.
-        time.sleep(6.0)
+        # Stay off the port until the app is up: bytes sent while it boots can leave the chip's USB
+        # receive path out of step (see TakeStrandedUsbBytes in panel_vcom.cc).
+        time.sleep(15.0)
         print(json.dumps(call({"op": "attach"}), ensure_ascii=False))
         if result.returncode:
             sys.exit("flash failed; the port was reattached")
