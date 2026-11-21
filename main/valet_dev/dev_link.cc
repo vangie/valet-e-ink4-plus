@@ -14,6 +14,7 @@
 #include "metalio_touch.h"
 #include "screen_common.h"
 #include "sd_log_writer.h"
+#include "usb_virtual_disk.h"
 #include "standby_screen/standby_classic.h"
 #include "standby_screen/standby_screen.h"
 #include "vk_key_handler.h"
@@ -319,6 +320,22 @@ void ValetDevLinkHandle(const char* json) {
         error = cJSON_IsString(name) ? PressKey(name->valuestring, ms) : "MISSING_NAME";
     } else if (!strcmp(cmd, "home")) {
         ScreenRequestHome();
+    } else if (!strcmp(cmd, "udisk")) {
+        // 不碰屏幕测一次 U 盘往返：0.5 s 后（先让这条回复发出去）打开 U 盘，`s` 秒后关掉。
+        // U 盘开着时调试口不在线，关掉后看调试口能否自己回来。
+        static int s_udisk_s;
+        Int(root, "s", &s_udisk_s, 8);
+        auto& disk = UsbVirtualDisk::GetInstance();
+        if (disk.IsGadgetActive() || disk.IsBusy()) error = "BUSY";
+        else if (xTaskCreate([](void*) {
+                     vTaskDelay(pdMS_TO_TICKS(500));
+                     ESP_LOGW(TAG, "udisk: on for %d s", s_udisk_s);
+                     UsbVirtualDisk::GetInstance().Toggle();
+                     vTaskDelay(pdMS_TO_TICKS(s_udisk_s * 1000));
+                     ESP_LOGW(TAG, "udisk: off");
+                     UsbVirtualDisk::GetInstance().DisableIfActive();
+                     vTaskDelete(nullptr);
+                 }, "udisk", 3072, nullptr, 3, nullptr) != pdPASS) error = "NO_MEMORY";
     } else if (!strcmp(cmd, "preview")) {
         // Draw a page that cannot be reached while the USB link is up (standby takes the
         // port down) on a throwaway screen, so it can be captured. `home` leaves it.
