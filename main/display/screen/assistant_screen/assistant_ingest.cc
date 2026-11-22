@@ -373,6 +373,27 @@ void AssistantScreen::FinishYunxinSpeech() {
     stream.yunxin_rendered = false;
 }
 
+namespace {
+// 自建助理（尤其 Hermes）的回答常带 Markdown：墨水屏上只显示纯文字，去掉加粗 / 标题 / 行内代码的符号。
+std::string PlainReply(const char* text) {
+    std::string out;
+    out.reserve(std::strlen(text));
+    bool line_start = true;
+    for (const char* p = text; *p;) {
+        if (line_start) {
+            const char* q = p;
+            while (*q == '#') ++q;
+            if (q != p && q - p <= 6 && *q == ' ') p = q + 1;   // 「## 标题」→「标题」
+        }
+        if ((p[0] == '*' && p[1] == '*') || (p[0] == '_' && p[1] == '_')) { p += 2; line_start = false; continue; }
+        if (*p == '`') { ++p; continue; }
+        line_start = *p == '\n';
+        out.push_back(*p++);
+    }
+    return out;
+}
+}  // namespace
+
 void AssistantScreen::AddMessage(const char* role, const char* content) {
     ESP_LOGD(TAG, "AddMessage user=%d assistant=%d bytes=%u",
              role != nullptr && std::strcmp(role, "user") == 0,
@@ -416,7 +437,8 @@ void AssistantScreen::AddMessage(const char* role, const char* content) {
         cJSON_AddBoolToObject(prefix, "bold", true);
         auto* message = cJSON_CreateObject();
         cJSON_AddItemToArray(spans, message);
-        cJSON_AddStringToObject(message, "text", content);
+        cJSON_AddStringToObject(message, "text", chat_cloud::IsCustom() && std::strcmp(role, "assistant") == 0
+                                                     ? PlainReply(content).c_str() : content);
     } else if (!is_a2ui) {
         const char* p = content;
         while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') { ++p; }
