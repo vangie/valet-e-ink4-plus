@@ -94,13 +94,16 @@ std::string ComposeReadingText(const std::vector<PageLine>& prev, const std::vec
     }
     return head + body + tail;
 }
+std::string BookIdForPath(const std::string& path) {
+    uint8_t hash[64]; crypto_sha512(hash, reinterpret_cast<const uint8_t*>(path.data()), path.size());
+    char id[33]{}; for (size_t i=0;i<16;++i) std::snprintf(id+i*2,3,"%02x",hash[i]);
+    return id;
+}
 void PublishReadingPage(const std::string& path, const std::string& title,
                         const std::string& chapter, int page, const std::string& text) {
     ReadingContext context;
     if (!path.empty() && page > 0 && !text.empty()) {
-        uint8_t hash[64]; crypto_sha512(hash, reinterpret_cast<const uint8_t*>(path.data()), path.size());
-        char id[33]{}; for (size_t i=0;i<16;++i) std::snprintf(id+i*2,3,"%02x",hash[i]);
-        context.book_id = id; context.title = Clip(title.empty() ? "未命名书籍" : title, 240);
+        context.book_id = BookIdForPath(path); context.title = Clip(title.empty() ? "未命名书籍" : title, 240);
         context.chapter = Clip(chapter.empty() ? "正文" : chapter, 240);
         context.page = page; context.text = Clip(text, 12000); context.truncated = context.text.size() != text.size();
     }

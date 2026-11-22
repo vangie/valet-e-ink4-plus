@@ -63,7 +63,9 @@ private:
     valet::ReadingContext context_;
     bool context_supported_ = false;
     bool context_selected_ = false;
-    bool book_live_supported_ = false, speech_supported_ = false, speech_active_ = false;
+    bool book_live_supported_ = false, speech_supported_ = false, speech_active_ = false, book_tools_supported_ = false;
+    void HandleBookRequest(const cJSON* payload);
+    void SendBookResult(const std::string& request_id, const std::string& key, cJSON* result);
     uint64_t speech_sequence_ = 0;
     void CompleteReply(const std::string& text);
     std::atomic<bool> authenticated_{false}, opened_{false}, closing_{false}, recording_{false}, live_ready_{false}, interrupted_{false};

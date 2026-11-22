@@ -178,6 +178,12 @@ public:
     void SetCachedPageImage(const std::string& href, int max_w, int max_h, RasterImage&& img);
 
     int ChapterIndex() const { return chapter_index_; }
+    /** 当前章在文档里的序号（EPUB 阅读顺序 / EBOOK 章节表；TXT 为 0）。给助理的书内工具定位用 */
+    int SourceChapterIndex() const {
+        if (txt_mode_) return 0;
+        if (ebook_ && chapter_index_ >= 0 && chapter_index_ < static_cast<int>(ebook_spine_.size())) return ebook_spine_[chapter_index_];
+        return chapter_index_;
+    }
     int ChapterCount() const { return chapter_count_; }
 
     // 统一目录（TXT 解析 TOC / EPUB·EBOOK 章表）。无目录时 Count=0。

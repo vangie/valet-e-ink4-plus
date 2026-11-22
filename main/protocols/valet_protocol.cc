@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "chat_cloud.h"
 #include "application.h"
+#include "valet_book_tools.h"
 #include "assistant_screen/assistant_screen.h"
 #include "audio/audio_service.h"
 #include "assets/lang_config.h"
@@ -33,9 +34,9 @@ std::atomic<int> mic_level{0};
 std::atomic<int64_t> mic_level_at{0};
 std::atomic<bool> mic_voice{false};   // 人声门这会儿开着（真在上传麦克风的声音）
 std::atomic<bool> link_reconnecting{false}, call_retrying{false};
-#if CONFIG_VALET_DEV_LINK
+// 当前开着的那条连接（悬窗翻页补发这一页、书内工具回结果用）。live_mutex 保证用的时候对象还在。
 std::atomic<ValetProtocol*> live_instance{nullptr};
-#endif
+std::mutex live_mutex;
 constexpr size_t kMaxFrame = 65536;
 constexpr EventBits_t kHello = BIT0, kFailed = BIT1, kInbox = BIT2, kExit = BIT3, kContext = BIT4, kSubscribed = BIT5, kReconnectExit = BIT6;
 using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
@@ -65,10 +66,11 @@ void ValetProtocol::SetMuted(bool enabled) { muted.store(enabled); }
 bool ValetProtocol::Muted() { return muted.load(); }
 ValetProtocol::ValetProtocol() : events_(xEventGroupCreate()) { server_sample_rate_ = 24000; server_frame_duration_ = 60; }
 ValetProtocol::~ValetProtocol() {
+    {
+        std::lock_guard<std::mutex> live(live_mutex);
+        ValetProtocol* self = this; live_instance.compare_exchange_strong(self, nullptr);
+    }
     CloseAudioChannel();
-#if CONFIG_VALET_DEV_LINK
-    ValetProtocol* self = this; live_instance.compare_exchange_strong(self, nullptr);
-#endif
     vEventGroupDelete(events_); if (vad_) fvad_free(vad_);
 }
 bool ValetProtocol::SendText(const std::string& text) {
@@ -250,9 +252,7 @@ bool ValetProtocol::OpenAudioChannel() {
     if (auto* engine = Engine()) { talk_overs_seen_ = engine->TalkOvers(); engine->DropMic(); }
     opened_ = true;
     StartUplink();
-#if CONFIG_VALET_DEV_LINK
     live_instance = this;
-#endif
     if (on_audio_channel_opened_) on_audio_channel_opened_();
     if (on_connected_) on_connected_();
     return true;
@@ -365,8 +365,8 @@ void ValetProtocol::RunReconnect() {
     reconnecting_ = false; link_reconnecting = false;
     if (!ok) SetError("助理连接已断开，请重新进入");
 }
-#if CONFIG_VALET_DEV_LINK
 void ValetProtocol::ReadingContextChanged() {
+    std::lock_guard<std::mutex> live(live_mutex);
     auto* self = live_instance.load();
     if (!self) return;
     const auto next = valet::SelectedReadingContext();
@@ -383,6 +383,46 @@ void ValetProtocol::ReadingContextChanged() {
     ESP_LOGI(TAG, "reading context: now page %d", next.page);
     self->Send(request);
 }
+// 助理要在这本书里搜词 / 读一段（valet_book_search / valet_book_read）：交给后台任务，读完回 valet.book.result。
+void ValetProtocol::SendBookResult(const std::string& request_id, const std::string& key, cJSON* result) {
+    auto* request = valet::wire::Request(("valet-book-" + request_id).c_str(), "valet.book.result");
+    auto* params = cJSON_GetObjectItem(request, "params");
+    cJSON_AddStringToObject(params, "requestId", request_id.c_str());
+    cJSON_AddStringToObject(params, "sessionKey", key.c_str());
+    cJSON_AddItemToObject(params, "result", result);
+    Send(request);
+}
+void ValetProtocol::HandleBookRequest(const cJSON* payload) {
+    const std::string request_id = String(payload, "requestId"), key = String(payload, "sessionKey");
+    if (request_id.empty() || request_id.size() > 80) return;
+    const auto source = valet::LatestBookSource();
+    const char* refuse = nullptr;
+    if (!book_tools_supported_) refuse = "book tools were not negotiated";
+    else if (key != session_id_ || !context_.Valid()) refuse = "this device is not in that book session";
+    else if (source.path.empty() || source.book_id != context_.book_id) refuse = "that book is no longer open on the device";
+    if (!refuse) {
+        ESP_LOGI(TAG, "book tool: %s", String(payload, "op"));
+        // 结果在后台任务里回来：那时这条连接可能已经关了或换了书，先核对（锁的顺序和 ReadingContextChanged 一样）
+        const bool started = valet::StartBookToolRequest(source, payload, [request_id, key](cJSON* result) {
+            std::lock_guard<std::mutex> live(live_mutex);
+            auto* self = live_instance.load();
+            if (self) {
+                std::lock_guard<std::recursive_mutex> lock(self->state_mutex_);
+                if (self->opened_ && self->session_id_ == key) { self->SendBookResult(request_id, key, result); return; }
+            }
+            ESP_LOGW(TAG, "book tool: the connection changed before the result was ready");
+            cJSON_Delete(result);
+        });
+        if (started) return;
+        refuse = "the device is still working on the previous book request";
+    }
+    ESP_LOGW(TAG, "book tool refused: %s", refuse);
+    auto* result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result, "ok", false);
+    cJSON_AddStringToObject(result, "error", refuse);
+    SendBookResult(request_id, key, result);
+}
+#if CONFIG_VALET_DEV_LINK
 namespace { std::mutex s_test_question_mutex; std::string s_test_question; }
 void ValetProtocol::SetTestQuestion(const std::string& text) {
     std::lock_guard<std::mutex> lock(s_test_question_mutex);
@@ -772,9 +812,12 @@ void ValetProtocol::Handle(cJSON* root) {
         book_live_supported_ = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload, "valetBookLive"));
         const auto* speech = cJSON_GetObjectItemCaseSensitive(payload, "valetAskSpeech");
         speech_supported_ = cJSON_IsNumber(speech) && speech->valueint == 1;
+        const auto* tools = cJSON_GetObjectItemCaseSensitive(payload, "valetBookTools");
+        book_tools_supported_ = cJSON_IsNumber(tools) && tools->valueint == 1;
         xEventGroupSetBits(events_, kHello); return;
     }
     if (!authenticated_) return;
+    if (event == "valet.book.request") { HandleBookRequest(payload); return; }
     if (!request_id_.empty() && id == "valet-speech-" + request_id_) {
         if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok"))) { speech_active_ = false; Event("tts", "stop"); }
         return;

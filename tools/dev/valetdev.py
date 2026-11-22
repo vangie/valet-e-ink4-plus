@@ -311,6 +311,7 @@ def main():
     p = sub.add_parser("voiceprobe", help="play <url>/play.raw, record, upload mic/ref to <url>/upload"); p.add_argument("url")
     p = sub.add_parser("audioprobe", help="measure speaker-to-mic delay (home screen, idle)"); p.add_argument("--stall", type=int, default=0); p.add_argument("--amp", type=int, default=0)
     sub.add_parser("droplink", help="close the link to the assistant (test call reconnection)")
+    p = sub.add_parser("booktool", help='run a book tool on the open book: booktool \'{"op":"search","query":"宋万"}\''); p.add_argument("request")
     p = sub.add_parser("sd", help="SD card state; --mount retries mounting"); p.add_argument("--mount", action="store_true")
     p = sub.add_parser("ask", help="send TEXT instead of the recording at the next hold-to-talk (no speaking needed)"); p.add_argument("text")
     p = sub.add_parser("proxy", help="set the proxy: proxy http 192.168.0.10 6152 --wifi; proxy off")
@@ -362,6 +363,8 @@ def main():
         dev({"cmd": "audioprobe", "stall": args.stall, "amp": args.amp})
     elif args.command == "droplink":
         dev({"cmd": "droplink"})
+    elif args.command == "booktool":
+        dev({"cmd": "booktool", "request": json.loads(args.request)})
     elif args.command == "sd":
         dev({"cmd": "sd", "mount": args.mount})
     elif args.command == "ask":

@@ -1,3 +1,4 @@
+#include "valet_book_tools.h"
 #include "SdCardManager.hpp"
 #include "dev_link.h"
 
@@ -355,6 +356,18 @@ void ValetDevLinkHandle(const char* json) {
     } else if (!strcmp(cmd, "droplink")) {
         // 仅测试版：关掉当前和助理的连接（发关闭帧，网关回关闭），看通话能不能自己接回来。
         ValetProtocol::DropLinkForTest();
+    } else if (!strcmp(cmd, "booktool")) {
+        // 仅测试版：不经网关，直接在正在读的书里跑一次书内工具，结果打到日志（分段打，日志一行有长度上限）
+        const auto* request = cJSON_GetObjectItemCaseSensitive(root, "request");
+        if (!cJSON_IsObject(request)) error = "MISSING_REQUEST";
+        else if (!valet::StartBookToolRequest(valet::LatestBookSource(), request, [](cJSON* result) {
+                     char* text = cJSON_PrintUnformatted(result);
+                     const size_t n = text ? std::strlen(text) : 0;
+                     ESP_LOGW(TAG, "booktool result %u bytes", unsigned(n));
+                     for (size_t i = 0; i < n; i += 400) ESP_LOGW(TAG, "booktool| %.*s", int(std::min<size_t>(400, n - i)), text + i);
+                     cJSON_free(text);
+                     cJSON_Delete(result);
+                 })) error = "BUSY";
     } else if (!strcmp(cmd, "sd")) {
         // 仅测试版：SD 卡状态（挂上没有、卡在不在、上次初始化的错误）；mount=true 时重试挂载
         auto& sd = SdCardManager::GetInstance();

@@ -45,7 +45,7 @@ cJSON* Connect(const uint8_t secret[64], const uint8_t public_key[32], const std
     auto* scopes = cJSON_AddArrayToObject(params, "scopes");
     for (const auto* scope : {"operator.read", "operator.write", "operator.talk"}) cJSON_AddItemToArray(scopes, cJSON_CreateString(scope));
     auto* caps = cJSON_AddArrayToObject(params, "caps");
-    for (const auto* cap : {"hello-health-on-demand", "hello-presence-self", "session-scoped-events", "passport-ima-v1", "valet-book-context-v1", "valet-ask-speech-v1"}) cJSON_AddItemToArray(caps, cJSON_CreateString(cap));
+    for (const auto* cap : {"hello-health-on-demand", "hello-presence-self", "session-scoped-events", "passport-ima-v1", "valet-book-context-v1", "valet-ask-speech-v1", "valet-book-tools-v1"}) cJSON_AddItemToArray(caps, cJSON_CreateString(cap));
     cJSON_AddArrayToObject(params, "commands");
     auto* auth = cJSON_AddObjectToObject(params, "auth"); cJSON_AddStringToObject(auth, bootstrap ? "bootstrapToken" : "deviceToken", token.c_str());
     auto* device = cJSON_AddObjectToObject(params, "device");

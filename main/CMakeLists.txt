@@ -146,6 +146,8 @@ idf_component_register(
         "settings.cc"
         "assistant_profiles.cc"
         "valet_reading_context.cc"
+        "valet_book_search.cc"
+        "valet_book_tools.cc"
         "assistant_profiles_model.cc"
         "valet_setup/pairing.cc"
         "valet_setup/server.cc"

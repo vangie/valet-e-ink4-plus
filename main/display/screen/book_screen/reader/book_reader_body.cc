@@ -2,6 +2,7 @@
 #include "assets/lang_reader.h"
 #include "epd_content_policy.h"
 #include "valet_reading_context.h"
+#include "valet_book_tools.h"
 #include "valet_protocol.h"
 #include "chat_cloud.h"
 #include "assistant_screen/assistant_screen.h"
@@ -344,6 +345,16 @@ void RenderReaderPage() {
         st.reader.session->CurrentTocTitle(), st.reader.session->BookCurrentPage() + 1,
         valet::JoinPageLines(ContextLines(page->items)));
     valet::SetReadingTextExpander(ExpandReadingText);
+    {   // 给助理的书内搜索：哪本书、第几章、这一页第一行（只留在设备上）
+        valet::BookSource source;
+        source.path = st.reader.session->Info().path;
+        source.book_id = valet::BookIdForPath(source.path);
+        source.format = static_cast<int>(st.reader.session->Info().format);
+        source.chapter = st.reader.session->SourceChapterIndex();
+        for (const auto& item : page->items)
+            if (item.kind == reader::ContentKind::kText && !item.text.empty()) { source.anchor = item.text; break; }
+        valet::PublishBookSource(source);
+    }
     // 问答悬窗开着：跟到这一页（画完再选，补全前后段落要读相邻页）；从「全屏」返回：悬窗接着开
     if (AssistantScreen::PanelOpen()) ScreenLvAsync([](void*) {
         AssistantScreen::PanelPageChanged();

@@ -14,6 +14,8 @@ struct ReadingContext {
 };
 // UI publishes an immutable copy of the page actually rendered; never reads SD.
 // 选中「这一页」（SelectBookContext）时才请阅读器补全前后被截断的段落（见 SetReadingTextExpander）。
+// 书的稳定编号（路径的 SHA-512 前 128 位，十六进制），助理那边按它分会话。
+std::string BookIdForPath(const std::string& path);
 void PublishReadingPage(const std::string& path, const std::string& title,
                         const std::string& chapter, int page, const std::string& text);
 ReadingContext LatestReadingPage();
