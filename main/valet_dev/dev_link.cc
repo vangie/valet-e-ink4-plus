@@ -354,6 +354,10 @@ void ValetDevLinkHandle(const char* json) {
     } else if (!strcmp(cmd, "droplink")) {
         // 仅测试版：关掉当前和助理的连接（发关闭帧，网关回关闭），看通话能不能自己接回来。
         ValetProtocol::DropLinkForTest();
+    } else if (!strcmp(cmd, "ask")) {
+        // 仅测试版：下一次「按住说话」改发这段文字（见 ValetProtocol::SetTestQuestion）
+        const auto* text = cJSON_GetObjectItemCaseSensitive(root, "text");
+        if (cJSON_IsString(text) && text->valuestring[0]) ValetProtocol::SetTestQuestion(text->valuestring); else error = "MISSING_TEXT";
     } else if (!strcmp(cmd, "micgate")) {
         extern bool g_valet_mic_gate;
         g_valet_mic_gate = !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "on"));

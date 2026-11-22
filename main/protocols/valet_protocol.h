@@ -29,6 +29,8 @@ public:
     static bool Reconnecting();
 #if CONFIG_VALET_DEV_LINK
     static void DropLinkForTest();   // 仅测试版：主动关掉当前连接，模拟线路断开
+    // 仅测试版：下一次「按住说话」松开后不传录音，改发这段文字（问题照常带上当前页）。不用出声就能测提问。
+    static void SetTestQuestion(const std::string& text);
 #endif
     // 配对结果。Refused* 是网关给出的明确原因，Unreachable 是没连到网关。
     enum class Pairing { Paired, NeedsApproval, CodeExpired, ScopeDenied, Refused, Unreachable, SaveFailed, NoProfile };

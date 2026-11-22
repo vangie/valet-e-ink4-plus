@@ -751,9 +751,13 @@ lv_obj_t* AssistantScreen::Create() {
             lv_obj_set_style_text_font(where, ValetSmall(), 0);
             lv_obj_set_width(where, LV_HOR_RES - 2 * kValetSide - 30);
             lv_label_set_long_mode(where, LV_LABEL_LONG_DOT);
+            lv_obj_set_height(where, lv_font_get_line_height(ValetSmall()));   // 只占一行：长书名省略，不压住下面的摘录
             lv_obj_set_pos(where, 20, 4);
             auto* text = lv_label_create(quote);
-            lv_label_set_text(text, reading.text.c_str());
+            // 补全过前后段落的正文以说明行开头：卡片上从这一页的第一个字显示
+            const auto start = reading.text.find("【本页开始】");
+            lv_label_set_text(text, start == std::string::npos ? reading.text.c_str()
+                                                                : reading.text.c_str() + start + std::strlen("【本页开始】"));
             lv_obj_set_style_text_font(text, fontpack_lv_font_ui(), 0);
             lv_obj_set_width(text, LV_HOR_RES - 2 * kValetSide - 30);
             lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);

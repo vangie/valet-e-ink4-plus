@@ -47,6 +47,34 @@
 namespace {
 bool s_reader_first_paint = false;
 
+// 页上的文字行 → 助理用的行（段首 = 缩进、段前空或章名）
+std::vector<valet::PageLine> ContextLines(const std::vector<reader::PageItem>& items) {
+    std::vector<valet::PageLine> lines;
+    for (const auto& item : items) {
+        if (item.kind != reader::ContentKind::kText || item.text.empty()) continue;
+        lines.push_back({item.text, item.para_indent || item.para_gap_before || item.chapter_title});
+    }
+    return lines;
+}
+
+// 选中「这一页」时调用：读前后两页，把被翻页截断的首尾段落补全。阅读器忙、已关闭或读不到时返回空，用原来的本页文字。
+std::pair<int, std::string> ExpandReadingText() {
+    auto& st = Book_State();
+    if (!st.reader.session || st.reader.opening.load() || ReaderPageWorkPending()) return {0, {}};
+    const reader::Page* page = st.reader.session->CurrentPageData();
+    if (!page) return {0, {}};
+    const auto current = ContextLines(page->items);   // 先拷出来：读相邻页（TXT）会借用同一份页缓冲
+    std::vector<reader::PageItem> items;
+    const auto prev = st.reader.session->AdjacentPageItems(-1, items) ? ContextLines(items) : std::vector<valet::PageLine>{};
+    const auto next = st.reader.session->AdjacentPageItems(+1, items) ? ContextLines(items) : std::vector<valet::PageLine>{};
+    bool truncated = false;
+    auto text = valet::ComposeReadingText(prev, current, next, 12000, truncated);
+    ESP_LOGI("BookReader", "reading context: page %u B, before/after pages %u/%u lines, sent %u B%s",
+             unsigned(valet::JoinPageLines(current).size()), unsigned(prev.size()), unsigned(next.size()),
+             unsigned(text.size()), truncated ? " (page clipped)" : "");
+    return {st.reader.session->BookCurrentPage() + 1, std::move(text)};
+}
+
 void FinishReaderFirstPaintGate() {
     if (!s_reader_first_paint) {
         return;
@@ -244,15 +272,11 @@ void RenderReaderPage() {
         return;
     }
 
-    std::string context_text;
-    for (const auto& item : page->items) {
-        if (item.kind == reader::ContentKind::kText && !item.text.empty()) {
-            context_text += item.text; context_text += '\n';
-            if (context_text.size() > 12000) break;
-        }
-    }
+    // 给助理的正文：页上的行拼回段落（不再一行一个换行）。前后被翻页截断的段落等真要提问时再补（见 ExpandReadingText）。
     valet::PublishReadingPage(st.reader.session->Info().path, st.reader.session->Title(),
-        st.reader.session->CurrentTocTitle(), st.reader.session->BookCurrentPage() + 1, context_text);
+        st.reader.session->CurrentTocTitle(), st.reader.session->BookCurrentPage() + 1,
+        valet::JoinPageLines(ContextLines(page->items)));
+    valet::SetReadingTextExpander(ExpandReadingText);
 
     if (prepared->direction != 0) {
         const int effect = BookReaderPrefsPageTurn();

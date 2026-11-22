@@ -311,6 +311,7 @@ def main():
     p = sub.add_parser("voiceprobe", help="play <url>/play.raw, record, upload mic/ref to <url>/upload"); p.add_argument("url")
     p = sub.add_parser("audioprobe", help="measure speaker-to-mic delay (home screen, idle)"); p.add_argument("--stall", type=int, default=0); p.add_argument("--amp", type=int, default=0)
     sub.add_parser("droplink", help="close the link to the assistant (test call reconnection)")
+    p = sub.add_parser("ask", help="send TEXT instead of the recording at the next hold-to-talk (no speaking needed)"); p.add_argument("text")
     p = sub.add_parser("proxy", help="set the proxy: proxy http 192.168.0.10 6152 --wifi; proxy off")
     p.add_argument("kind", choices=["http", "socks5", "off"]); p.add_argument("host", nargs="?"); p.add_argument("port", nargs="?", type=int)
     p.add_argument("--wifi", action="store_true"); p.add_argument("--cell", action="store_true")
@@ -360,6 +361,8 @@ def main():
         dev({"cmd": "audioprobe", "stall": args.stall, "amp": args.amp})
     elif args.command == "droplink":
         dev({"cmd": "droplink"})
+    elif args.command == "ask":
+        dev({"cmd": "ask", "text": args.text})
     elif args.command == "micgate":
         dev({"cmd": "micgate", "on": args.state == "on"})
     elif args.command == "livebars":

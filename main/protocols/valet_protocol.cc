@@ -366,6 +366,12 @@ void ValetProtocol::RunReconnect() {
     if (!ok) SetError("助理连接已断开，请重新进入");
 }
 #if CONFIG_VALET_DEV_LINK
+namespace { std::mutex s_test_question_mutex; std::string s_test_question; }
+void ValetProtocol::SetTestQuestion(const std::string& text) {
+    std::lock_guard<std::mutex> lock(s_test_question_mutex);
+    s_test_question = text;
+    ESP_LOGW(TAG, "ask: next question will be sent as text (%u bytes)", unsigned(text.size()));
+}
 void ValetProtocol::DropLinkForTest() {
     auto* self = live_instance.load();
     if (!self || !self->opened_) { ESP_LOGW(TAG, "droplink: no open channel"); return; }
@@ -657,14 +663,23 @@ bool ValetProtocol::Submit() {
         return valet::wire::Base64(wav.data(), wav.size());
     }();
     record.unlock();
+    std::string text_question;
+#if CONFIG_VALET_DEV_LINK
+    { std::lock_guard<std::mutex> lock(s_test_question_mutex); text_question.swap(s_test_question); }
+#endif
     if (!max_payload_ || audio.size() + 1024 > max_payload_) { SetError("录音超过网关限制，请缩短后重试"); return false; }
     run_id_.clear(); reply_.clear(); reply_completed_ = false; interrupted_ = false;
     awaiting_ = true; ask_deadline_ = esp_timer_get_time() + 180000000; last_poll_ = 0;
     request_id_ = "valet-" + std::to_string(esp_random()) + "-" + std::to_string(++sequence_);
     auto* root = valet::wire::Request(request_id_.c_str(), "chat.send"); auto* params = cJSON_GetObjectItem(root, "params");
-    cJSON_AddStringToObject(params, "sessionKey", session_id_.c_str()); cJSON_AddStringToObject(params, "message", "");
+    cJSON_AddStringToObject(params, "sessionKey", session_id_.c_str()); cJSON_AddStringToObject(params, "message", text_question.c_str());
     cJSON_AddStringToObject(params, "thinking", "off"); cJSON_AddBoolToObject(params, "fastMode", true);
     cJSON_AddStringToObject(params, "idempotencyKey", request_id_.c_str());
+    if (!text_question.empty()) {   // 仅测试：文字问题，不带录音
+        ESP_LOGW(TAG, "ask: sending a text question instead of the recording");
+        if (Send(root)) return true;
+        awaiting_ = false; SetError("提问发送失败，请重新连接助理"); return false;
+    }
     auto* attachments = cJSON_AddArrayToObject(params, "attachments"); auto* attachment = cJSON_CreateObject(); cJSON_AddItemToArray(attachments, attachment);
     cJSON_AddStringToObject(attachment, "type", "audio"); cJSON_AddStringToObject(attachment, "mimeType", "audio/wav");
     cJSON_AddStringToObject(attachment, "fileName", "valet.wav"); // The reference stays valid through synchronous Send; avoid another large copy.
@@ -1193,7 +1208,20 @@ void ValetProtocol::DrainPlayback() {
         ESP_LOGW(TAG, "call: no reply to the interrupt after 2 s, listening again");
         interrupted_ = false; interrupt_at_ = 0; Event("tts", "stop");
     }
-    if (live_ready_ && !call_ready_seen_) { call_ready_seen_ = true; call_retries_ = 0; call_retrying = false; }
+    if (live_ready_ && !call_ready_seen_) {
+        call_ready_seen_ = true; call_retries_ = 0; call_retrying = false;
+        // 真打通过一次通话：记到这个助理上（设置页不再显示「通话未验证」）。写 NVS 交给主任务，不卡音频。
+        if (!profile_.live) {
+            profile_.live = true;
+            Application::GetInstance().Schedule([id = profile_.id, url = profile_.connection.url] {
+                auto updated = valet::LoadAssistantProfiles();
+                bool changed = false;
+                for (auto& item : updated.items)
+                    if (item.id == id && item.connection.url == url && !item.live) { item.live = true; changed = true; }
+                if (changed && !valet::SaveAssistantProfiles(updated)) ESP_LOGW(TAG, "call: could not record the verified call");
+            });
+        }
+    }
     if (recreate_at_ && now >= recreate_at_ && authenticated_ && session_live_ && opened_) CreateCall();
     // 连接悄悄断了（没有关闭帧也没有 RST，比如隧道挂了）：每 20 秒一次的 ping 连着 2 次没回音就当断线。
     if (authenticated_ && session_live_ && opened_ && !reconnecting_ && socket_) {
@@ -1205,7 +1233,16 @@ void ValetProtocol::DrainPlayback() {
             return;
         }
     }
-    if (awaiting_ && now > ask_deadline_) { awaiting_ = false; SetError("助理回复超时，请重新提问"); }
+    if (awaiting_ && now > ask_deadline_) {
+        awaiting_ = false; SetError("助理回复超时，请重新提问");
+        // 让助理那边也停下：不然它还在后台一轮轮查资料、花用量，答案也没人收
+        if (!run_id_.empty() && !session_live_) {
+            ESP_LOGW(TAG, "ask: no answer in time, asking the assistant to stop");
+            auto* root = valet::wire::Request("valet-timeout-abort", "chat.abort"); auto* params = cJSON_GetObjectItem(root, "params");
+            cJSON_AddStringToObject(params, "sessionKey", session_id_.c_str()); cJSON_AddStringToObject(params, "runId", run_id_.c_str());
+            Send(root);
+        }
+    }
     if (awaiting_ && !run_id_.empty() && now - last_poll_ > 3000000) {
         last_poll_ = now;
         auto* history = valet::wire::Request("valet-history", "chat.history"); auto* params = cJSON_GetObjectItem(history, "params");

@@ -3002,6 +3002,29 @@ const Page* BookSession::CurrentPageData() const try {
     return nullptr;
 }
 
+bool BookSession::AdjacentPageItems(int delta, std::vector<PageItem>& out) const try {
+    out.clear();
+    if (live_preview_active_) return false;
+    const int index = page_index_ + delta;
+    if (index < 0 || index >= PageCount() || index == page_index_) return false;
+    if (txt_mode_) {
+        // TXT 只物化一页：借用后把当前页放回去
+        MaterializeTxtPage(index);
+        const bool ok = txt_lines_.Good() && txt_page_first_line_.Good();
+        if (ok) out = txt_view_page_.items;
+        MaterializeTxtPage(page_index_);
+        return ok;
+    }
+    // 分页缓存按页号奇偶分两格：相邻页不会挤掉当前页
+    const Page& page = pages_[static_cast<size_t>(index)];
+    if (!pages_.Good()) return false;
+    out = page.items;
+    return true;
+} catch (const std::bad_alloc&) {
+    out.clear();
+    return false;
+}
+
 bool BookSession::GoToPage(int page) {
     navigation_anchor_ = {};
     if (live_preview_active_) {

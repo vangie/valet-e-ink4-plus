@@ -153,6 +153,9 @@ public:
     bool HasPrevPage() const;
 
     const Page* CurrentPageData() const;
+    /** 同一章内相邻页（delta = -1 / +1）的绘制单元拷贝，不改变当前页；读不到、跨章或预览中返回 false。
+     *  给助理补全被翻页截断的段落用；只在阅读器空闲时由 UI 任务调用。 */
+    bool AdjacentPageItems(int delta, std::vector<PageItem>& out) const;
     const BookBookmarkStore& BookmarkStore() const { return bookmarks_; }
     bool CaptureBookmarkRange(BookSourcePosition& first,BookSourcePosition& end) const;
     uint32_t CurrentPageBookmarkId() const;
