@@ -554,9 +554,14 @@ void LiveTick(lv_timer_t*) {
     // （2026-11-22 实测 0.5～1 秒）。提高播放优先级会让屏幕欠载闪烁，两头不能兼得。
     int64_t at = 0;
     int rms = 0;
+    auto& audio = Application::GetInstance().GetAudioService();
+    // 新语音引擎下刷屏不再卡声音（2026-11-23 实测：141 秒回答里刷了 17 次，音频循环最长 36 ms），
+    // 助理说话时竖条也跟着扬声器正在播的声音跳；老链路仍用固定形状。
+    const bool speaking_live = state == 2 && audio.EngineMode();
     if (state == 1) rms = ValetProtocol::MicLevel(&at);
+    else if (speaking_live) rms = audio.OutputLevel(&at);
     constexpr int kHalf = (kLiveBars + 1) / 2;
-    if (state == 2) {
+    if (state == 2 && !speaking_live) {
         static const float kSpeaking[kHalf] = {1.f, 0.55f, 0.85f, 0.4f, 0.65f};
         for (int d = 0; d < kHalf; ++d) s_live.history[d] = kSpeaking[d];
     } else {

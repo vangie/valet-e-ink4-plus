@@ -12,4 +12,5 @@ void Assistant_ReplayHistoryFromStore();
 void Assistant_ClearSession();
 /** @brief 流式分片：排队或立即展示 */
 void Assistant_QueueOrShowChunk(FlowList&& chunk, bool jump_to_new);
-bool Assistant_ReplaceYunxinSpeech(FlowList&& chunk);
+// follow：替换后翻到最后一页（通话里助理说到哪儿，屏幕就跟到哪儿）
+bool Assistant_ReplaceYunxinSpeech(FlowList&& chunk, bool follow = false);

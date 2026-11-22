@@ -300,6 +300,34 @@ void AssistantScreen::FlushYunxinSpeech() {
     stream.yunxin_dirty = false;
 }
 
+void AssistantScreen::ShowLiveReply(const char* text, bool done) {
+    auto& stream = Assistant_State().stream;
+    if (IsActive() && text && text[0] && stream.yunxin_text != text) {
+        FlowItem item;
+        item.kind = FlowKind::RichText;
+        SpanRun prefix;
+        prefix.text = "AI：";   // 末页增量重排认这个前缀
+        prefix.bold = true;
+        item.spans.push_back(std::move(prefix));
+        SpanRun body;
+        body.text = text;
+        item.spans.push_back(std::move(body));
+        FlowList chunk;
+        chunk.push_back(std::move(item));
+        // 新的一条：翻到它开头所在的页；之后每次加文字：翻到最后一页（说到哪儿跟到哪儿）
+        if (!stream.yunxin_rendered || !Assistant_ReplaceYunxinSpeech(std::move(chunk), true)) {
+            Assistant_AppendFlowAndShow(std::move(chunk), true);
+        }
+        stream.yunxin_rendered = true;
+        stream.yunxin_text = text;
+    }
+    if (done) {
+        stream.yunxin_text.clear();
+        stream.yunxin_rendered = false;
+        stream.yunxin_dirty = false;
+    }
+}
+
 void AssistantScreen::AddYunxinSpeech(const char* text) {
     if (!chat_cloud::IsYunxin() || !IsActive() || text == nullptr || text[0] == '\0') { return; }
     auto& stream = Assistant_State().stream;
@@ -366,6 +394,7 @@ void AssistantScreen::AddMessage(const char* role, const char* content) {
     if (chat_cloud::IsYunxin() && (is_a2ui || (role != nullptr && std::strcmp(role, "user") == 0))) {
         FinishYunxinSpeech();
     }
+    if (chat_cloud::IsCustom()) ShowLiveReply(nullptr, true);   // 新消息之后，通话回答不能再原地替换
     if (!is_a2ui && (chat_cloud::UsesXiaozhiProtocol() || chat_cloud::IsCustom()) && role != nullptr &&
         (std::strcmp(role, "user") == 0 || std::strcmp(role, "assistant") == 0)) {
         // Standard Xiaozhi STT/TTS text must enter the same pagination/history path.

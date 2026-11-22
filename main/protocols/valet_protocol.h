@@ -132,6 +132,25 @@ private:
     std::mutex record_mutex_;   // recording_data_：上行任务写，松开按键后上传
     std::atomic<bool> submit_pending_{false};   // 松开了：上行任务把剩下的麦克风帧取完再上传
     uint32_t talk_overs_seen_ = 0;
+    // 通话字幕逐段显示（新引擎）：助理的文字比语音先到，按句 / 按段切开，记下每段文字到达时播放环里
+    // 已有多少样本（≈ 这段话的语音从哪儿开始），播到那里再放上屏，所以字幕跟着说话一段一段出来。
+    // 屏幕上的文字只用增量拼：助理一个回合里可能连说两段（先「好的」再正文），两段的定稿最后才一起到，
+    // 拿定稿替换会把文字弄乱（2026-11-23 出现过）。定稿只用来补没收到增量的内容。
+    // 这一条在语音播完（或被打断）时结束。两次上屏至少隔 2.5 秒，少刷墨水屏。
+    struct LiveSeg { std::string text; uint64_t pos; bool end; };
+    std::deque<LiveSeg> live_segs_;
+    std::string live_pending_, live_shown_;
+    std::string live_all_;      // 这个回合收到的全部增量（判断定稿是不是已经显示过）
+    bool live_closed_ = false;  // 上一条已结束；再来增量就是新回合
+    uint64_t live_pending_pos_ = 0;
+    int64_t live_last_show_ = 0;
+    void LiveReplyDelta(const char* text, VoiceEngine& engine);
+    void LiveReplyFinal(const char* text, VoiceEngine& engine);
+    void RevealLiveReply(int64_t now);
+    void FlushCaptions();
+    void FinishLiveReply(const char* suffix = "");
+    void TakeLiveSeg(LiveSeg&& seg);
+    void ResetLiveReply() { live_segs_.clear(); live_pending_.clear(); live_shown_.clear(); live_all_.clear(); live_pending_pos_ = 0; live_last_show_ = 0; live_closed_ = false; }
     OpusResampler output_resampler_;   // 回话 24 kHz → 引擎 16 kHz
     void ResyncPlayback();   // 清空播放队列后：已交出的包都当作播完
     // 缓冲：助理的声音按说话的速度到达，扬声器前面几乎没有存货，网络或屏幕刷新慢一下就断音。

@@ -46,6 +46,9 @@ public:
     static void FinishYunxinSpeech();
     static void AddYunxinSpeech(const char* text);
     static void FlushYunxinSpeech();
+    // 通话（自建）：助理这段回答到目前为止要显示的文字。第一次追加一条「AI：」，之后原地替换这一条
+    // （只重排最后一页）；done 表示这段回答结束，下一次再显示就是新的一条。
+    static void ShowLiveReply(const char* text, bool done);
 
     /** @brief 设置情绪表情（当前可为空操作） */
     static void SetEmotion(const char* emotion);

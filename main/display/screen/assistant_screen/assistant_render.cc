@@ -335,7 +335,8 @@ void Assistant_RenderCurrentPage() {
     }
     auto& stream = Assistant_State().stream;
     const auto& layout = Assistant_State().layout;
-    const bool yunxin = chat_cloud::IsYunxin();
+    // 页面内容没变就不重画（云信流式文字和自建通话的逐段字幕都会频繁刷新最后一页）
+    const bool yunxin = chat_cloud::IsYunxin() || chat_cloud::IsCustom();
     if (yunxin && json.size() == stream.rendered_page_json.size() &&
         std::memcmp(json.data(), stream.rendered_page_json.data(), json.size()) == 0 &&
         stream.rendered_page_font == Assistant_UiFont() &&

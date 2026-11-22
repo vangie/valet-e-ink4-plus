@@ -188,7 +188,7 @@ void Assistant_AppendFlowAndShow(FlowList&& chunk, bool jump_to_new) {
     PresentAppendUi(jump_to_new, reflow_from_page, true);
 }
 
-bool Assistant_ReplaceYunxinSpeech(FlowList&& chunk) {
+bool Assistant_ReplaceYunxinSpeech(FlowList&& chunk, bool follow) {
     auto& st = Assistant_State();
     if (chunk.size() != 1 || chunk.front().kind != FlowKind::RichText) { return false; }
     if (st.stream.coalesce_pending && !st.stream.coalesce_buf.empty()) {
@@ -205,8 +205,11 @@ bool Assistant_ReplaceYunxinSpeech(FlowList&& chunk) {
         st.layout.flow.back() = std::move(chunk.front());
         int reflow_from_page = Assistant_RebuildYunxinTextTail();
         if (Assistant_TrimFlowToMaxPages()) { reflow_from_page = 0; }
+        const int last_page = static_cast<int>(st.layout.pages.size()) - 1;
+        const bool turn = follow && last_page >= 0 && st.layout.page_index != last_page;
+        if (turn) st.layout.page_index = last_page;
         Assistant_ClampPageIndex();
-        repaint = st.layout.page_index >= reflow_from_page;
+        repaint = turn || st.layout.page_index >= reflow_from_page;
     }
     auto* display = Board::GetInstance().GetDisplay();
     if (display != nullptr) {

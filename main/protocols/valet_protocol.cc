@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "chat_cloud.h"
 #include "application.h"
+#include "assistant_screen/assistant_screen.h"
 #include "audio/audio_service.h"
 #include "assets/lang_config.h"
 #include <esp_random.h>
@@ -289,7 +290,7 @@ void ValetProtocol::CloseAudioChannel() {
     StopReceiver();
     recording_ = false; live_ready_ = false; awaiting_ = false; speech_active_ = false; recording_data_.clear(); input_decoder_.reset(); call_id_.clear(); early_ready_.clear();
     marks_.clear(); playback_sequence_ = 0; output_started_ = false; audio_done_ = false; call_pending_ = false; tool_call_.clear(); tool_queue_.clear(); steering_.clear(); finished_tools_.clear();
-    captions_.clear(); quiet_since_ = 0; reply_so_far_.clear();
+    captions_.clear(); quiet_since_ = 0; reply_so_far_.clear(); ResetLiveReply();
     call_ready_seen_ = false; call_retries_ = 0; recreate_at_ = 0; call_retrying = false;
     if (was_open && on_audio_channel_closed_) on_audio_channel_closed_();
 }
@@ -927,6 +928,12 @@ void ValetProtocol::Handle(cJSON* root) {
         if (session_live_ && !std::strcmp(String(payload, "role"), "assistant")) {
             if (final_text) reply_so_far_.clear();
             else if (!interrupted_ && reply_so_far_.size() < 4096) reply_so_far_ += String(payload, "text");
+            if (auto* engine = Engine()) {   // 新引擎：逐段上屏，不进 captions_
+                if (interrupted_) return;      // 被打断的回答已经带「……」结束了
+                if (final_text) LiveReplyFinal(String(payload, "text"), *engine);
+                else LiveReplyDelta(String(payload, "text"), *engine);
+                return;
+            }
         }
         if (final_text) {
             const bool user = !std::strcmp(String(payload, "role"), "user");
@@ -1033,7 +1040,102 @@ void ValetProtocol::FinishTool(const char* key, const std::string& text) {
         StartTool(next.call_id, next.name, next.args);
     }
 }
+namespace {
+std::string Trimmed(const std::string& s) {
+    const auto a = s.find_first_not_of(" \n\t\r");
+    return a == std::string::npos ? std::string() : s.substr(a, s.find_last_not_of(" \n\t\r") - a + 1);
+}
+bool EndsSentence(const std::string& s) {
+    static const char* const kEnds[] = {"。", "！", "？", "；", "…", "!", "?"};
+    const auto t = s.find_last_not_of(" \t\r\"”』」）)");
+    if (t == std::string::npos) return false;
+    const std::string head = s.substr(0, t + 1);
+    for (const char* e : kEnds) {
+        const size_t n = std::strlen(e);
+        if (head.size() >= n && head.compare(head.size() - n, n, e) == 0) return true;
+    }
+    return false;
+}
+}  // namespace
+void ValetProtocol::FlushCaptions() {
+    for (const auto& caption : captions_)
+        Event(caption.user ? "stt" : "tts", caption.user ? nullptr : "sentence_start", caption.text);
+    captions_.clear();
+}
+void ValetProtocol::LiveReplyDelta(const char* text, VoiceEngine& engine) {
+    if (!text || !*text) return;
+    if (live_closed_) { live_all_.clear(); live_closed_ = false; }
+    if (live_all_.size() < 16384) live_all_ += text;
+    if (live_pending_.empty()) live_pending_pos_ = engine.Queued();
+    live_pending_ += text;
+    // 一段到哪儿：遇到换行（助理自己分的段）；或者句子结束且够长（第一段 8 个字就放，早点看到开头；之后约 20 个字）
+    const bool first = live_shown_.empty() && live_segs_.empty();
+    const size_t min_bytes = first ? 24 : 60;
+    if ((std::strchr(text, '\n') && !Trimmed(live_pending_).empty()) ||
+        (EndsSentence(live_pending_) && live_pending_.size() >= min_bytes)) {
+        live_segs_.push_back({std::move(live_pending_), live_pending_pos_, false});
+        live_pending_.clear();
+    }
+}
+void ValetProtocol::LiveReplyFinal(const char* text, VoiceEngine& engine) {
+    if (!live_pending_.empty()) { live_segs_.push_back({std::move(live_pending_), live_pending_pos_, false}); live_pending_.clear(); }
+    const std::string t = Trimmed(text ? text : "");
+    if (t.empty() || live_all_.find(t) != std::string::npos) return;   // 增量里已经有了
+    if (live_closed_) { live_all_.clear(); live_closed_ = false; }
+    live_all_ += t;
+    live_segs_.push_back({t, engine.Queued(), true});
+}
+void ValetProtocol::TakeLiveSeg(LiveSeg&& seg) {
+    if (seg.end && !live_shown_.empty() && live_shown_.back() != '\n') live_shown_ += "\n";
+    live_shown_ += seg.text;
+}
+void ValetProtocol::RevealLiveReply(int64_t now) {
+    auto* engine = Engine();
+    if (!engine || live_segs_.empty()) return;
+    const uint64_t played = engine->Played();
+    if (live_segs_.front().pos > played) return;
+    if (now - live_last_show_ < 2500000) return;   // 少刷墨水屏：攒到下次一起上
+    while (!live_segs_.empty() && live_segs_.front().pos <= played) {
+        TakeLiveSeg(std::move(live_segs_.front()));
+        live_segs_.pop_front();
+    }
+    std::string text = Trimmed(live_shown_);
+    if (text.empty()) return;
+    FlushCaptions();   // 用户的问题先上屏，排在回答前面
+#if CONFIG_VALET_DEV_LINK
+    ESP_LOGI(TAG, "live text: %u bytes at %.1f s of reply audio", unsigned(text.size()), played / 16000.0);
+#endif
+    live_last_show_ = now;
+    Application::GetInstance().Schedule([text = std::move(text)] { AssistantScreen::ShowLiveReply(text.c_str(), false); });
+}
+void ValetProtocol::FinishLiveReply(const char* suffix) {
+    while (!live_segs_.empty()) { TakeLiveSeg(std::move(live_segs_.front())); live_segs_.pop_front(); }
+    live_shown_ += live_pending_;
+    live_pending_.clear();
+    std::string text = Trimmed(live_shown_);
+    live_shown_.clear();
+    live_closed_ = true;   // live_all_ 留着：回答播完后才到的定稿还要拿它比对
+    if (text.empty()) return;
+    text += suffix;
+    FlushCaptions();
+#if CONFIG_VALET_DEV_LINK
+    ESP_LOGI(TAG, "live text: %u bytes, reply finished", unsigned(text.size()));
+#endif
+    Application::GetInstance().Schedule([text = std::move(text)] { AssistantScreen::ShowLiveReply(text.c_str(), true); });
+}
 void ValetProtocol::KeepInterruptedReply() {
+    if (auto* engine = Engine(); engine && session_live_) {
+        // 新引擎：已经播到的那些段放上屏，后面加「……」，这一条到此结束；没播到的丢掉
+        const uint64_t played = engine->Played();
+        while (!live_segs_.empty() && live_segs_.front().pos <= played) {
+            TakeLiveSeg(std::move(live_segs_.front()));
+            live_segs_.pop_front();
+        }
+        live_segs_.clear(); live_pending_.clear();
+        FinishLiveReply("……");
+        reply_so_far_.clear();
+        return;
+    }
     // 首尾的空白去掉；只剩标点或空白就不显示。
     const auto first = reply_so_far_.find_first_not_of(" \n\t");
     if (session_live_ && first != std::string::npos) {
@@ -1119,6 +1221,7 @@ void ValetProtocol::DrainPlayback() {
         cJSON_AddStringToObject(params, "markName", marks_.front().name.c_str());
         Send(root); marks_.pop_front();
     }
+    if (session_live_) RevealLiveReply(esp_timer_get_time());
     if (!idle) { quiet_since_ = 0; return; }
     const int64_t now_us = esp_timer_get_time();
     if (!quiet_since_) quiet_since_ = now_us;
@@ -1127,6 +1230,12 @@ void ValetProtocol::DrainPlayback() {
         for (const auto& caption : captions_)
             Event(caption.user ? "stt" : "tts", caption.user ? nullptr : "sentence_start", caption.text);
         captions_.clear();
+    }
+    if (session_live_ && Engine()) {
+        // 回答播完：这一条字幕结束（播完后才到的定稿只补没显示过的内容，同样马上结束）
+        // 注意：增量常比语音先到，那时扬声器也空着，不能当成播完；只认「只剩定稿」的情况
+        if ((audio_done_ && output_started_) || (!output_started_ && !live_segs_.empty() && live_segs_.front().end))
+            FinishLiveReply();
     }
     if (audio_done_ && output_started_) {
         if (level_samples_) ESP_LOGI(TAG, "reply audio: %u ms, received peak %d rms %d, gain %.2f..%.2f",
