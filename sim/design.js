@@ -39,6 +39,7 @@ const V2_ICONS = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   pause: '<path d="M8.5 5v14M15.5 5v14"/>',
+  stop: '<rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" stroke="none"/>',
   cam: '<path d="M3.5 8h3.2l1.6-2.5h7.4L17.3 8h3.2v11h-17z"/><circle cx="12" cy="13.2" r="3.2"/>',
   speaker: '<path d="M4 9.5v5h3.5l5 4v-13l-5 4zM16 9a4.2 4.2 0 0 1 0 6M18.6 6.4a7.8 7.8 0 0 1 0 11.2"/>',
   net: '<path d="M4.5 20v-3M9.5 20v-7M14.5 20V9M19.5 20V4"/>',
@@ -389,10 +390,11 @@ function v2Ai() {
 
   let foot = "";
   if (ready && state.live) {
-    foot = `<div class="v-callbar">
-      <button data-mute class="${state.liveMuted ? "on" : ""}">${ic(state.liveMuted ? "micOff" : "mic")}${state.liveMuted ? L("取消静音", "Unmute") : L("静音", "Mute")}</button>
-      <button data-interrupt ${state.speaking ? "" : "disabled"}>${ic("pause")}${L("打断", "Interrupt")}</button>
-      <button class="end" data-mode="ask">${ic("x")}${L("挂断", "End")}</button></div>`;
+    // 通话里沿用提问页的胶囊条：左边「静音」「打断」，右边是和「通话」同位置、同斜切的黑色「挂断」（照真机）。
+    foot = `<div class="v-talk v-callbar">
+      <button data-mute>${ic(state.liveMuted ? "micOff" : "mic")}${state.liveMuted ? L("取消静音", "Unmute") : L("静音", "Mute")}</button>
+      <button data-interrupt>${ic("stop", "stop")}${L("打断", "Interrupt")}</button>
+      <button class="tolive" data-mode="ask">${ic("x")}${L("挂断", "End")}</button></div>`;
   } else if (ready) {
     const pager = s.a.length && !state.listening
       ? `<div class="v-pages"><button data-answer="-1" ${state.answerPage > 0 ? "" : "disabled"}>${ic("back")}</button><span>${state.speaking ? L("在说 · 短按 AI 唤醒键停下", "Speaking") : `${state.answerPage + 1} / ${s.a.length}`}</span><button data-answer="1" ${state.answerPage < s.a.length - 1 ? "" : "disabled"}>${ic("go")}</button></div>`

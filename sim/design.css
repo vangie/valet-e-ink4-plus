@@ -204,10 +204,11 @@ body { font-family: "PingFang SC", "Avenir Next", "Helvetica Neue", sans-serif; 
 .v-talk .v-cam.on { background: var(--ink); color: var(--paper); }
 .v-talk .v-cam .ic { width: 15px; height: 15px; }
 .v-talk .tolive { padding: 0 13px 0 19px; border: 0; background: var(--ink); color: var(--paper); clip-path: polygon(13px 0, 100% 0, 100% 100%, 0 100%); display: flex; align-items: center; gap: 4px; font-size: 10.8px; font-weight: 600; }
-.v-callbar { flex: none; margin: 8px 12px 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-.v-callbar button { height: 42px; border: 1.2px solid var(--ink); background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 9px; }
-.v-callbar button.on, .v-callbar button.end { background: var(--ink); color: var(--paper); }
-.v-callbar button:disabled { border-style: dashed; color: var(--g2); cursor: default; }
+/* 通话：同一条胶囊，左边两格图标 + 字横排，中间一条短竖线，右边斜切「挂断」与「通话」同形 */
+.v-talk.v-callbar { grid-template-columns: 1.15fr 1fr auto; }   /* 「取消静音」比「打断」长 */
+.v-callbar > button:not(.tolive) { position: relative; padding: 0; border: 0; background: none; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 10.8px; font-weight: 600; }
+.v-callbar > button[data-interrupt]::before { content: ""; position: absolute; left: 0; top: 25%; height: 50%; border-left: 1.2px solid var(--ink); }
+.v-callbar .ic.stop { width: 10px; height: 10px; }
 .v-solid { height: 32px; padding: 0 14px; border: 0; background: var(--ink); color: var(--paper); display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: 10.8px; font-weight: 600; }
 .v-solid .ic { width: 10px; height: 10px; }
 
