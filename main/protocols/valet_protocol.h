@@ -128,7 +128,8 @@ private:
     // 就用这些字补上（加「……」），屏幕上留着助理说到了哪儿。
     std::string reply_so_far_;
     void KeepInterruptedReply();
-    int64_t quiet_since_ = 0;   // 扬声器从什么时候开始没在播（0 = 正在播）
+    int64_t quiet_since_ = 0;
+    int64_t interrupt_at_ = 0;   // 发出打断的时刻，等网关回复用   // 扬声器从什么时候开始没在播（0 = 正在播）
     std::string tool_call_, tool_run_, tool_key_;
     // 助理一句话里可能连着叫两次工具（2026-11-22：「帮我记一下明天八点开会」第一次还没回来就叫了第二次，
     // 旧代码直接结束通话）。一次只跑一个，其余排队；失败或超时只把错误交回给助理，不挂断。

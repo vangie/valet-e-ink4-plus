@@ -92,7 +92,13 @@ void ValetProtocol::Receive(const char* data, size_t length) {
     if (closing_ || !length) return;
     if (length > kMaxFrame) { SetError("网关消息超过设备限制"); xEventGroupSetBits(events_, kFailed); return; }
     std::lock_guard<std::mutex> lock(inbox_mutex_);
-    if (inbox_.size() >= 16) { xEventGroupSetBits(events_, kFailed); return; }
+    // 助理回话时音频帧来得比播放快，处理线程一时被占着，16 条的上限会把夹在中间的控制回复（比如「已停止输出」）
+    // 一起丢掉，通话就再也收不到新回答（2026-11-22 测试里出现）。放宽到 64 条，丢了要留记录。
+    if (inbox_.size() >= 64) {
+        static int64_t warned = 0;
+        if (esp_timer_get_time() - warned > 1000000) { ESP_LOGW(TAG, "inbox full, dropping a frame"); warned = esp_timer_get_time(); }
+        xEventGroupSetBits(events_, kFailed); return;
+    }
     inbox_.emplace_back(data, length);
     xEventGroupSetBits(events_, kInbox);
 }
@@ -534,7 +540,7 @@ void ValetProtocol::CreateCall() {
 void ValetProtocol::SendAbortSpeaking(AbortReason) {
     std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     marks_.clear(); audio_done_ = false; output_started_ = false; tool_call_.clear(); tool_queue_.clear();
-    interrupted_ = true; awaiting_ = false;
+    interrupted_ = true; awaiting_ = false; interrupt_at_ = esp_timer_get_time();
     KeepInterruptedReply();
     Application::GetInstance().GetAudioService().ResetDecoder(); ResyncPlayback();
     if (speech_active_) { Send(valet::wire::Request("valet-speech-cancel", "valet.speech.cancel")); speech_active_ = false; }
@@ -600,7 +606,7 @@ void ValetProtocol::Handle(cJSON* root) {
         if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")) || std::strcmp(String(audio, "outputEncoding"), "pcm16") || !cJSON_IsNumber(rate) || rate->valueint != 24000 || std::strcmp(String(audio, "inputEncoding"), "pcm16") || !cJSON_IsNumber(input_rate) || input_rate->valueint != 24000) { SetError("实时语音未配置或格式不兼容"); return; }
         call_id_ = String(payload, "sessionId"); live_ready_ = !call_id_.empty() && early_ready_ == call_id_; return;
     }
-    if (id == "valet-interrupt") { if (session_live_) interrupted_ = false; Event("tts", "stop"); return; }
+    if (id == "valet-interrupt") { if (session_live_) interrupted_ = false; interrupt_at_ = 0; Event("tts", "stop"); return; }
     if (id == "valet-transcript" && awaiting_ && String(payload, "runId") == run_id_) {
         if (*String(payload, "text") && reply_.empty()) Event("stt", nullptr, String(payload, "text"));
         reply_ = String(payload, "text"); return;
@@ -909,6 +915,11 @@ void ValetProtocol::DrainPlayback() {
     if (!tool_call_.empty() && esp_timer_get_time() > tool_deadline_) FinishTool("error", "处理超时（2 分钟没有结果）");
     const auto now = esp_timer_get_time();
     if (authenticated_ && now - last_ping_ > 20000000) { socket_->Ping(); last_ping_ = now; }
+    // 打断后一直等不到网关「已停止输出」的回复：2 秒后不再等，否则之后的回答全被当成旧回答丢掉，通话像是没反应。
+    if (interrupted_ && session_live_ && interrupt_at_ && now - interrupt_at_ > 2000000) {
+        ESP_LOGW(TAG, "call: no reply to the interrupt after 2 s, listening again");
+        interrupted_ = false; interrupt_at_ = 0; Event("tts", "stop");
+    }
     if (live_ready_ && !call_ready_seen_) { call_ready_seen_ = true; call_retries_ = 0; call_retrying = false; }
     if (recreate_at_ && now >= recreate_at_ && authenticated_ && session_live_ && opened_) CreateCall();
     // 连接悄悄断了（没有关闭帧也没有 RST，比如隧道挂了）：每 20 秒一次的 ping 连着 2 次没回音就当断线。
