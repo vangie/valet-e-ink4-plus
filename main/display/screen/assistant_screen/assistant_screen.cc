@@ -549,6 +549,14 @@ float LiveLevel(int rms) {
 }
 void LiveTick(lv_timer_t*) {
     if (!s_live.row || !lv_obj_is_valid(s_live.row)) return;
+    // 刚接通还没对话时，欢迎页（白底铺满）建在状态行之后，会把「在听」盖住：放回最上层。
+    if (auto* parent = lv_obj_get_parent(s_live.row);
+        parent && lv_obj_get_index(s_live.row) != int32_t(lv_obj_get_child_count(parent)) - 1) {
+        auto* hint = Assistant_State().chrome.idle_hint;
+        if (hint && lv_obj_is_valid(hint) && lv_obj_get_parent(hint) == parent &&
+            lv_obj_get_index(hint) > lv_obj_get_index(s_live.row))
+            lv_obj_move_to_index(s_live.row, lv_obj_get_index(hint));
+    }
     if (!g_valet_live_bars) return;   // 仅测试：量竖条本身的开销
     const auto refresh = EpdGetStats();
     if (refresh.busy || refresh.completed < refresh.submitted || refresh.test_active) return;
@@ -834,45 +842,105 @@ lv_obj_t* AssistantScreen::Create() {
     Assistant_DisableScroll(bar);
     const bool custom_live = chat_cloud::IsCustom() && ValetProtocol::Live();
     if (custom_live) {
-        // In a call the pill gives way to three boxes: mute, interrupt, end.
-        lv_obj_set_style_radius(bar, 0, 0);
-        lv_obj_set_style_border_width(bar, 0, 0);
-        lv_obj_set_height(bar, 112);
-        const int gap = 16, each = (bar_w - 2 * gap) / 3;
+        // 通话里沿用提问页的胶囊条：左边「静音」「打断」两格，右边是和「通话」同位置、同斜切的黑色「挂断」。
+        // （2026-11-23 用户：进了通话也保留圆角和斜切的风格。）
+        constexpr lv_coord_t kEndW = 190;   // 与提问页「通话」楔形同宽
+        const lv_coord_t inner_w = bar_w - 6, inner_h = kValetBarH - 6, half = (inner_w - kEndW) / 2;
         static lv_obj_t* s_mute_label = nullptr;
-        for (int i = 0; i < 3; ++i) {
-            const bool end = i == 2;
-            auto* button = ValetBox(bar, i * (each + gap), 0, each, 112);
-            lv_obj_set_style_border_width(button, 3, 0);
-            lv_obj_set_style_border_color(button, lv_color_black(), 0);
-            lv_obj_set_style_bg_color(button, end ? lv_color_black() : lv_color_white(), 0);
-            lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-            lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
-            HapticAttachClick(button);
-            const intptr_t icon = (i == 0 ? (ValetProtocol::Muted() ? kIconMicOff : kIconMic) : i == 1 ? kIconEnd : kIconEnd) | (end ? kIconWhite : 0);
-            if (i != 1) lv_obj_align(ValetIconBox(button, icon, 40), LV_ALIGN_TOP_MID, 0, 16);
-            auto* label = lv_label_create(button);
+        static lv_obj_t* s_mute_icon = nullptr;
+        const auto on_click = [](lv_event_t* e) {
+            const intptr_t which = reinterpret_cast<intptr_t>(lv_event_get_user_data(e));
+            if (which == 2) { ChangeTalkMode(nullptr); return; }
+            if (which == 1) {
+                // Stop what the assistant is saying; the call stays up.
+                Application::GetInstance().AbortSpeaking(kAbortReasonNone);
+                return;
+            }
+            ValetProtocol::SetMuted(!ValetProtocol::Muted());
+            if (s_mute_label && lv_obj_is_valid(s_mute_label))
+                lv_label_set_text(s_mute_label, ValetProtocol::Muted() ? ValetText("取消静音", "Unmute") : ValetText("静音", "Mute"));
+            if (s_mute_icon && lv_obj_is_valid(s_mute_icon)) {   // 图标画法存在绘制回调的参数里：换一个回调
+                lv_obj_remove_event_cb(s_mute_icon, DrawValetIcon);
+                lv_obj_add_event_cb(s_mute_icon, DrawValetIcon, LV_EVENT_DRAW_MAIN,
+                                    reinterpret_cast<void*>(ValetProtocol::Muted() ? kIconMicOff : kIconMic));
+                lv_obj_invalidate(s_mute_icon);
+            }
+            ScreenShowToast(ValetProtocol::Muted() ? ValetText("麦克风已静音", "Microphone muted") : ValetText("麦克风已恢复", "Microphone on"));
+        };
+        // 左边两格：图标 + 文字，横排居中
+        for (int i = 0; i < 2; ++i) {
+            auto* cell = lv_obj_create(bar);
+            lv_obj_remove_style_all(cell);
+            lv_obj_set_size(cell, half, inner_h);
+            lv_obj_set_pos(cell, i * half, 0);
+            lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_column(cell, 10, 0);
+            lv_obj_add_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+            Assistant_DisableScroll(cell);
+            HapticAttachClick(cell);
+            if (i == 0) {
+                auto* icon = ValetIconBox(cell, ValetProtocol::Muted() ? kIconMicOff : kIconMic, 36);
+                lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+                s_mute_icon = icon;
+            } else {   // 打断：实心小方块（停止）
+                auto* stop = lv_obj_create(cell);
+                lv_obj_remove_style_all(stop);
+                lv_obj_set_size(stop, 22, 22);
+                lv_obj_set_style_radius(stop, 4, 0);
+                lv_obj_set_style_bg_color(stop, lv_color_black(), 0);
+                lv_obj_set_style_bg_opa(stop, LV_OPA_COVER, 0);
+                lv_obj_clear_flag(stop, LV_OBJ_FLAG_CLICKABLE);
+            }
+            auto* label = lv_label_create(cell);
             lv_label_set_text(label, i == 0 ? (ValetProtocol::Muted() ? ValetText("取消静音", "Unmute") : ValetText("静音", "Mute"))
-                                   : i == 1 ? ValetText("打断", "Interrupt") : ValetText("挂断", "End"));
-            lv_obj_set_style_text_font(label, ValetSmall(), 0);
-            lv_obj_set_style_text_color(label, end ? lv_color_white() : lv_color_black(), 0);
-            if (i == 1) lv_obj_center(label); else lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -14);
+                                            : ValetText("打断", "Interrupt"));
+            lv_obj_set_style_text_font(label, ValetStrong(), 0);
+            lv_obj_set_style_text_color(label, lv_color_black(), 0);
             lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
             if (i == 0) s_mute_label = label;
-            lv_obj_add_event_cb(button, [](lv_event_t* e) {
-                const intptr_t which = reinterpret_cast<intptr_t>(lv_event_get_user_data(e));
-                if (which == 2) { ChangeTalkMode(nullptr); return; }
-                if (which == 1) {
-                    // Stop what the assistant is saying; the call stays up.
-                    Application::GetInstance().AbortSpeaking(kAbortReasonNone);
-                    return;
-                }
-                ValetProtocol::SetMuted(!ValetProtocol::Muted());
-                if (s_mute_label && lv_obj_is_valid(s_mute_label))
-                    lv_label_set_text(s_mute_label, ValetProtocol::Muted() ? ValetText("取消静音", "Unmute") : ValetText("静音", "Mute"));
-                ScreenShowToast(ValetProtocol::Muted() ? ValetText("麦克风已静音", "Microphone muted") : ValetText("麦克风已恢复", "Microphone on"));
-            }, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
+            lv_obj_add_event_cb(cell, on_click, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
         }
+        // 两格之间一条短竖线
+        auto* divider = lv_obj_create(bar);
+        lv_obj_remove_style_all(divider);
+        lv_obj_set_size(divider, 2, inner_h / 2);
+        lv_obj_set_pos(divider, half - 1, inner_h / 4);
+        lv_obj_set_style_bg_color(divider, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
+        // 右边黑色斜切「挂断」，画法与提问页「通话」相同
+        auto* end = lv_obj_create(bar);
+        lv_obj_remove_style_all(end);
+        lv_obj_set_size(end, kEndW, inner_h);
+        lv_obj_align(end, LV_ALIGN_RIGHT_MID, 0, 0);
+        Assistant_DisableScroll(end);
+        lv_obj_add_flag(end, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(end);
+        lv_obj_add_event_cb(end, [](lv_event_t* e) {
+            lv_area_t a;
+            lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+            lv_draw_triangle_dsc_t fill;
+            lv_draw_triangle_dsc_init(&fill);
+            fill.color = lv_color_black();
+            fill.opa = LV_OPA_COVER;
+            auto P = [](int x, int y) { return lv_point_precise_t{static_cast<lv_value_precise_t>(x), static_cast<lv_value_precise_t>(y)}; };
+            fill.p[0] = P(a.x1 + 26, a.y1); fill.p[1] = P(a.x1 + 30, a.y2); fill.p[2] = P(a.x1, a.y2);
+            lv_draw_triangle(lv_event_get_layer(e), &fill);
+            lv_draw_rect_dsc_t rest;
+            lv_draw_rect_dsc_init(&rest);
+            rest.bg_color = lv_color_black();
+            rest.bg_opa = LV_OPA_COVER;
+            lv_area_t body = {a.x1 + 26, a.y1, a.x2, a.y2};
+            lv_draw_rect(lv_event_get_layer(e), &rest, &body);
+        }, LV_EVENT_DRAW_MAIN, nullptr);
+        lv_obj_add_event_cb(end, on_click, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(2)));
+        lv_obj_align(ValetIconBox(end, kIconEnd | kIconWhite, 36), LV_ALIGN_LEFT_MID, 44, 0);
+        auto* end_label = lv_label_create(end);
+        lv_label_set_text(end_label, ValetText("挂断", "End"));
+        lv_obj_set_style_text_font(end_label, ValetStrong(), 0);
+        lv_obj_set_style_text_color(end_label, lv_color_white(), 0);
+        lv_obj_align(end_label, LV_ALIGN_LEFT_MID, 90, 0);
+        lv_obj_clear_flag(end_label, LV_OBJ_FLAG_CLICKABLE);
     }
     const bool baiwen = chat_cloud::ActiveProvider() == chat_cloud::Provider::Baiwen;
     const bool camera_available = baiwen && Board::GetInstance().GetCamera() != nullptr;
