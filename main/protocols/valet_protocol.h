@@ -77,7 +77,9 @@ private:
     // 期间通话不结束（IsAudioChannelOpened 仍为真，麦克风不上传），接不回来才报错。
     std::atomic<bool> reconnecting_{false}, stop_reconnect_{false};
     TaskHandle_t reconnector_ = nullptr;
-    int connect_timeout_ms_ = 20000;   // 单次建连时限；重连时缩短，挂断时不用久等
+    // 单次建连（TCP + TLS + WebSocket 握手）的时限。正常 1.6～3 秒连上（2026-11-22 实测，Wi-Fi 和 4G），
+    // 连不上时 frp 入口约 10 秒被重置、4G 直连 Cloudflare 约 18 秒被掐断；8 秒足够区分，用户也不用干等。
+    int connect_timeout_ms_ = 8000;
     void StartReconnect();
     // 通话还没就绪就被网关关掉（多半是网关连 OpenAI 实时语音一时失败）：隔 2 秒重建，最多 3 次。
     bool call_ready_seen_ = false;

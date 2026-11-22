@@ -145,7 +145,8 @@ bool ValetProtocol::ConnectOnce(bool bootstrap) {
     const int link_ms = static_cast<int>((esp_timer_get_time() - started) / 1000);
     // 等登录结果；重连时按 0.2 秒一段等，挂断了就不再等。
     EventBits_t bits = 0;
-    for (int waited = 0; waited < (reconnecting_ ? 10000 : 30000) && !(reconnecting_ && stop_reconnect_); waited += 200) {
+    // 登录回复（约 27 KB）正常 0.5 秒内到；连上了却 10 秒没回音，多半是入口卡住。
+    for (int waited = 0; waited < 10000 && !(reconnecting_ && stop_reconnect_); waited += 200) {
         bits = xEventGroupWaitBits(events_, kHello | kFailed, pdFALSE, pdFALSE, pdMS_TO_TICKS(200));
         if (bits & (kHello | kFailed)) break;
     }
@@ -157,10 +158,14 @@ bool ValetProtocol::ConnectOnce(bool bootstrap) {
     return ok;
 }
 // 连不上（握手超时、网络刚唤醒）再试一次；连上了但网关不认，重试没有意义。
+// 只有很快就失败的（比如网络刚唤醒、连接被立刻拒绝）才再试一次；等满时限才失败的，再试多半也一样，
+// 直接告诉用户连不上，最长约 8 秒（以前两次各等近 20 秒，要 40 秒才出提示）。
 bool ValetProtocol::Connect(bool bootstrap) {
+    const int64_t started = esp_timer_get_time();
     if (ConnectOnce(bootstrap)) return true;
     if (reached_ || closing_) return false;
-    ESP_LOGW(TAG, "connect: retrying once");
+    if (esp_timer_get_time() - started > 3000000) return false;
+    ESP_LOGW(TAG, "connect: failed fast, retrying once");
     vTaskDelay(pdMS_TO_TICKS(500));
     return ConnectOnce(bootstrap);
 }
@@ -322,7 +327,6 @@ void ValetProtocol::RunReconnect() {
         Application::GetInstance().GetAudioService().ResetDecoder(); ResyncPlayback();
         Event("tts", "stop");
     }
-    connect_timeout_ms_ = 8000;
     bool ok = false;
     int attempt = 0;
     while (!stop_reconnect_ && esp_timer_get_time() - started < 90000000) {
@@ -338,7 +342,6 @@ void ValetProtocol::RunReconnect() {
         // 每次之间等 2 秒（挂断立即停）
         for (int i = 0; i < 10 && !stop_reconnect_; ++i) vTaskDelay(pdMS_TO_TICKS(200));
     }
-    connect_timeout_ms_ = 20000;
     if (stop_reconnect_) { reconnecting_ = false; link_reconnecting = false; return; }
     if (ok) {
         std::lock_guard<std::recursive_mutex> lock(state_mutex_);

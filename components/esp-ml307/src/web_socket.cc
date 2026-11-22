@@ -1,4 +1,5 @@
 #include <esp_timer.h>
+#include <algorithm>
 #include "web_socket.h"
 #include "network_interface.h"
 #include <esp_log.h>
@@ -183,7 +184,7 @@ bool WebSocket::Connect(const char* uri) {
         HANDSHAKE_SUCCESS_BIT | HANDSHAKE_FAILED_BIT,
         pdFALSE,  // 不清除事件位
         pdFALSE,  // 等待任意一个事件位
-        pdMS_TO_TICKS(10000)  // 10秒超时
+        pdMS_TO_TICKS(std::min(10000, connect_timeout_ms_))  // 不超过建连时限
     );
 
     if (bits & HANDSHAKE_SUCCESS_BIT) {
