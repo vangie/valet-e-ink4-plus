@@ -1,6 +1,7 @@
 #ifndef AUDIO_SERVICE_H
 #define AUDIO_SERVICE_H
 
+#include "voice_engine.h"
 #include <memory>
 #include <deque>
 #include <condition_variable>
@@ -91,6 +92,11 @@ public:
     ~AudioService();
 
     void Initialize(AudioCodec* codec);
+    // 自建助理用新的语音引擎（docs/voice-engine.md）：Start 前设置。开着时不启动原来的输入 / 输出 / 编解码任务，
+    // 播放相关的查询和清空都交给引擎；官方云仍走原来的任务。
+    void SetEngineMode(bool on) { if (service_stopped_) engine_mode_ = on; }
+    bool EngineMode() const { return engine_mode_; }
+    VoiceEngine& Engine() { return engine_; }
     /** @brief 创建音频输入、输出和编解码任务；已启动时不重复创建 */
     void Start();
     /** 拆任务并销毁 AFE（离百问 / reboot / OTA / 开机清理）。 */
@@ -104,7 +110,11 @@ public:
     // 已经送到扬声器的播放包数，只增不减（通话里按它回「播到了」）。
     uint64_t PlayedPackets() const { return played_packets_.load(); }
     // 最近一包送到扬声器的声音大小（均方根，满幅 32767）和时刻；通话页的波形用。
-    int OutputLevel(int64_t* at_us = nullptr) const { if (at_us) *at_us = output_level_at_.load(); return output_level_.load(); }
+    int OutputLevel(int64_t* at_us = nullptr) const {
+        if (engine_mode_) return engine_.OutputLevel(at_us);
+        if (at_us) *at_us = output_level_at_.load();
+        return output_level_.load();
+    }
     bool IsWakeWordRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_WAKE_WORD_RUNNING; }
     bool IsStarted() const { return !service_stopped_; }
     bool IsAudioProcessorRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING; }
@@ -146,6 +156,8 @@ private:
     static constexpr size_t kOpusCodecStackWords = 2048 * 13;
     AudioCodec* codec_ = nullptr;
     bool codec_started_ = false;
+    bool engine_mode_ = false;
+    VoiceEngine engine_;
     AudioServiceCallbacks callbacks_;
     std::mutex opus_capture_mutex_; // 保护接收器与采集路由归属
     std::function<bool(const uint8_t*, size_t, size_t)> opus_capture_callback_; // 当前独占 Opus 包接收器

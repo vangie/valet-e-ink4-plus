@@ -308,6 +308,8 @@ def main():
     p = sub.add_parser("assistant-url"); p.add_argument("url")
     p = sub.add_parser("livebars"); p.add_argument("state", choices=["on", "off"])
     p = sub.add_parser("micgate"); p.add_argument("state", choices=["on", "off"])
+    p = sub.add_parser("voiceprobe", help="play <url>/play.raw, record, upload mic/ref to <url>/upload"); p.add_argument("url")
+    p = sub.add_parser("audioprobe", help="measure speaker-to-mic delay (home screen, idle)"); p.add_argument("--stall", type=int, default=0); p.add_argument("--amp", type=int, default=0)
     sub.add_parser("droplink", help="close the link to the assistant (test call reconnection)")
     p = sub.add_parser("proxy", help="set the proxy: proxy http 192.168.0.10 6152 --wifi; proxy off")
     p.add_argument("kind", choices=["http", "socks5", "off"]); p.add_argument("host", nargs="?"); p.add_argument("port", nargs="?", type=int)
@@ -352,6 +354,10 @@ def main():
         req = {"cmd": "proxy", "wifi": args.wifi and args.kind != "off", "cell": args.cell and args.kind != "off"}
         if args.kind != "off": req.update({"kind": args.kind, "host": args.host or "", "port": args.port or 0})
         dev(req)
+    elif args.command == "voiceprobe":
+        dev({"cmd": "voiceprobe", "url": args.url})
+    elif args.command == "audioprobe":
+        dev({"cmd": "audioprobe", "stall": args.stall, "amp": args.amp})
     elif args.command == "droplink":
         dev({"cmd": "droplink"})
     elif args.command == "micgate":

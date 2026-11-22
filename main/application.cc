@@ -307,6 +307,9 @@ void Application::EnsureAudioServiceRunning() {
     }
 
     if (!audio_running_) {
+        // 自建助理的提问 / 通话用新的语音引擎（docs/voice-engine.md）；其他用途（官方云、WorkBuddy、测试）照旧。
+        audio_service_.SetEngineMode(chat_cloud::IsCustom() &&
+                                     audio_clients_.load() == static_cast<uint32_t>(AudioClient::Assistant));
         audio_service_.Start();
         if (!audio_service_.IsStarted()) {
             ESP_LOGE(TAG, "Audio service Start failed");

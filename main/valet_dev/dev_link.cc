@@ -340,6 +340,17 @@ void ValetDevLinkHandle(const char* json) {
         else if (!valet::proxy::Update(prefs)) error = "BUSY";
         else ESP_LOGW(TAG, "proxy: %s %s:%d wifi=%d cell=%d", prefs.kind == net_proxy::Kind::kSocks5 ? "socks5" : "http",
                       prefs.host.c_str(), prefs.port, prefs.on_wifi, prefs.on_cell);
+    } else if (!strcmp(cmd, "voiceprobe")) {
+        // 仅测试版：从 url 下载 play.raw 播放并录音，把麦克风和参考传回 url/upload
+        extern void ValetVoiceProbe(const char* base);
+        const auto* url = cJSON_GetObjectItemCaseSensitive(root, "url");
+        if (cJSON_IsString(url)) ValetVoiceProbe(url->valuestring); else error = "MISSING_URL";
+    } else if (!strcmp(cmd, "audioprobe")) {
+        // 仅测试版：量扬声器到麦克风的延迟（见 audio_probe.cc）
+        extern void ValetAudioProbe(int stall_ms, int amplitude);
+        int stall = 0, amp = 0;
+        Int(root, "stall", &stall, 0); Int(root, "amp", &amp, 0);
+        ValetAudioProbe(stall, amp);
     } else if (!strcmp(cmd, "droplink")) {
         // 仅测试版：关掉当前和助理的连接（发关闭帧，网关回关闭），看通话能不能自己接回来。
         ValetProtocol::DropLinkForTest();

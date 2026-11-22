@@ -109,6 +109,10 @@ void AudioService::Start() {
         ESP_LOGE(TAG, "Audio start deferred: I2S resources unavailable");
         return;
     }
+    if (engine_mode_) {
+        if (engine_.Start(codec_)) service_stopped_ = false;
+        return;
+    }
     xEventGroupClearBits(event_group_, AS_EVENT_INPUT_EXITED | AS_EVENT_OUTPUT_EXITED | AS_EVENT_OPUS_EXITED);
     service_stopped_ = false;
     xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING);
@@ -228,6 +232,12 @@ void AudioService::Start() {
 }
 
 void AudioService::Stop() {
+    if (engine_mode_) {
+        engine_.Stop();
+        service_stopped_ = true;
+        if (codec_) codec_->ReleaseHardware();
+        return;
+    }
     StopOpusCapture();
     if (service_stopped_ && !audio_input_task_handle_ && !audio_output_task_handle_ && !opus_codec_task_handle_) {
         if (codec_) codec_->ReleaseHardware();
@@ -730,6 +740,7 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
 }
 
 bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait) {
+    if (engine_mode_) return true;   // 引擎模式下协议层直接交给引擎播放
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
     if (!packet || service_stopped_) return false;
     const auto generation = playback_generation_;
@@ -803,6 +814,7 @@ void AudioService::EnableWakeWordDetection(bool enable) {
 
 void AudioService::EnableVoiceProcessing(bool enable) {
     ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
+    if (engine_mode_) return;   // 引擎一直在收音，由协议层决定用不用（这里原来会清空播放）
     if (enable) {
         if (!audio_processor_initialized_) {
             audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
@@ -948,11 +960,13 @@ void AudioService::PlaySound(const std::string_view& ogg) {
 }
 
 bool AudioService::IsIdle() {
+    if (engine_mode_) return engine_.PlaybackIdle();
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     return audio_encode_queue_.empty() && audio_decode_queue_.empty() && audio_playback_queue_.empty() && audio_testing_queue_.empty();
 }
 
 void AudioService::ResetDecoder() {
+    if (engine_mode_) { engine_.Flush(); return; }
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     ++playback_generation_;
     if (opus_decoder_) {
@@ -966,6 +980,7 @@ void AudioService::ResetDecoder() {
 }
 
 void AudioService::FlushQueues() {
+    if (engine_mode_) { engine_.Flush(); engine_.DropMic(); return; }
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
     const bool capture_dropped = std::any_of(audio_encode_queue_.begin(), audio_encode_queue_.end(),
         [](const auto& task) { return task->type == kAudioTaskTypeEncodeToCapture; });
@@ -1013,6 +1028,7 @@ bool AudioService::IsAfeWakeWord() {
 }
 
 bool AudioService::IsPlaybackIdle() {
+    if (engine_mode_) return engine_.PlaybackIdle();
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     return audio_decode_queue_.empty() && audio_playback_queue_.empty() && !playback_active_ && !decoding_active_;
 }

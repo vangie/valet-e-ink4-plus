@@ -244,7 +244,11 @@ bool ValetProtocol::OpenAudioChannel() {
     pushed_packets_ = 0; ResyncPlayback(); agc_gain_ = 3.0f; agc_env_ = 0.f; live_errors_ = 0; gate_reset_ = true;
     input_decoder_ = std::make_unique<OpusDecoderWrapper>(16000, 1, 60);
     input_resampler_.Configure(16000, 24000);
+    output_resampler_.Configure(24000, 16000);
+    muted_history_.clear(); barge_pending_ = false; barge_at_ = 0; submit_pending_ = false;
+    if (auto* engine = Engine()) { talk_overs_seen_ = engine->TalkOvers(); engine->DropMic(); }
     opened_ = true;
+    StartUplink();
 #if CONFIG_VALET_DEV_LINK
     live_instance = this;
 #endif
@@ -278,6 +282,8 @@ const char* ValetProtocol::Prepare() {
 }
 void ValetProtocol::CloseAudioChannel() {
     const bool was_open = opened_.exchange(false);
+    StopUplink();
+    if (auto* engine = Engine()) engine->ArmTalkOver(false);
     JoinReconnect();
     // Join before touching state owned by the receiver.
     StopReceiver();
@@ -378,11 +384,19 @@ void ValetProtocol::SendStartListening(ListeningMode) {
     if (session_live_) { if (call_id_.empty() && !call_pending_) CreateCall(); return; }
     if (awaiting_ || speech_active_) SendAbortSpeaking(kAbortReasonNone);
     awaiting_ = false; reply_completed_ = true; run_id_.clear(); request_id_.clear();
-    interrupted_ = false; recording_data_.clear(); recording_data_.reserve(16000 * 30 + 58);
+    interrupted_ = false;
+    {
+        std::lock_guard<std::mutex> record(record_mutex_);
+        recording_data_.clear(); recording_data_.reserve(16000 * 30 + 58);
+    }
     if (input_decoder_) input_decoder_->ResetState();
+    if (auto* engine = Engine()) engine->DropMic();   // 只录按下之后的
+    submit_pending_ = false;
     recording_ = true;
+    ESP_LOGI(TAG, "ask: recording (engine %d, uplink %d)", Engine() ? 1 : 0, uplink_ ? 1 : 0);
 }
 bool ValetProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
+    if (Engine()) return true;   // 新引擎：麦克风由上行任务直接从引擎取（这里收到的 Opus 包不用）
     std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     if (!IsAudioChannelOpened()) return false;
     if (session_live_ && (!live_ready_ || Muted())) return true;
@@ -426,7 +440,7 @@ bool ValetProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
 #endif
         std::vector<std::vector<int16_t>> frames;
         mic_voice.store(GateMic(pcm, now, mic_muted, frames));
-        for (const auto& frame : frames) if (!SendLiveFrame(frame)) return false;
+        for (const auto& frame : frames) if (!SendLiveFrame(frame, call_id_)) return false;
         return true;
     }
     if (recording_data_.size() + pcm.size() > 16000 * 30) { recording_ = false; SetError("录音最多 30 秒，请松手后重新提问"); return false; }
@@ -453,8 +467,19 @@ bool ValetProtocol::GateMic(const std::vector<int16_t>& pcm, int64_t now, bool m
     if (muted) {   // 扬声器在响：麦克风里是助理自己的声音，不更新底噪，也不留作开门前的补音
         if (gate_open_) ESP_LOGI(TAG, "mic gate: closed by playback");
         gate_preroll_.clear(); gate_open_ = false; gate_score_ = 0;
+        muted_history_.push_back(pcm);   // 万一是插话，这几包就是句子开头
+        if (muted_history_.size() > 6) muted_history_.pop_front();
         silent(); return false;
     }
+    if (barge_pending_) {   // 刚判定插话：补上静音期间最后约 0.36 秒，人声门直接打开
+        barge_pending_ = false;
+        ESP_LOGI(TAG, "mic gate: open by talk-over, %u packets of lead-in", unsigned(muted_history_.size()));
+        for (auto& frame : muted_history_) out.push_back(std::move(frame));
+        muted_history_.clear(); gate_preroll_.clear();
+        gate_open_ = true; gate_score_ = 3; gate_last_voice_ = now;
+        out.push_back(pcm); return true;
+    }
+    muted_history_.clear();
     if (!vad_ || !g_valet_mic_gate) { out.push_back(pcm); return true; }
     double sq = 0;
     for (const auto v : pcm) sq += double(v) * v;
@@ -485,12 +510,12 @@ bool ValetProtocol::GateMic(const std::vector<int16_t>& pcm, int64_t now, bool m
     if (gate_preroll_.size() > kPreroll) gate_preroll_.pop_front();
     silent(); return false;
 }
-bool ValetProtocol::SendLiveFrame(const std::vector<int16_t>& pcm) {
+bool ValetProtocol::SendLiveFrame(const std::vector<int16_t>& pcm, const std::string& call_id) {
     {
         std::vector<int16_t> resampled(input_resampler_.GetOutputSamples(pcm.size()));
         input_resampler_.Process(pcm.data(), pcm.size(), resampled.data());
         auto* root = valet::wire::Request(("valet-a-" + std::to_string(++sequence_)).c_str(), "talk.session.appendAudio");
-        auto* params = cJSON_GetObjectItem(root, "params"); cJSON_AddStringToObject(params, "sessionId", call_id_.c_str());
+        auto* params = cJSON_GetObjectItem(root, "params"); cJSON_AddStringToObject(params, "sessionId", call_id.c_str());
         std::vector<uint8_t> compressed;
         int index = 0;
         for (size_t offset = 0; offset < resampled.size(); offset += PASSPORT_IMA_SAMPLES) {
@@ -505,13 +530,132 @@ bool ValetProtocol::SendLiveFrame(const std::vector<int16_t>& pcm) {
         return Send(root);
     }
 }
+VoiceEngine* ValetProtocol::Engine() {
+    auto& audio = Application::GetInstance().GetAudioService();
+    return audio.EngineMode() && audio.Engine().Running() ? &audio.Engine() : nullptr;
+}
+void ValetProtocol::StartUplink() {
+    if (uplink_ || !Engine()) return;
+    if (!uplink_done_) uplink_done_ = xSemaphoreCreateBinary();
+    xSemaphoreTake(uplink_done_, 0);
+    uplink_stop_ = false;
+    // 要发 TLS、拼 JSON：栈 8 KB 放 PSRAM（内部内存紧），带 caps 建的任务做完就停住，由 StopUplink 删。
+    if (xTaskCreateWithCaps([](void* arg) {
+            auto* self = static_cast<ValetProtocol*>(arg);
+            self->RunUplink();
+            xSemaphoreGive(self->uplink_done_);
+            vTaskSuspend(nullptr);
+        }, "valet_uplink", 8192, this, 5, &uplink_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        uplink_ = nullptr;
+        ESP_LOGE(TAG, "uplink task create failed");
+    }
+}
+void ValetProtocol::StopUplink() {
+    if (!uplink_) return;
+    uplink_stop_ = true;
+    if (xSemaphoreTake(uplink_done_, pdMS_TO_TICKS(3000)) != pdTRUE) ESP_LOGW(TAG, "uplink did not stop in time");
+    while (eTaskGetState(uplink_) != eSuspended) vTaskDelay(1);
+    vTaskDeleteWithCaps(uplink_);
+    uplink_ = nullptr;
+}
+void ValetProtocol::RunUplink() {
+    std::vector<int16_t> pcm;
+    pcm.reserve(960);
+    int16_t frame[VoiceEngine::kFrame];
+    const auto submit = [this] {
+        std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+        if (submit_pending_.exchange(false)) {
+            ESP_LOGI(TAG, "ask: uploading %u samples", unsigned(recording_data_.size()));
+            Submit();
+        }
+    };
+    while (!uplink_stop_) {
+        VoiceEngine* engine = Engine();
+        if (!engine) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
+        int64_t at = 0;
+        if (!engine->ReadMic(frame, 60, &at)) {
+            if (submit_pending_) submit();
+            continue;
+        }
+        if (!session_live_) {   // 提问：按住期间录下来（μ-law），松开后把松开前录到的取完再上传
+            if (submit_pending_ && at > submit_at_us_) { submit(); continue; }
+            if (!recording_ && !submit_pending_) continue;
+            std::lock_guard<std::mutex> record(record_mutex_);
+            if (recording_data_.size() + VoiceEngine::kFrame > 16000 * 30) {
+                if (recording_.exchange(false)) SetError("录音最多 30 秒，请松手后重新提问");
+                continue;
+            }
+            for (int i = 0; i < VoiceEngine::kFrame; ++i) recording_data_.push_back(valet::wire::MuLaw(frame[i]));
+            continue;
+        }
+        pcm.insert(pcm.end(), frame, frame + VoiceEngine::kFrame);
+        if (pcm.size() < 960) continue;   // 凑 60 ms 一包：人声门按 30 ms 判断，网关按包收
+        UplinkLive(pcm, at, *engine);
+        pcm.clear();
+    }
+}
+void ValetProtocol::UplinkLive(const std::vector<int16_t>& pcm, int64_t now, VoiceEngine& engine) {
+    bool ready = false, output_started = false;
+    std::string call;
+    {
+        std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+        if (!IsAudioChannelOpened()) { engine.ArmTalkOver(false); return; }
+        ready = live_ready_ && !reconnecting_; output_started = output_started_; call = call_id_;
+    }
+    const bool muted_by_user = Muted();
+    engine.ArmTalkOver(ready && !muted_by_user);
+    {
+        double sq = 0;
+        for (const auto v : pcm) sq += double(v) * v;
+        mic_level.store(int(std::sqrt(sq / pcm.size())));
+        mic_level_at.store(now);
+    }
+    if (!ready || muted_by_user || call.empty()) return;
+    // 扬声器在响：播放环里还有声音，或最后一次出声之后还没过「路径延迟 + 300 ms 余音」
+    const bool speaker = !engine.PlaybackIdle() ||
+                         now - engine.LastSoundUs() < int64_t(VoiceEngine::kPathDelayMs + 300) * 1000;
+    const uint32_t overs = engine.TalkOvers();
+    if (overs != talk_overs_seen_) {
+        talk_overs_seen_ = overs;
+        if (speaker) {
+            ESP_LOGI(TAG, "call: user spoke over the reply, interrupting");
+            Application::GetInstance().AbortSpeaking(kAbortReasonNone);   // 清空播放环 + cancelOutput
+            barge_at_ = now; barge_pending_ = true;
+        }
+    }
+    // 插话之后，只要用户还在说（人声门开着）就一直不静音，新回答开始了也不静音，直到这句话说完。
+    // 2026-11-23：原来只放开 1.5 秒，网关在用户句中的停顿处就开始回答，麦克风随即又被静音，
+    // 「等一下，我想 / 问另外一个问题」被切成两段，后半句丢了。
+    if (barge_at_ && (now - barge_at_ > 15000000 || (now - barge_at_ > 1500000 && !gate_open_))) barge_at_ = 0;
+    const bool after_barge = barge_at_ != 0;
+    (void)output_started;
+    std::vector<std::vector<int16_t>> frames;
+    mic_voice.store(GateMic(pcm, now, speaker && !after_barge, frames));
+    for (const auto& f : frames) if (!SendLiveFrame(f, call)) break;
+#if CONFIG_VALET_DEV_LINK
+    {   // 仅测试版：每 3 秒记一次上行情况
+        static int64_t since = 0; static unsigned sent = 0, muted = 0;
+        if (!since) since = now;
+        ++sent; if (speaker && !after_barge) ++muted;
+        if (now - since > 3000000) {
+            const auto s = engine.TakeStats();
+            ESP_LOGI(TAG, "uplink: %u packets, %u muted, mic rms %d; engine: %u frames, ran dry %u, mic dropped %u, worst loop %d ms",
+                     sent, muted, mic_level.load(), unsigned(s.frames), unsigned(s.underruns), unsigned(s.mic_dropped), s.max_loop_ms);
+            since = now; sent = muted = 0;
+        }
+    }
+#endif
+}
 bool ValetProtocol::Submit() {
+    std::unique_lock<std::mutex> record(record_mutex_);
     if (recording_data_.empty()) { SetError("没有收到录音，请重试"); return false; }
     // Move the recording into its WAV envelope, then free it before serializing JSON.
     const auto audio = [this] {
         const auto wav = valet::wire::Wav(std::move(recording_data_));
+        recording_data_.clear();
         return valet::wire::Base64(wav.data(), wav.size());
     }();
+    record.unlock();
     if (!max_payload_ || audio.size() + 1024 > max_payload_) { SetError("录音超过网关限制，请缩短后重试"); return false; }
     run_id_.clear(); reply_.clear(); reply_completed_ = false; interrupted_ = false;
     awaiting_ = true; ask_deadline_ = esp_timer_get_time() + 180000000; last_poll_ = 0;
@@ -527,7 +671,16 @@ bool ValetProtocol::Submit() {
     if (Send(root)) return true;
     awaiting_ = false; SetError("提问发送失败，请重新连接助理"); return false;
 }
-void ValetProtocol::SendStopListening() { std::lock_guard<std::recursive_mutex> lock(state_mutex_); if (recording_.exchange(false)) { Submit(); recording_data_.clear(); } }
+void ValetProtocol::SendStopListening() {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    if (!recording_.exchange(false)) { ESP_LOGW(TAG, "ask: released but was not recording"); return; }
+    ESP_LOGI(TAG, "ask: released, %u samples so far", unsigned(recording_data_.size()));
+    // 新引擎：上行任务把松开之前录到的帧取完，再上传
+    if (Engine()) { submit_at_us_ = esp_timer_get_time(); submit_pending_ = true; return; }
+    Submit();
+    std::lock_guard<std::mutex> record(record_mutex_);
+    recording_data_.clear();
+}
 void ValetProtocol::CreateCall() {
     call_pending_ = true; call_ready_seen_ = false; recreate_at_ = 0;
     playback_sequence_ = 0;   // 每个新通话的音频序号都从头算；留着旧通话的序号会把新回答的声音全当成过期包丢掉
@@ -715,7 +868,8 @@ void ValetProtocol::Handle(cJSON* root) {
         if (name.empty() || name.size() > 128) return;
         // 网关的确认点按顺序编号，确认后一个就隐含确认了前一个；攒满时用新的替换最后一个，
         // 而不是报错（2026-11-22：助理连说两段时扬声器一直不空，旧代码攒满 16 个就把通话打断）。
-        const uint64_t target = pushed_packets_ + held_.size();   // 还在缓冲里的包也算在确认点之前
+        // 新引擎按样本：确认点 = 它到达时已经放进播放环的样本数，播到这里才回
+        const uint64_t target = Engine() ? Engine()->Queued() : pushed_packets_ + held_.size();
         if (marks_.size() >= 16) marks_.back() = {name, target};
         else marks_.push_back({name, target});
         return;
@@ -800,6 +954,15 @@ void ValetProtocol::Handle(cJSON* root) {
         level_samples_ += pcm.size();
         if (!output_started_) { output_started_ = true; Event("tts", "start"); }
         audio_done_ = false;
+        if (auto* engine = Engine()) {
+            // 直接放进引擎的播放环（不阻塞收消息的线程）；提问模式按设置决定播不播回答的语音
+            if (session_live_ || chat_cloud::SpeechPlaybackEnabled()) {
+                std::vector<int16_t> out(output_resampler_.GetOutputSamples(pcm.size()));
+                output_resampler_.Process(pcm.data(), pcm.size(), out.data());
+                engine->Play(out.data(), out.size());
+            }
+            return;
+        }
         auto packet = std::make_unique<AudioStreamPacket>(); packet->sample_rate = 24000; packet->pcm = true;
         packet->payload.resize(pcm.size()*2); std::memcpy(packet->payload.data(), pcm.data(), packet->payload.size());
         PushReplyAudio(std::move(packet));
@@ -946,8 +1109,9 @@ void ValetProtocol::DrainPlayback() {
     auto& audio = Application::GetInstance().GetAudioService();
     // 声音来得慢、攒不够时最多等 0.3 秒就先放出去。
     if (!held_.empty() && esp_timer_get_time() - held_since_ >= 300000) ReleaseHeldAudio();
-    const bool idle = audio.IsPlaybackIdle() && held_.empty();
-    const uint64_t played = audio.PlayedPackets() - played_base_;
+    auto* engine = Engine();
+    const bool idle = engine ? engine->PlaybackIdle() : audio.IsPlaybackIdle() && held_.empty();
+    const uint64_t played = engine ? engine->Played() : audio.PlayedPackets() - played_base_;
     while (!marks_.empty() && !interrupted_ && (idle || played >= marks_.front().target)) {
         auto* root = valet::wire::Request("valet-mark", "talk.session.acknowledgeMark");
         auto* params = cJSON_GetObjectItem(root, "params");

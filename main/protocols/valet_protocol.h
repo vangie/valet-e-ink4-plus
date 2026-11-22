@@ -5,6 +5,8 @@
 #include "valet_reading_context.h"
 #include "opus_decoder.h"
 #include "opus_resampler.h"
+#include "voice_engine.h"
+#include <freertos/semphr.h>
 #include <web_socket.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -109,8 +111,28 @@ private:
     int gate_score_ = 0;
     int64_t gate_last_voice_ = 0;
     float gate_floor_db_ = -60.f;   // 房间底噪（dBFS），慢升快降
+    // 插话：判定用户对着正在说话的助理开口时，打断回答，并补上扬声器响着时被静音的那几包（句子开头）。
+    std::deque<std::vector<int16_t>> muted_history_;
+    bool barge_pending_ = false;
+    int64_t barge_at_ = 0;
+    int64_t submit_at_us_ = 0;   // 提问：松开按键的时刻，之后录到的不算
     bool GateMic(const std::vector<int16_t>& pcm, int64_t now, bool muted, std::vector<std::vector<int16_t>>& out);
-    bool SendLiveFrame(const std::vector<int16_t>& pcm);
+    bool SendLiveFrame(const std::vector<int16_t>& pcm, const std::string& call_id);
+    // ---- 新语音引擎（docs/voice-engine.md）----
+    // 引擎在跑时返回它，否则 nullptr（官方云路径或音频还没起来）。
+    VoiceEngine* Engine();
+    // 上行任务：从引擎取麦克风，通话时过防回声 / 人声门 / 插话后发出去，提问时录下来。不拿协议锁发网络。
+    TaskHandle_t uplink_ = nullptr;
+    std::atomic<bool> uplink_stop_{false};
+    SemaphoreHandle_t uplink_done_ = nullptr;
+    void StartUplink();
+    void StopUplink();
+    void RunUplink();
+    void UplinkLive(const std::vector<int16_t>& pcm, int64_t now, VoiceEngine& engine);
+    std::mutex record_mutex_;   // recording_data_：上行任务写，松开按键后上传
+    std::atomic<bool> submit_pending_{false};   // 松开了：上行任务把剩下的麦克风帧取完再上传
+    uint32_t talk_overs_seen_ = 0;
+    OpusResampler output_resampler_;   // 回话 24 kHz → 引擎 16 kHz
     void ResyncPlayback();   // 清空播放队列后：已交出的包都当作播完
     // 缓冲：助理的声音按说话的速度到达，扬声器前面几乎没有存货，网络或屏幕刷新慢一下就断音。
     // 扬声器空着时先攒 kPrerollMs 再一起交出去，之后都直接交；播空了（断过一次）就再攒一次。
@@ -128,8 +150,8 @@ private:
     // 就用这些字补上（加「……」），屏幕上留着助理说到了哪儿。
     std::string reply_so_far_;
     void KeepInterruptedReply();
-    int64_t quiet_since_ = 0;
-    int64_t interrupt_at_ = 0;   // 发出打断的时刻，等网关回复用   // 扬声器从什么时候开始没在播（0 = 正在播）
+    int64_t quiet_since_ = 0;   // 扬声器从什么时候开始没在播（0 = 正在播）
+    int64_t interrupt_at_ = 0;   // 发出打断的时刻，等网关回复用
     std::string tool_call_, tool_run_, tool_key_;
     // 助理一句话里可能连着叫两次工具（2026-11-22：「帮我记一下明天八点开会」第一次还没回来就叫了第二次，
     // 旧代码直接结束通话）。一次只跑一个，其余排队；失败或超时只把错误交回给助理，不挂断。
