@@ -1995,6 +1995,7 @@ void Application::DispatchVoiceEvents() {
                 error = last_error_message_;
                 generation = last_error_generation_;
             }
+            ESP_LOGW(TAG, "voice error: %s", error.c_str());
             if (generation == voice_generation_.load() && AssistantScreen::IsActive() && !StandbyScreen::IsActive()) {
                 SetDeviceState(kDeviceStateIdle);
                 Alert(error.c_str(), error.c_str(), "cloud_slash");

@@ -1,5 +1,13 @@
 #include "audio_service.h"
+#include "sdkconfig.h"
+#if CONFIG_VALET_DEV_LINK
+#include "epd_refresh.h"
+#endif
+#if CONFIG_VALET_DEV_LINK
+static int64_t valet_play_end_us = 0;
+#endif
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <esp_heap_caps.h>
 #include <cstring>
 #include <cmath>
@@ -109,7 +117,9 @@ void AudioService::Start() {
 
     // 栈放 SPIRAM：内部 DRAM 碎片时 xTaskCreate 易失败；TCB 仍在内部
     constexpr UBaseType_t kStackCaps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-    // 与刷新调度同级，避免语音包长时间待解码；屏幕扫描供数仍保留更高优先级。
+    // 与刷新调度同级，避免语音包长时间待解码；屏幕扫描供数（epd_prep）仍保留更高优先级。
+    // 不能提到与 epd_prep 同级：试过（2026-11-22），播放和解码都提或只提播放都一样，
+    // 供数被抢走，墨水屏每次刷新都欠载，进入「清屏 + GC16 全刷」恢复，屏幕不停黑白闪。
     constexpr UBaseType_t kOutputPriority = configMAX_PRIORITIES - 2;
     constexpr UBaseType_t kCodecPriority = configMAX_PRIORITIES - 2;
 
@@ -469,6 +479,10 @@ void AudioService::AudioOutputTask() {
         playback_active_ = true;
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
+#if CONFIG_VALET_DEV_LINK
+        const size_t queued_after = audio_playback_queue_.size();
+        const size_t decode_after = audio_decode_queue_.size();
+#endif
         audio_queue_cv_.notify_all();
         lock.unlock();
 
@@ -477,7 +491,43 @@ void AudioService::AudioOutputTask() {
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
             codec_->EnableOutput(true);
         }
+#if CONFIG_VALET_DEV_LINK
+        // 仅测试版：每段连续播放结束时记下送到扬声器之前的电平（音量键之前），用来对比各路声音的响度。
+        {
+            static double sumsq = 0; static uint64_t samples = 0; static int peak = 0;
+            int64_t& last_us = valet_play_end_us;   // 上一段播完的时刻
+            static unsigned stalls = 0; static int64_t worst_gap = 0;
+            const int64_t now_us = esp_timer_get_time();
+            // 一段回话里扬声器空等超过 40 ms 记一次「断」（数据没及时到）。
+            const int64_t gap = now_us - last_us;
+            if (samples && gap > 40000 && gap <= 1500000) {
+                ++stalls; worst_gap = std::max(worst_gap, gap);
+                // 排队里还有包 = 播放任务没抢到 CPU；没有包 = 数据没到。
+                const auto epd = EpdGetStats();
+                ESP_LOGI(TAG, "playback gap %d ms, queued %u, decode queue %u, epd busy %d mode %d last %u ms",
+                         int(gap / 1000), unsigned(queued_after), unsigned(decode_after), epd.busy, epd.mode, unsigned(epd.last_ms));
+            }
+            if (samples && gap > 1500000) {
+                ESP_LOGI(TAG, "playback level: %u ms, rms %.1f dBFS, peak %.1f dBFS, stalls %u (worst %d ms)", unsigned(samples / 16),
+                         20 * std::log10(std::max(1.0, std::sqrt(sumsq / samples)) / 32767.0),
+                         20 * std::log10(std::max(1, peak) / 32767.0), stalls, int(worst_gap / 1000));
+                sumsq = 0; samples = 0; peak = 0; stalls = 0; worst_gap = 0;
+            }
+            for (const auto v : task->pcm) { sumsq += double(v) * v; peak = std::max(peak, std::abs(int(v))); }
+            samples += task->pcm.size();
+        }
+#endif
+        if (!task->pcm.empty()) {
+            double sq = 0;
+            for (const auto v : task->pcm) sq += double(v) * v;
+            output_level_.store(int(std::sqrt(sq / task->pcm.size())));
+            output_level_at_.store(esp_timer_get_time());
+        }
         codec_->OutputData(task->pcm);
+#if CONFIG_VALET_DEV_LINK
+        valet_play_end_us = esp_timer_get_time();
+#endif
+        played_packets_.fetch_add(1);
         playback_active_ = false;
 
         /* Update the last output time */

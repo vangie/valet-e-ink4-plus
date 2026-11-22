@@ -1,15 +1,21 @@
 #include "server.h"
 #include "pairing.h"
 #include "assistant_profiles.h"
+#include "protocols/valet_protocol.h"
 #include "application.h"
 #include "power_policy.h"
+#include "board.h"
+#include "dual_network_board.h"
+#include "wifi_station.h"
 #include <esp_http_server.h>
+#include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_wifi.h>
 #include <esp_random.h>
 #include <esp_timer.h>
 #include <cJSON.h>
 #include <mutex>
+#include <utility>
 #include <memory>
 #include <cstdio>
 #include <cstring>
@@ -18,6 +24,7 @@ extern const uint8_t setup_page_start[] asm("_binary_valet_setup_html_gz_start")
 extern const uint8_t setup_page_end[] asm("_binary_valet_setup_html_gz_end");
 namespace valet {
 namespace {
+const char* TAG = "ValetSetup";
 std::mutex s_mutex;
 SetupStatus s_status;
 std::string s_access;
@@ -77,6 +84,7 @@ esp_err_t Profiles(httpd_req_t* req) {
     cJSON_AddStringToObject(root.get(), "active", profiles.active_id.c_str());
     cJSON_AddBoolToObject(root.get(), "saving", status.saving);
     cJSON_AddStringToObject(root.get(), "note", status.note.c_str());
+    cJSON_AddBoolToObject(root.get(), "paired", status.paired);
     cJSON_AddStringToObject(root.get(), "transport", "passport-v1");
     auto* items = cJSON_AddArrayToObject(root.get(), "items");
     if (!items) return JsonReply(req, nullptr);
@@ -88,9 +96,49 @@ esp_err_t Profiles(httpd_req_t* req) {
         cJSON_AddStringToObject(item, "name", profile.name.c_str());
         cJSON_AddStringToObject(item, "backend", profile.connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw");
         cJSON_AddStringToObject(item, "url", profile.connection.url.c_str());
+        cJSON_AddBoolToObject(item, "paired", !profile.device_token.empty());
         // Codes and tokens are write-only, including after the device is read back.
     }
     return JsonReply(req, root.get());
+}
+// 保存后立刻配对，并在配置页开着的这段时间里每 4 秒重试：这样「需要批准」当场出现，
+// 批准后自动换到长期凭据，不用等用户以后进提问页，那时配对码多半已经过期（网关给 10 分钟）。
+void PairWhileOpen(uint32_t generation, std::string id) {
+    const auto still_open = [generation] {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        return s_status.running && s_status.generation == generation && esp_timer_get_time() < s_expires;
+    };
+    const auto note = [generation](const std::string& text, bool paired) {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        if (s_status.generation != generation) return;
+        s_status.note = text; s_status.paired = paired;
+    };
+    if (!still_open()) return;
+    const auto result = ValetProtocol::PairNow(id);
+    using Pairing = ValetProtocol::Pairing;
+    if (result == Pairing::Paired) { note("已连接。现在可以在设备上提问了。", true); return; }
+    note(ValetProtocol::PairingText(result), false);
+    if (result != Pairing::NeedsApproval && result != Pairing::Unreachable) return;   // 重试也没用
+    if (!still_open()) return;
+    // 不占住 Network 任务：隔几秒再排一次。定时器只建一个，反复使用。
+    static esp_timer_handle_t s_pair_timer = nullptr;
+    static uint32_t s_pair_generation = 0;
+    static std::string s_pair_id;
+    { std::lock_guard<std::mutex> lock(s_mutex); s_pair_generation = generation; s_pair_id = std::move(id); }
+    if (!s_pair_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = [](void*) {
+                uint32_t generation; std::string id;
+                { std::lock_guard<std::mutex> lock(s_mutex); generation = s_pair_generation; id = s_pair_id; }
+                Application::GetInstance().Schedule([generation, id] { PairWhileOpen(generation, id); },
+                                                    Application::TaskDomain::Network);
+            },
+            .arg = nullptr, .dispatch_method = ESP_TIMER_TASK, .name = "valet_pair", .skip_unhandled_events = true,
+        };
+        if (esp_timer_create(&args, &s_pair_timer) != ESP_OK) { s_pair_timer = nullptr; return; }
+    }
+    esp_timer_stop(s_pair_timer);
+    esp_timer_start_once(s_pair_timer, 4 * 1000000);
 }
 esp_err_t Mutate(httpd_req_t* req) {
     uint32_t generation;
@@ -143,11 +191,17 @@ esp_err_t Mutate(httpd_req_t* req) {
         } else if (action == "select") changed = profiles.Select(id);
         else changed = profiles.Remove(id);
         const bool saved = changed && SaveAssistantProfiles(profiles);
-        std::lock_guard<std::mutex> lock(s_mutex);
-        if (s_status.generation != generation) return;
-        s_status.saving = false;
-        s_status.note = saved ? "已保存到设备。请在设备进入提问或通话，完成签名配对与语音测试。" :
-            "未保存。请检查是否重复添加、连接数或存储空间已满。";
+        {
+            std::lock_guard<std::mutex> lock(s_mutex);
+            if (s_status.generation != generation) return;
+            s_status.saving = false;
+            s_status.paired = false;
+            s_status.note = !saved ? "未保存。请检查是否重复添加、连接数或存储空间已满。"
+                          : action == "add" ? "已保存，正在连接助理…" : "已保存到设备。";
+        }
+        if (saved && action == "add")
+            Application::GetInstance().Schedule([generation, id = profile.id] { PairWhileOpen(generation, id); },
+                                                Application::TaskDomain::Network);
     }, Application::TaskDomain::Storage)) {
         std::lock_guard<std::mutex> lock(s_mutex);
         s_status.saving = false;
@@ -163,14 +217,37 @@ SetupStatus GetSetupStatus() {
     if (result.running && esp_timer_get_time() >= s_expires) { result.running = false; result.note = "配置已过期，请重新打开"; }
     return result;
 }
+static bool StartSetupServerLocked();
 bool StartSetupServer() {
     StopSetupServer();
+    { std::lock_guard<std::mutex> lock(s_mutex); s_status.starting = true; s_status.note = "正在连 Wi-Fi 并打开配置页，要十来秒…"; }
+    const bool ok = StartSetupServerLocked();
+    { std::lock_guard<std::mutex> lock(s_mutex); s_status.starting = false; }
+    return ok;
+}
+static bool StartSetupServerLocked() {
+    // 配置页只能在局域网里打开。Wi-Fi 空闲一会儿射频就会被省电关掉，
+    // 所以先申请保持联网、把它叫起来；只有上网方式不是 Wi-Fi 时才让用户去换。
+    auto* dual = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
+    const bool wifi_selected = (dual ? dual->GetNetworkType() == NetworkType::WIFI : true) &&
+                               WifiStation::GetInstance().IsUserEnabled();
+    if (!wifi_selected) {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        s_status.note = "现在用的是 4G。配置页要在同一个 Wi-Fi 里打开，请先把上网方式换成 Wi-Fi。";
+        return false;
+    }
+    PowerPolicy::GetInstance().Acquire(PowerNeed::UiKeepNet);
+    PowerPolicy::GetInstance().Acquire(PowerNeed::StandbyInhibit);
+    s_hold = true;
+    if (!WifiStation::GetInstance().IsConnected()) Board::GetInstance().EnsureNetworkReady(20000);
     wifi_ap_record_t ap{};
     esp_netif_ip_info_t ip{};
     auto* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (!netif || esp_wifi_sta_get_ap_info(&ap) != ESP_OK || esp_netif_get_ip_info(netif, &ip) != ESP_OK || !ip.ip.addr) {
+        ESP_LOGW(TAG, "no Wi-Fi address after wake-up");
+        StopSetupServer();
         std::lock_guard<std::mutex> lock(s_mutex);
-        s_status.note = "请先让设备与手机连接同一个 Wi-Fi";
+        s_status.note = "Wi-Fi 没连上。请检查 Wi-Fi 后再试。";
         return false;
     }
     uint8_t random[24]; esp_fill_random(random, sizeof(random));
@@ -189,16 +266,30 @@ bool StartSetupServer() {
     config.server_port = 8080; config.ctrl_port = 32769;
     config.stack_size = 8192; config.max_uri_handlers = 3;
     config.max_open_sockets = 2; config.recv_wait_timeout = 5; config.send_wait_timeout = 5;
-    if (httpd_start(&s_server, &config) != ESP_OK) { StopSetupServer(); return false; }
+    const esp_err_t started = httpd_start(&s_server, &config);
+    if (started != ESP_OK) {
+        ESP_LOGE(TAG, "httpd_start failed: %s", esp_err_to_name(started));
+        s_server = nullptr;
+        StopSetupServer();
+        std::lock_guard<std::mutex> lock(s_mutex);
+        s_status.note = "配置页没能打开，请再试一次。";
+        return false;
+    }
     const httpd_uri_t routes[] = {
         {.uri = "/setup", .method = HTTP_GET, .handler = Page},
         {.uri = "/api/assistants", .method = HTTP_GET, .handler = Profiles},
         {.uri = "/api/assistants", .method = HTTP_POST, .handler = Mutate},
     };
-    for (const auto& route : routes) if (httpd_register_uri_handler(s_server, &route) != ESP_OK) { StopSetupServer(); return false; }
-    PowerPolicy::GetInstance().Acquire(PowerNeed::UiKeepNet);
-    PowerPolicy::GetInstance().Acquire(PowerNeed::StandbyInhibit);
-    s_hold = true;
+    for (const auto& route : routes) {
+        const esp_err_t registered = httpd_register_uri_handler(s_server, &route);
+        if (registered == ESP_OK) continue;
+        ESP_LOGE(TAG, "route %s failed: %s", route.uri, esp_err_to_name(registered));
+        StopSetupServer();
+        std::lock_guard<std::mutex> lock(s_mutex);
+        s_status.note = "配置页没能打开，请再试一次。";
+        return false;
+    }
+    ESP_LOGI(TAG, "setup page up at %s", origin);
     std::lock_guard<std::mutex> lock(s_mutex);
     s_status.running = true;
     return true;
@@ -220,6 +311,7 @@ void CloseSetupSession() {
     {
         std::lock_guard<std::mutex> lock(s_mutex);
         if (!s_status.running && s_access.empty()) return;
+        ESP_LOGW(TAG, "close requested: running=%d starting=%d", s_status.running ? 1 : 0, s_status.starting ? 1 : 0);
         s_status.running = false; s_status.saving = false; s_access.clear();
         generation = ++s_status.generation;
     }

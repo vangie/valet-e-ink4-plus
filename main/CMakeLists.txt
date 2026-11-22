@@ -280,7 +280,7 @@ idf_component_register(
     PRIV_REQUIRES
         esp_driver_usb_serial_jtag
         bt elf_loader
-        esp-wifi-connect esp-ml307 espressif__cjson 78__esp-opus-encoder 78__esp-opus esp_driver_jpeg
+        esp-wifi-connect esp-ml307 fvad espressif__cjson 78__esp-opus-encoder 78__esp-opus esp_driver_jpeg
 )
 
 if(CONFIG_IDF_TARGET_ESP32S31)

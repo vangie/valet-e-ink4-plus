@@ -33,7 +33,9 @@
 
 #define OPUS_FRAME_DURATION_MS 60
 #define MAX_ENCODE_TASKS_IN_QUEUE 2
-#define MAX_PLAYBACK_TASKS_IN_QUEUE 2
+// 解好的 PCM 在播放前最多排几段：墨水屏每刷新一次约 0.4 秒，解码这段时间抢不到 CPU，
+// 只排 2 段时扬声器会空掉断音；多排几段（放在 PSRAM 里），解码有空时先解到前面去。
+#define MAX_PLAYBACK_TASKS_IN_QUEUE 12
 // 原 2400ms≈40 包；Opus 包常 <512B 偏内部堆，压到 ~0.9s 减碎片与峰值
 #define MAX_DECODE_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
 #define MAX_SEND_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
@@ -99,6 +101,10 @@ public:
     bool IsVoiceDetected() const { return voice_detected_; }
     bool IsIdle();
     bool IsPlaybackIdle();
+    // 已经送到扬声器的播放包数，只增不减（通话里按它回「播到了」）。
+    uint64_t PlayedPackets() const { return played_packets_.load(); }
+    // 最近一包送到扬声器的声音大小（均方根，满幅 32767）和时刻；通话页的波形用。
+    int OutputLevel(int64_t* at_us = nullptr) const { if (at_us) *at_us = output_level_at_.load(); return output_level_.load(); }
     bool IsWakeWordRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_WAKE_WORD_RUNNING; }
     bool IsStarted() const { return !service_stopped_; }
     bool IsAudioProcessorRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING; }
@@ -157,6 +163,9 @@ private:
     OpusResampler reference_resampler_;
     OpusResampler output_resampler_;
     std::atomic<bool> playback_active_{false};
+    std::atomic<uint64_t> played_packets_{0};
+    std::atomic<int> output_level_{0};
+    std::atomic<int64_t> output_level_at_{0};
     std::atomic<bool> decoding_active_{false};
     bool pcm_resampler_ready_ = false; // owned by the codec task
     DebugStatistics debug_statistics_;

@@ -98,17 +98,15 @@ static void StartSetupClicked(lv_event_t*) {
     if (s_setup_starting) return;
     s_setup_visible = true;
     s_setup_starting = true;
-    const uint32_t generation = s_ui_generation;
-    if (!Application::GetInstance().Schedule([generation]() {
+    // 进入「添加助理」会整页重建，页面代数随之变化，所以这里不能用代数判断页面还在不在：
+    // 只看页面是否还开着、是否仍在添加流程里（离开页面时 Reset 会清掉 s_setup_visible）。
+    if (!Application::GetInstance().Schedule([]() {
         valet::StartSetupServer();
-        auto* expected = new uint32_t(generation);
-        if (!ScreenLvAsync([](void* context) {
-            const auto generation = *static_cast<uint32_t*>(context);
-            delete static_cast<uint32_t*>(context);
+        if (!ScreenLvAsync([](void*) {
             s_setup_starting = false;
-            if (s_ui.alive && generation == s_ui_generation && s_setup_visible) RefreshAssistantList();
+            if (s_ui.alive && s_setup_visible) RefreshAssistantList();
             else valet::CloseSetupSession();
-        }, expected)) { delete expected; s_setup_starting = false; valet::CloseSetupSession(); }
+        }, nullptr)) { s_setup_starting = false; valet::CloseSetupSession(); }
     }, Application::TaskDomain::Network)) s_setup_starting = false;
     lv_async_call([](void*) { RebuildPage(); }, nullptr);
 }
@@ -166,7 +164,8 @@ static void BuildAssistants(lv_obj_t* page) {
         auto* hint = lv_label_create(page);
         lv_obj_set_width(hint, lv_pct(100));
         lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-        lv_label_set_text(hint, s_setup_starting ? CloudText("正在打开本地配置页…", "Opening local setup…") : setup.note.c_str());
+        const bool opening = s_setup_starting || setup.starting;
+        lv_label_set_text(hint, opening ? CloudText("正在连 Wi-Fi 并打开配置页，要十来秒…", "Connecting Wi-Fi and opening setup…") : setup.note.c_str());
         if (setup.running) {
             auto* frame = UiCreateQrFrame(page, UiSx(170));
             auto* qr = lv_qrcode_create(frame);
@@ -187,11 +186,11 @@ static void BuildAssistants(lv_obj_t* page) {
             lv_obj_set_width(steps, lv_pct(100));
             lv_label_set_long_mode(steps, LV_LABEL_LONG_WRAP);
             lv_label_set_text(steps, CloudText("同一 Wi-Fi → 复制提示给助理 → 粘贴回复保存。二维码十分钟有效。", "Same Wi-Fi → send prompt → paste reply and save. QR expires in 10 minutes."));
-        } else if (!s_setup_starting) {
-            SettingsCreateSelectableOption(page, CloudText("连接 Wi-Fi", "Connect Wi-Fi"), OpenWifi, 0);
-            SettingsCreateSelectableOption(page, CloudText("重新打开配置", "Open setup again"), StartSetupClicked, 0);
+        } else if (!opening) {
+            SettingsCreateSelectableOption(page, CloudText("去网络设置", "Network settings"), OpenWifi, 0);
+            SettingsCreateSelectableOption(page, CloudText("再试一次", "Try again"), StartSetupClicked, 0);
         }
-        SettingsCreateSelectableOption(page, CloudText("关闭配置并返回", "Close setup and return"), StopSetupClicked, 0);
+        SettingsCreateSelectableOption(page, CloudText("返回", "Back"), StopSetupClicked, 0);
         return;
     }
     const auto profiles = valet::LoadAssistantProfiles();
@@ -252,9 +251,12 @@ static void BuildAssistants(lv_obj_t* page) {
         auto* state = lv_label_create(card);
         const char* backend = profile.connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw";
         // Capabilities are recorded by a real handshake; say so when the call was not verified.
+        // 有长期凭据才算连上过；没有就是还在等批准，或配对码已经过期。
+        const bool paired = !profile.device_token.empty();
         lv_label_set_text_fmt(state, "%s · %s%s", backend,
             current ? CloudText("当前使用", "In use") : CloudText("已保存", "Saved"),
-            profile.live ? "" : CloudText(" · 通话未验证", " · call not verified"));
+            !paired ? CloudText(" · 还没连上", " · not connected yet")
+                    : profile.live ? "" : CloudText(" · 通话未验证", " · call not verified"));
         lv_obj_set_style_text_font(state, small, 0);
         lv_obj_set_pos(state, left, 86);
         const int inner = 617 - 6 - left - 27, half = (inner - 16) / 2, by = 152;
@@ -284,7 +286,7 @@ static void BuildAssistants(lv_obj_t* page) {
     }
     if (!profiles.items.empty()) {
         auto* note = lv_label_create(page);
-        lv_label_set_text(note, CloudText("已保存的连接不代表在线。首次使用时会签名认证；网关可能要求批准新设备。", "A saved connection is not an online check. First use authenticates the device; the gateway may ask you to approve it."));
+        lv_label_set_text(note, CloudText("添加时设备会马上去连助理；助理那边要求批准的话，请在十分钟内批准。", "The device connects as soon as you add an assistant. If it asks for approval, approve within ten minutes."));
         lv_obj_set_width(note, lv_pct(100));
         lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_font(note, small, 0);
@@ -685,7 +687,9 @@ void SettingsConversationTab_Build(lv_obj_t* page) {
         if (!custom) detail = CloudText("官方订阅，正在用", "Official plan, in use");
         else if (active) {
             title = active->name + " · " + (active->connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw");
-            detail = CloudText("已保存连接", "Connection saved");
+            ok = !active->device_token.empty();
+            detail = ok ? CloudText("已连接过，正在用", "Connected, in use")
+                        : CloudText("还没连上。请在助理那边批准这台设备，或重新添加", "Not connected yet. Approve this device, or add it again");
         } else { detail = CloudText("还没有助理", "No assistant yet"); ok = false; }
         SettingsValetCard(page, title.c_str(), detail.c_str(), ok);
         SettingsValetGap(page, 30);
@@ -722,9 +726,11 @@ void SettingsConversationTab_Build(lv_obj_t* page) {
             if (!s_ui.alive || !s_setup_visible || s_setup_starting) return;
             static std::string last;
             const auto setup = valet::GetSetupStatus();
-            const auto key = setup.note + (setup.running ? "1" : "0");
+            const auto key = setup.note + (setup.running ? "1" : "0") + (setup.starting ? "s" : "");
             if (key != last) { last = key; RefreshAssistantList(); }
-            if (!setup.running) valet::CloseSetupSession();
+            // 只在配置页开过又过期时收尾；还在启动（叫醒 Wi-Fi、开服务）时不能关，
+            // 否则服务刚起来就被这里关掉。
+            if (!setup.running && !setup.starting && !setup.url.empty()) valet::CloseSetupSession();
         }, 1000, nullptr);
         if (!adding) SettingsValetGap(page, 30);
     }

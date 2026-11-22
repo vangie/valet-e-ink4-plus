@@ -8,6 +8,8 @@ components/*
 !components/esp_lvgl_port/**
 !components/epdiy/
 !components/epdiy/**
+!components/fvad/
+!components/fvad/**
 managed_components/
 build/
 build-valet/

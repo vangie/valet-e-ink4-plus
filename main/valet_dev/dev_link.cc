@@ -15,6 +15,9 @@
 #include "screen_common.h"
 #include "sd_log_writer.h"
 #include "usb_virtual_disk.h"
+#include "assistant_profiles.h"
+#include "valet_net/proxy.h"
+#include "application.h"
 #include "standby_screen/standby_classic.h"
 #include "standby_screen/standby_screen.h"
 #include "vk_key_handler.h"
@@ -320,6 +323,42 @@ void ValetDevLinkHandle(const char* json) {
         error = cJSON_IsString(name) ? PressKey(name->valuestring, ms) : "MISSING_NAME";
     } else if (!strcmp(cmd, "home")) {
         ScreenRequestHome();
+    } else if (!strcmp(cmd, "proxy")) {
+        // 仅测试版：直接写代理设置（和设置页「代理」保存的是同一份），省得在屏幕上一个个字输入。
+        const auto* host = cJSON_GetObjectItemCaseSensitive(root, "host");
+        const auto* kind = cJSON_GetObjectItemCaseSensitive(root, "kind");
+        int port = 0;
+        Int(root, "port", &port, 0);
+        auto prefs = valet::proxy::Get();
+        if (cJSON_IsString(host)) prefs.host = host->valuestring;
+        if (port > 0) prefs.port = port;
+        if (cJSON_IsString(kind)) prefs.kind = !strcmp(kind->valuestring, "socks5") ? net_proxy::Kind::kSocks5 : net_proxy::Kind::kHttp;
+        prefs.on_wifi = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "wifi"));
+        prefs.on_cell = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "cell"));
+        if ((prefs.on_wifi || prefs.on_cell) && !prefs.HasAddress()) error = "NO_ADDRESS";
+        else if (!valet::proxy::Update(prefs)) error = "BUSY";
+        else ESP_LOGW(TAG, "proxy: %s %s:%d wifi=%d cell=%d", prefs.kind == net_proxy::Kind::kSocks5 ? "socks5" : "http",
+                      prefs.host.c_str(), prefs.port, prefs.on_wifi, prefs.on_cell);
+    } else if (!strcmp(cmd, "micgate")) {
+        extern bool g_valet_mic_gate;
+        g_valet_mic_gate = !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "on"));
+        ESP_LOGW(TAG, "micgate %s", g_valet_mic_gate ? "on" : "off");
+    } else if (!strcmp(cmd, "livebars")) {
+        extern bool g_valet_live_bars;
+        const auto* on = cJSON_GetObjectItemCaseSensitive(root, "on");
+        g_valet_live_bars = !cJSON_IsFalse(on);
+        ESP_LOGW(TAG, "livebars %s", g_valet_live_bars ? "on" : "off");
+    } else if (!strcmp(cmd, "assistant_url")) {
+        // 仅测试版：只换当前助理的入口地址，保留长期凭据（凭据认设备身份，与入口无关）。
+        const auto* url = cJSON_GetObjectItemCaseSensitive(root, "url");
+        if (!cJSON_IsString(url) || strncmp(url->valuestring, "wss://", 6)) error = "BAD_URL";
+        else if (!Application::GetInstance().Schedule([u = std::string(url->valuestring)] {
+                     auto profiles = valet::LoadAssistantProfiles();
+                     bool done = false;
+                     for (auto& item : profiles.items)
+                         if (item.id == profiles.active_id) { item.connection.url = u; done = valet::ValidProfile(item); }
+                     ESP_LOGW(TAG, "assistant_url: %s", done && valet::SaveAssistantProfiles(profiles) ? "saved" : "FAILED");
+                 }, Application::TaskDomain::Storage)) error = "BUSY";
     } else if (!strcmp(cmd, "udisk")) {
         // 不碰屏幕测一次 U 盘往返：0.5 s 后（先让这条回复发出去）打开 U 盘，`s` 秒后关掉。
         // U 盘开着时调试口不在线，关掉后看调试口能否自己回来。

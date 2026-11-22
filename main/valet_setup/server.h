@@ -4,7 +4,9 @@
 namespace valet {
 struct SetupStatus {
     bool running = false;
+    bool starting = false;   // StartSetupServer 进行中（含叫醒 Wi-Fi），此时不是失败
     bool saving = false;
+    bool paired = false;     // 刚添加的助理已经拿到长期凭据
     uint32_t generation = 0;
     std::string url;
     std::string note;

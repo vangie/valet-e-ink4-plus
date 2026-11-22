@@ -305,6 +305,12 @@ def main():
     p = sub.add_parser("key"); p.add_argument("name"); p.add_argument("--ms", type=int, default=100)
     p = sub.add_parser("log"); p.add_argument("-n", type=int, default=60); p.add_argument("--grep")
     p = sub.add_parser("sdlog"); p.add_argument("path")
+    p = sub.add_parser("assistant-url"); p.add_argument("url")
+    p = sub.add_parser("livebars"); p.add_argument("state", choices=["on", "off"])
+    p = sub.add_parser("micgate"); p.add_argument("state", choices=["on", "off"])
+    p = sub.add_parser("proxy", help="set the proxy: proxy http 192.168.0.10 6152 --wifi; proxy off")
+    p.add_argument("kind", choices=["http", "socks5", "off"]); p.add_argument("host", nargs="?"); p.add_argument("port", nargs="?", type=int)
+    p.add_argument("--wifi", action="store_true"); p.add_argument("--cell", action="store_true")
     p = sub.add_parser("flash"); p.add_argument("--image", default=str(APP))
     args = parser.parse_args()
 
@@ -341,6 +347,16 @@ def main():
             lines = [line for line in lines if re.search(args.grep, line)]
         for line in lines[-args.n:]:
             print(SECRET.sub(r"\1\2***", line))
+    elif args.command == "proxy":
+        req = {"cmd": "proxy", "wifi": args.wifi and args.kind != "off", "cell": args.cell and args.kind != "off"}
+        if args.kind != "off": req.update({"kind": args.kind, "host": args.host or "", "port": args.port or 0})
+        dev(req)
+    elif args.command == "micgate":
+        dev({"cmd": "micgate", "on": args.state == "on"})
+    elif args.command == "livebars":
+        dev({"cmd": "livebars", "on": args.state == "on"})
+    elif args.command == "assistant-url":
+        dev({"cmd": "assistant_url", "url": args.url})
     elif args.command == "sdlog":
         reply = dev({"cmd": "sdlog"})
         data = zlib.decompress(base64.b64decode(reply["data"]))

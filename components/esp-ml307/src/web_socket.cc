@@ -1,3 +1,4 @@
+#include <esp_timer.h>
 #include "web_socket.h"
 #include "network_interface.h"
 #include <esp_log.h>
@@ -131,6 +132,8 @@ bool WebSocket::Connect(const char* uri) {
     }
 
     connected_ = false;
+    // 给建连（含 TLS 握手）和握手请求一个总时限；之后的长连接不受它限制。
+    tcp_->SetRequestDeadline(esp_timer_get_time() + 20LL * 1000000);
     // 使用 tcp 建立连接
     if (!tcp_->Connect(host, std::stoi(port))) {
         ESP_LOGE(TAG, "Failed to connect to server");
@@ -153,6 +156,8 @@ bool WebSocket::Connect(const char* uri) {
                  static_cast<unsigned>(request.size()), sent);
         return false;
     }
+
+    tcp_->SetRequestDeadline(0);   // 握手请求已发出：之后的收发不设截止时间
 
     // 清除事件位
     xEventGroupClearBits(handshake_event_group_, HANDSHAKE_SUCCESS_BIT | HANDSHAKE_FAILED_BIT);
@@ -478,7 +483,9 @@ bool WebSocket::SendControlFrame(uint8_t opcode, const void* data, size_t len) {
         frame.push_back(static_cast<char>(payload[i] ^ mask[i % 4]));
     }
 
-    // 发送帧（锁同时保护 continuation_ 和帧构造）。
+    // 和数据帧共用发送锁：pong 由接收任务发出，通话时声音帧在别的任务里同时发送，
+    // 两边同时写同一条 TLS 连接会弄乱加密状态，连接被对端重置（2026-11-22 实测）。
+    std::lock_guard<std::mutex> lock(send_mutex_);
     const int sent = tcp_->Send(frame);
     if (sent != static_cast<int>(frame.size())) {
         ESP_LOGE(TAG, "WebSocket control frame write incomplete: expected_bytes=%u sent_bytes=%d",

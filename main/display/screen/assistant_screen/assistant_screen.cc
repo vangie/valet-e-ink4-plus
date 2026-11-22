@@ -13,6 +13,9 @@
 #include "a2ui.h"
 #include "a2ui_image.h"
 #include "application.h"
+#include "epd_refresh.h"
+#include <esp_timer.h>
+#include <cmath>
 #include "firmware_memory.h"
 #include "assistant_boot_photo.h"
 #include "assets/lang_config.h"
@@ -497,6 +500,124 @@ void Assistant_ValetSyncChrome() {
     else lv_obj_add_flag(chrome.valet_new, LV_OBJ_FLAG_HIDDEN);
 }
 
+// ── 通话状态条（设计稿「通话」页最上面那一条）：一排竖条 + 在听／在说／静音 + 一句提示。
+// 竖条跟真实声音走：助理说话时取扬声器正在播的那一包，其余时候取麦克风。最新的电平在正中，
+// 往两边是前几次的，所以声音一起伏，波纹就从中间往外走。
+// 墨水屏每改一次都要整套重绘：120 ms 一次时通话里 CPU 从 22% 涨到约 60%（2026-11-22 实测）。
+// 所以每 300 ms 才看一次，高度只分 5 档，档位不变就不动；没有声音时竖条放平，不再刷新。
+bool g_valet_live_bars = true;
+namespace {
+constexpr int kLiveBars = 9, kLiveBarW = 8, kLiveBarGap = 8, kLiveBarMaxH = 52, kLiveBarMinH = 6, kLiveSteps = 4;
+constexpr int kLiveRowH = 92;
+struct LiveRow {
+    lv_obj_t* row = nullptr;
+    lv_obj_t* bars[kLiveBars] = {};
+    lv_obj_t* label = nullptr;
+    lv_obj_t* hint = nullptr;
+    lv_timer_t* timer = nullptr;
+    float history[(kLiveBars + 1) / 2] = {};
+    int shown[kLiveBars] = {};
+    int state = -1;
+} s_live;
+// 均方根 → 0..1：-48 dBFS 以下算没声音，-12 dBFS 算满。
+float LiveLevel(int rms) {
+    if (rms <= 0) return 0.f;
+    const float db = 20.f * std::log10(float(rms) / 32767.f);
+    return std::clamp((db + 48.f) / 36.f, 0.f, 1.f);
+}
+void LiveTick(lv_timer_t*) {
+    if (!s_live.row || !lv_obj_is_valid(s_live.row)) return;
+    if (!g_valet_live_bars) return;   // 仅测试：量竖条本身的开销
+    const auto refresh = EpdGetStats();
+    if (refresh.busy || refresh.completed < refresh.submitted || refresh.test_active) return;
+    const auto device = Application::GetInstance().GetDeviceState();
+    const bool muted = ValetProtocol::Muted();
+    const int64_t now = esp_timer_get_time();
+    int state;   // 0 接通中 1 在听 2 在说 3 静音 4 没接通
+    if (device == kDeviceStateConnecting) state = 0;
+    else if (device == kDeviceStateSpeaking) state = 2;
+    else if (device == kDeviceStateListening) state = muted ? 3 : 1;
+    else state = 4;
+    if (state != s_live.state) {
+        s_live.state = state;
+        static const char* const kLabel[] = {"接通中", "在听", "在说", "静音", "没接通"};
+        static const char* const kLabelEn[] = {"Connecting", "Listening", "Speaking", "Muted", "Not connected"};
+        static const char* const kHint[] = {"马上就好", "直接说，不用按键", "按「打断」可以插话", "麦克风关着，助手听不到", "按挂断后再点通话"};
+        static const char* const kHintEn[] = {"One moment", "Just speak", "Tap Interrupt to cut in", "Mic is off", "End, then call again"};
+        lv_label_set_text(s_live.label, ValetText(kLabel[state], kLabelEn[state]));
+        lv_label_set_text(s_live.hint, ValetText(kHint[state], kHintEn[state]));
+    }
+    // 取这一刻的电平；超过 0.3 秒没有新数据就当没声音。
+    // 助理说话时竖条摆成固定的高低形状、不再跟着动：墨水屏每刷新一次，两个核上的供数线程
+    // 要占满约 0.4 秒，播放和解码抢不到 CPU，扬声器缓冲只有约 60 ms，每动一下就断一次音
+    // （2026-11-22 实测 0.5～1 秒）。提高播放优先级会让屏幕欠载闪烁，两头不能兼得。
+    int64_t at = 0;
+    int rms = 0;
+    if (state == 1) rms = ValetProtocol::MicLevel(&at);
+    constexpr int kHalf = (kLiveBars + 1) / 2;
+    if (state == 2) {
+        static const float kSpeaking[kHalf] = {1.f, 0.55f, 0.85f, 0.4f, 0.65f};
+        for (int d = 0; d < kHalf; ++d) s_live.history[d] = kSpeaking[d];
+    } else {
+        const float level = (now - at < 300000) ? LiveLevel(rms) : 0.f;
+        for (int i = kHalf - 1; i > 0; --i) s_live.history[i] = s_live.history[i - 1];
+        s_live.history[0] = level;
+    }
+    for (int i = 0; i < kLiveBars; ++i) {
+        const int d = i < kHalf - 1 ? kHalf - 1 - i : i - (kHalf - 1);
+        const float shape = 1.f - 0.15f * d;   // 中间高、两边低
+        const int step = std::clamp(int(s_live.history[d] * shape * kLiveSteps + 0.5f), 0, kLiveSteps);
+        const int h = kLiveBarMinH + (kLiveBarMaxH - kLiveBarMinH) * step / kLiveSteps;
+        if (h != s_live.shown[i]) {
+            s_live.shown[i] = h;
+            lv_obj_set_height(s_live.bars[i], h);
+        }
+    }
+}
+void BuildLiveRow(lv_obj_t* scr, lv_coord_t top) {
+    s_live = {};
+    auto* row = ValetBox(scr, 0, top, LV_HOR_RES, kLiveRowH);
+    lv_obj_set_style_bg_color(row, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(row, 2, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(row, lv_color_black(), 0);
+    s_live.row = row;
+    for (int i = 0; i < kLiveBars; ++i) {
+        auto* bar = lv_obj_create(row);
+        lv_obj_remove_style_all(bar);
+        lv_obj_set_size(bar, kLiveBarW, kLiveBarMinH);
+        lv_obj_set_style_bg_color(bar, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(bar, kLiveBarW / 2, 0);
+        lv_obj_align(bar, LV_ALIGN_LEFT_MID, kValetSide + i * (kLiveBarW + kLiveBarGap), 0);
+        lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+        s_live.bars[i] = bar;
+        s_live.shown[i] = kLiveBarMinH;
+    }
+    const int text_x = kValetSide + kLiveBars * (kLiveBarW + kLiveBarGap) + 14;
+    s_live.label = lv_label_create(row);
+    lv_obj_set_style_text_font(s_live.label, ValetStrong(), 0);
+    lv_label_set_text(s_live.label, "");
+    lv_obj_align(s_live.label, LV_ALIGN_LEFT_MID, text_x, 0);
+    s_live.hint = lv_label_create(row);
+    lv_obj_set_style_text_font(s_live.hint, ValetSmall(), 0);
+    lv_label_set_text(s_live.hint, "");
+    lv_obj_align(s_live.hint, LV_ALIGN_RIGHT_MID, -kValetSide, 2);
+    s_live.timer = lv_timer_create(LiveTick, 300, nullptr);
+    // 竖条一直在变，局刷次数很快攒够，墨水屏每 60 秒会插一次约 1 秒的 GC16 全刷：
+    // 全刷的准备线程优先级高于播放，扬声器缓冲只有约 60 ms，实测在说话时卡顿 1079 ms。
+    // 通话页在时按流式绘制处理（只做 DU，不插全刷），离开通话页时再整屏清一次。
+    if (auto* adapter = LvAdapterEpdiy::Instance()) adapter->SetStreamPaintMode(true);
+    lv_obj_add_event_cb(row, [](lv_event_t*) {
+        if (s_live.timer) lv_timer_delete(s_live.timer);
+        s_live = {};
+        if (auto* adapter = LvAdapterEpdiy::Instance()) adapter->SetStreamPaintMode(false);
+    }, LV_EVENT_DELETE, nullptr);
+    LiveTick(nullptr);
+}
+}  // namespace
+
 lv_obj_t* AssistantScreen::Create() {
     RestoreContextHistory();
     ESP_LOGI(TAG, "launch AssistantScreen");
@@ -604,6 +725,10 @@ lv_obj_t* AssistantScreen::Create() {
             lv_obj_set_pos(text, 20, 44);
         }
         header_h += book ? kValetStripH + 70 : kValetStripH - 44;
+    }
+    if (live_now) {
+        BuildLiveRow(scr, header_h);
+        header_h += kLiveRowH;
     }
     Assistant_State().chrome.valet_body_top = header_h;
     const lv_coord_t body_h = LV_VER_RES - header_h - kFooterH - kPageIndicatorH;
@@ -801,10 +926,15 @@ lv_obj_t* AssistantScreen::Create() {
             fill.color = lv_color_black();
             fill.opa = LV_OPA_COVER;
             auto P = [](int x, int y) { return lv_point_precise_t{static_cast<lv_value_precise_t>(x), static_cast<lv_value_precise_t>(y)}; };
-            fill.p[0] = P(a.x1 + 26, a.y1); fill.p[1] = P(a.x2, a.y1); fill.p[2] = P(a.x2, a.y2);
+            // 斜边用一个三角形，其余用矩形盖住：两个三角形沿对角线拼，接缝的抗锯齿会留一道白线。
+            fill.p[0] = P(a.x1 + 26, a.y1); fill.p[1] = P(a.x1 + 30, a.y2); fill.p[2] = P(a.x1, a.y2);
             lv_draw_triangle(lv_event_get_layer(e), &fill);
-            fill.p[1] = P(a.x2, a.y2); fill.p[2] = P(a.x1, a.y2);
-            lv_draw_triangle(lv_event_get_layer(e), &fill);
+            lv_draw_rect_dsc_t rest;
+            lv_draw_rect_dsc_init(&rest);
+            rest.bg_color = lv_color_black();
+            rest.bg_opa = LV_OPA_COVER;
+            lv_area_t body = {a.x1 + 26, a.y1, a.x2, a.y2};
+            lv_draw_rect(lv_event_get_layer(e), &rest, &body);
         }, LV_EVENT_DRAW_MAIN, nullptr);
         lv_obj_add_event_cb(action, ChangeTalkMode, LV_EVENT_CLICKED, nullptr);
         lv_obj_align(ValetIconBox(action, kIconWave | kIconWhite, 36), LV_ALIGN_LEFT_MID, 44, 0);

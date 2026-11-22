@@ -47,6 +47,10 @@ bool EspSsl::Connect(const std::string& host, int port) {
             return false;
         }
         cfg.timeout_ms = int(remaining_ms);
+    } else {
+        // esp-tls 只在给了总时限时才结束握手重试：不给的话，对端不回应时
+        // 每 10 秒读超时一次、无限重试，调用方永远等不到结果。
+        cfg.timeout_ms = 20000;
     }
 
     if (net_proxy::Applies(host)) {
