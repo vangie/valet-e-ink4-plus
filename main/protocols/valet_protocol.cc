@@ -30,6 +30,7 @@ std::string device_id;
 std::atomic<bool> live_mode{false}, muted{false};
 std::atomic<int> mic_level{0};
 std::atomic<int64_t> mic_level_at{0};
+std::atomic<bool> mic_voice{false};   // 人声门这会儿开着（真在上传麦克风的声音）
 std::atomic<bool> link_reconnecting{false}, call_retrying{false};
 #if CONFIG_VALET_DEV_LINK
 std::atomic<ValetProtocol*> live_instance{nullptr};
@@ -39,7 +40,8 @@ constexpr EventBits_t kHello = BIT0, kFailed = BIT1, kInbox = BIT2, kExit = BIT3
 using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 using valet::wire::String;
 }
-int ValetProtocol::MicLevel(int64_t* at_us) { if (at_us) *at_us = mic_level_at.load(); return mic_level.load(); }
+// 只在人声门开着时报电平：屋里有杂音时竖条不跟着跳，墨水屏也就不用一直刷。
+int ValetProtocol::MicLevel(int64_t* at_us) { if (at_us) *at_us = mic_level_at.load(); return mic_voice.load() ? mic_level.load() : 0; }
 bool ValetProtocol::Reconnecting() { return link_reconnecting.load() || call_retrying.load(); }
 bool ValetProtocol::InitializeIdentity() {
     nvs_handle_t handle;
@@ -414,7 +416,7 @@ bool ValetProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
         }
 #endif
         std::vector<std::vector<int16_t>> frames;
-        GateMic(pcm, now, mic_muted, frames);
+        mic_voice.store(GateMic(pcm, now, mic_muted, frames));
         for (const auto& frame : frames) if (!SendLiveFrame(frame)) return false;
         return true;
     }

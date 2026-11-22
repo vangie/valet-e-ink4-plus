@@ -21,7 +21,7 @@ public:
     static bool Live();
     static void SetMuted(bool enabled);
     static bool Muted();
-    // 通话里麦克风最近一包的声音大小（均方根，满幅 32767）和时刻；通话页的波形用。
+    // 通话里麦克风最近一包的声音大小（均方根，满幅 32767）和时刻；通话页的波形用。人声门关着时为 0。
     static int MicLevel(int64_t* at_us = nullptr);
     // 通话中线路断了、正在自动接回（通话页显示「重新连接」）。
     static bool Reconnecting();
