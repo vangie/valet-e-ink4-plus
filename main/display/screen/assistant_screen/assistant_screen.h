@@ -52,6 +52,24 @@ public:
     // 助理那边结束了通话（用户说「挂掉吧」等）：和按「挂断」一样回到提问页。
     static void EndLiveCall();
 
+    // ── 悬窗（自建助理）：在阅读页下方问这一页、聊这一页，书页不动。画的是同一个助手页。
+    // host = 阅读页，top = 悬窗上沿（落在两行之间）。只在 LVGL 线程调用。
+    static bool OpenPanel(lv_obj_t* host, lv_coord_t top, bool live);
+    static void ClosePanel();
+    static bool PanelOpen();
+    // 书页翻到别的页：标题换页码，下一句带上新的这一页
+    static void PanelPageChanged();
+    // 悬窗上沿位置；翻到行距不同的页时，阅读页让悬窗把 from 到上沿之间盖白（被切了一半的那行）
+    static lv_coord_t PanelTop();
+    static void PanelTrimAbove(lv_coord_t from);
+    // 「全屏」：换到完整的助手页，同一场对话；从那里返回时阅读页用 ConsumePanelReturn 接着开悬窗
+    static void PanelFullScreen();
+    static bool ConsumePanelReturn();
+    // 悬窗开着时阅读页把 AI 键转过来；没开返回 false
+    static bool PanelBootClick();
+    static bool PanelBootLongPress();
+    static bool PanelBootPressUp();
+
     /** @brief 设置情绪表情（当前可为空操作） */
     static void SetEmotion(const char* emotion);
 };

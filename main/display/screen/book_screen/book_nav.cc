@@ -386,8 +386,9 @@ void PollReaderPageWork() {
 }
 
 VkKeyScreenDesc BookAiLongPressDesc(ScreenFactory factory) {
+    // 抬起只在问答悬窗开着时有用（松开发送）；没开时不消费
     return VkKeyScreenDesc{factory, BookScreen::OnVkKey, BookScreen::OnBootClick,
-                           BookScreen::OnBootLongPress, nullptr, nullptr,
+                           BookScreen::OnBootLongPress, nullptr, [] { return AssistantScreen::PanelBootPressUp(); },
                            BookScreen::OnVkKeyLongPress, BookScreen::OnVkKeyPressUp};
 }
 
@@ -652,8 +653,10 @@ void OpenAssistantFromReaderAsync(void* /*user_data*/) {
     }
     if (chat_cloud::IsCustom()) {
         if (Book_State().reader.opening || ReaderPageWorkPending()) { ScreenShowToast("请等待正文翻页完成"); return; }
-        if (!valet::SelectBookContext()) { ScreenShowToast("当前页没有可提问的正文，请等待页面加载"); return; }
-        ValetProtocol::SetLive(false);
+        // 自建助理：在书页下方的悬窗里问，不切出去（sim/ 新设计 → 正文 → 问这一页）
+        HapticPulseIfEnabled();
+        OpenReaderAskPanel(false);
+        return;
     }
     HapticPulseIfEnabled();
     ESP_LOGI(TAG, "assistant from reader -> ScreenNavigateTo (resume via .pos)");

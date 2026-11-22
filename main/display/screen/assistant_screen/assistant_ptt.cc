@@ -313,7 +313,15 @@ void RestoreStatusCenterText() {
     }
 }
 
+void Assistant_PanelListening(bool listening);
 void Assistant_ApplyPttWave(bool show) {
+    if (Assistant_State().chrome.panel) {   // 悬窗：没有状态栏，改标题
+        if (AssistantScreen::IsActive() && show != Assistant_State().ptt.ptt_wave_visible) {
+            Assistant_State().ptt.ptt_wave_visible = show;
+            Assistant_PanelListening(show);
+        }
+        return;
+    }
     if (Assistant_State().ptt.ptt_wave == nullptr || !lv_obj_is_valid(Assistant_State().ptt.ptt_wave)) {
         return;
     }

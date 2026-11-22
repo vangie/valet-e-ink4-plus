@@ -1,3 +1,4 @@
+#include "SdCardManager.hpp"
 #include "dev_link.h"
 
 #include "sdkconfig.h"
@@ -354,6 +355,17 @@ void ValetDevLinkHandle(const char* json) {
     } else if (!strcmp(cmd, "droplink")) {
         // 仅测试版：关掉当前和助理的连接（发关闭帧，网关回关闭），看通话能不能自己接回来。
         ValetProtocol::DropLinkForTest();
+    } else if (!strcmp(cmd, "sd")) {
+        // 仅测试版：SD 卡状态（挂上没有、卡在不在、上次初始化的错误）；mount=true 时重试挂载
+        auto& sd = SdCardManager::GetInstance();
+        if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "mount")) && !sd.IsMounted()) {
+            const bool ok = sd.Mount();
+            ESP_LOGW(TAG, "sd: mount retry %s", ok ? "ok" : "failed");
+        }
+        bool mount_failed = false;
+        const esp_err_t err = sd.GetLastInitError(&mount_failed);
+        ESP_LOGW(TAG, "sd: mounted=%d card=%d last_init=%s mount_failed=%d io_error=%d", sd.IsMounted(), sd.HasCard(),
+                 esp_err_to_name(err), mount_failed, sd.HasIoError());
     } else if (!strcmp(cmd, "ask")) {
         // 仅测试版：下一次「按住说话」改发这段文字（见 ValetProtocol::SetTestQuestion）
         const auto* text = cJSON_GetObjectItemCaseSensitive(root, "text");

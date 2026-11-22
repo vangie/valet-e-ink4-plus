@@ -27,6 +27,8 @@ public:
     static int MicLevel(int64_t* at_us = nullptr);
     // 通话中线路断了、正在自动接回（通话页显示「重新连接」）。
     static bool Reconnecting();
+    // 悬窗里翻了页（同一本书）：把新的这一页发给网关，下一句问的就是这一页。不等确认。
+    static void ReadingContextChanged();
 #if CONFIG_VALET_DEV_LINK
     static void DropLinkForTest();   // 仅测试版：主动关掉当前连接，模拟线路断开
     // 仅测试版：下一次「按住说话」松开后不传录音，改发这段文字（问题照常带上当前页）。不用出声就能测提问。

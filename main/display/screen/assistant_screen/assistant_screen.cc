@@ -15,6 +15,7 @@
 #include "application.h"
 #include "epd_refresh.h"
 #include <esp_timer.h>
+#include <esp_heap_caps.h>
 #include <atomic>
 #include <cmath>
 #include "firmware_memory.h"
@@ -37,6 +38,7 @@
 #include "vk_key_handler.h"
 #include "vk_page_repeat.h"
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include "assistant_profiles.h"
@@ -92,11 +94,22 @@ bool Assistant_OnVkKey(const char* key) {
     return false;
 }
 
-void Assistant_OnAssistantLifecycle(lv_event_t* e) {
-    const lv_event_code_t code = lv_event_get_code(e);
+namespace {
+// 悬窗交给全屏（或全屏回到悬窗）时：旧的一面离开不停语音，新的一面进来接着用同一条连接，通话不断。
+bool s_keep_voice = false;
+// 悬窗：阅读页（host）上从 top 到底的一块，画的是同一个助手页。
+struct PanelState { lv_obj_t* host = nullptr; lv_obj_t* root = nullptr; lv_coord_t top = 0; lv_obj_t* sub = nullptr; lv_obj_t* mask = nullptr; } s_panel;
+// 从悬窗点了「全屏」：全屏页返回书页时，悬窗接着开（同一场对话，通话不断）
+bool s_panel_return = false;
+lv_timer_t* s_panel_return_timer = nullptr;
+}
+lv_obj_t* BuildAssistant(lv_obj_t* host, lv_coord_t top);
+void AssistantScreen_PanelHostUnload(lv_event_t* e);
+void BuildPanelHead(lv_obj_t* scr, bool live);
+void Assistant_Enter(lv_obj_t* root) {
     auto& app = Application::GetInstance();
-    if (code == LV_EVENT_SCREEN_LOADED) {
-        Assistant_State().chrome.scr = static_cast<lv_obj_t*>(lv_event_get_target(e));
+    {
+        Assistant_State().chrome.scr = root;
         Assistant_State().active.store(true, std::memory_order_release);
         s_standby.store(StandbyScreen::IsResuming());
         s_resume_load_pending = false;
@@ -125,8 +138,14 @@ void Assistant_OnAssistantLifecycle(lv_event_t* e) {
         });
         app.StartXiaozhiVoice(hold_through);
         Assistant_ApplyPttWave(Assistant_IsPttWaveWanted());
-    } else if (code == LV_EVENT_SCREEN_UNLOADED) {
+    }
+    s_keep_voice = false;   // 交接完成：之后再离开就照常停语音
+}
+void Assistant_Leave() {
+    auto& app = Application::GetInstance();
+    {
         ESP_LOGD(TAG, "leave -> schedule voice session stop (keep session RAM)");
+        const bool was_panel = Assistant_State().chrome.panel;   // 下面会清掉，先记下
         Assistant_State().active.store(false, std::memory_order_release);
         s_resume_load_pending = false;
         s_standby.store(false);
@@ -169,12 +188,31 @@ void Assistant_OnAssistantLifecycle(lv_event_t* e) {
         Assistant_State().layout.ui_font_bold = nullptr;
         Assistant_State().layout.viewport_w = 0;
         Assistant_State().layout.viewport_h = 0;
+        Assistant_State().chrome.panel = false;
+        Assistant_State().chrome.panel_title = nullptr;
         if (auto* disp = LVAdapterDisplay::Instance()) {
             disp->SetStatusTitlePrefix(nullptr);
             disp->SetIdleStatusMode(IdleStatusMode::kClock);
         }
-        app.StopXiaozhiVoice();
+        if (!was_panel && s_panel_return) {
+            // 全屏页返回书页：悬窗会在书页画好后接着开；8 秒内没开（去了别处）就照常停
+            s_keep_voice = true;
+            if (s_panel_return_timer) lv_timer_delete(s_panel_return_timer);
+            s_panel_return_timer = lv_timer_create([](lv_timer_t* t) {
+                lv_timer_delete(t); s_panel_return_timer = nullptr;
+                if (!s_panel_return) return;
+                s_panel_return = false; s_keep_voice = false;
+                if (!AssistantScreen::IsActive()) Application::GetInstance().StopXiaozhiVoice();
+            }, 8000, nullptr);
+        }
+        if (s_keep_voice) ESP_LOGI(TAG, "leave: voice kept for the next view of the same conversation");
+        else app.StopXiaozhiVoice();
     }
+}
+void Assistant_OnAssistantLifecycle(lv_event_t* e) {
+    const lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_SCREEN_LOADED) Assistant_Enter(static_cast<lv_obj_t*>(lv_event_get_target(e)));
+    else if (code == LV_EVENT_SCREEN_UNLOADED) Assistant_Leave();
 }
 
 void Assistant_OpenAssistantAsync(void* /*arg*/) {
@@ -356,6 +394,15 @@ void SwitchTalkMode(bool live) {
     if (!ScreenLvAsync([](void* arg) {
         const bool next = arg != nullptr;
         if (!AssistantScreen::IsActive() || ValetProtocol::Live() == next) return;
+        s_panel_return = false;
+        if (Assistant_State().chrome.panel && s_panel.root) {
+            // 悬窗里换通话 / 挂断：重画悬窗，书页不动
+            auto* host = s_panel.host; const auto top = s_panel.top;
+            AssistantScreen::ClosePanel();
+            AssistantScreen::OpenPanel(host, top, next);
+            s_talk_mode_switched_at = esp_timer_get_time();
+            return;
+        }
         Application::GetInstance().StopXiaozhiVoice();
         ValetProtocol::SetLive(next);
         ScreenLoadReplace(lv_obj_create(nullptr));
@@ -381,6 +428,7 @@ void ChangeReadingContext(lv_event_t*) {
     if (!ScreenLvAsync([](void* ptr) {
         const bool was_book = *static_cast<bool*>(ptr); delete static_cast<bool*>(ptr);
         if (!AssistantScreen::IsActive()) return;
+        s_panel_return = false;
         if (was_book) valet::SelectStandaloneContext();
         else if (!valet::SelectBookContext()) { ScreenShowToast("请先打开一本书，等待正文显示"); return; }
         // Close the previous protocol; the new screen gets a new voice generation and session key.
@@ -654,26 +702,237 @@ void BuildLiveRow(lv_obj_t* scr, lv_coord_t top) {
 }
 }  // namespace
 
-lv_obj_t* AssistantScreen::Create() {
+lv_obj_t* AssistantScreen::Create() { return BuildAssistant(nullptr, 0); }
+
+// ── 悬窗（sim/ 新设计 → 正文 → 问这一页）：上沿一条抖点阴影，标题栏整条黑底，书页留在上面。
+namespace {
+constexpr lv_coord_t kPanelShadowH = 10, kPanelBarH = 70, kPanelHeadH = kPanelShadowH + kPanelBarH;
+std::string PanelSubtitle() {
+    const auto reading = valet::SelectedReadingContext();
+    std::string who;
+    const auto profiles = valet::LoadAssistantProfiles();
+    if (const auto* active = profiles.Active()) who = active->name;
+    char page[48];
+    std::snprintf(page, sizeof(page), ValetText("第 %d 页", "p.%d"), reading.page);
+    return who.empty() ? std::string(page) : std::string(page) + " · " + who;
+}
+const char* PanelTitle(bool live, bool listening) {
+    if (listening) return ValetText("在听 · 松开发送", "Listening");
+    return live ? ValetText("聊这一页", "Talking about it") : ValetText("问这一页", "Ask this page");
+}
+}  // namespace
+void BuildPanelHead(lv_obj_t* scr, bool live) {
+    // 抖点阴影：墨水屏只有黑白，隔点画就是灰。一张预先画好的 8 位灰度小图（2×2 的点、每 4 像素一个、隔行错开），
+    // 用图片显示：画几百个小方块的绘制任务在墨水屏上会被丢掉（实测整条空白）。
+    static lv_image_dsc_t dither{};
+    static uint8_t* pixels = nullptr;
+    if (!pixels) {
+        pixels = static_cast<uint8_t*>(heap_caps_malloc(size_t(LV_HOR_RES) * kPanelShadowH, MALLOC_CAP_SPIRAM));
+        if (pixels) {
+            for (int y = 0; y < kPanelShadowH; ++y)
+                for (int x = 0; x < LV_HOR_RES; ++x) {
+                    const int shift = (y / 4) % 2 * 2;
+                    const bool ink = y % 4 < 2 && (x + 4 - shift) % 4 < 2;
+                    pixels[size_t(y) * LV_HOR_RES + x] = ink ? 0 : 255;
+                }
+            dither.header.magic = LV_IMAGE_HEADER_MAGIC;
+            dither.header.cf = LV_COLOR_FORMAT_L8;
+            dither.header.w = LV_HOR_RES;
+            dither.header.h = kPanelShadowH;
+            dither.header.stride = LV_HOR_RES;
+            dither.data_size = uint32_t(LV_HOR_RES) * kPanelShadowH;
+            dither.data = pixels;
+        }
+    }
+    if (pixels) {
+        auto* shadow = lv_image_create(scr);
+        lv_image_set_src(shadow, &dither);
+        lv_obj_set_pos(shadow, 0, 0);
+        lv_obj_clear_flag(shadow, LV_OBJ_FLAG_CLICKABLE);
+    }
+    auto* bar = ValetBox(scr, 0, kPanelShadowH, LV_HOR_RES, kPanelBarH);
+    lv_obj_set_style_bg_color(bar, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    auto* title = lv_label_create(bar);
+    lv_label_set_text(title, PanelTitle(live, false));
+    lv_obj_set_style_text_font(title, ValetStrong(), 0);
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, kValetSide, 0);
+    lv_obj_update_layout(title);
+    Assistant_State().chrome.panel_title = title;
+    auto* sub = lv_label_create(bar);
+    lv_label_set_text(sub, PanelSubtitle().c_str());
+    lv_obj_set_style_text_font(sub, ValetSmall(), 0);
+    lv_obj_set_style_text_color(sub, lv_color_white(), 0);
+    lv_obj_set_width(sub, LV_HOR_RES - kValetSide - 230 - lv_obj_get_width(title) - 24);
+    lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+    lv_obj_align(sub, LV_ALIGN_LEFT_MID, kValetSide + lv_obj_get_width(title) + 24, 2);
+    s_panel.sub = sub;
+    // 右边：「全屏」（换到完整的助手页，同一场对话）和 ✕（收起）
+    auto* full = ValetBox(bar, LV_HOR_RES - 230, 0, 130, kPanelBarH);
+    lv_obj_add_flag(full, LV_OBJ_FLAG_CLICKABLE);
+    HapticAttachClick(full);
+    auto* full_label = lv_label_create(full);
+    lv_label_set_text(full_label, ValetText("全屏", "Full screen"));
+    lv_obj_set_style_text_font(full_label, ValetSmall(), 0);
+    lv_obj_set_style_text_color(full_label, lv_color_white(), 0);
+    lv_obj_set_style_text_decor(full_label, LV_TEXT_DECOR_UNDERLINE, 0);
+    lv_obj_center(full_label);
+    lv_obj_add_event_cb(full, [](lv_event_t*) {
+        if (!ScreenLvAsync([](void*) { AssistantScreen::PanelFullScreen(); })) ScreenShowToast(ValetText("操作繁忙，请重试", "Busy. Try again."));
+    }, LV_EVENT_CLICKED, nullptr);
+    auto* close = ValetBox(bar, LV_HOR_RES - 100, 0, 100, kPanelBarH);
+    lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
+    HapticAttachClick(close);
+    lv_obj_center(ValetIconBox(close, kIconEnd | kIconWhite, 30));
+    lv_obj_add_event_cb(close, [](lv_event_t*) {
+        if (!ScreenLvAsync([](void*) { AssistantScreen::ClosePanel(); })) ScreenShowToast(ValetText("操作繁忙，请重试", "Busy. Try again."));
+    }, LV_EVENT_CLICKED, nullptr);
+}
+
+bool AssistantScreen::PanelOpen() { return s_panel.root != nullptr; }
+lv_coord_t AssistantScreen::PanelTop() { return s_panel.top; }
+void AssistantScreen::PanelTrimAbove(lv_coord_t from) {
+    if (!s_panel.root) return;
+    const lv_coord_t h = s_panel.top - from;
+    if (h <= 0) {
+        if (s_panel.mask && lv_obj_is_valid(s_panel.mask)) lv_obj_add_flag(s_panel.mask, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    if (!s_panel.mask || !lv_obj_is_valid(s_panel.mask)) {
+        // 悬窗上方一条白：盖住被悬窗切了一半的那行（画在悬窗外面，所以悬窗要允许子对象画出界）
+        s_panel.mask = ValetBox(s_panel.root, 0, 0, LV_HOR_RES, 1);
+        lv_obj_set_style_bg_color(s_panel.mask, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(s_panel.mask, LV_OPA_COVER, 0);
+        lv_obj_add_flag(s_panel.root, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    }
+    lv_obj_remove_flag(s_panel.mask, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(s_panel.mask, 0, -h);
+    lv_obj_set_size(s_panel.mask, LV_HOR_RES, h);
+}
+// 悬窗没有状态栏放录音波形：在听时标题换成「在听 · 松开发送」
+void Assistant_PanelListening(bool listening) {
+    auto* title = Assistant_State().chrome.panel_title;
+    if (!title || !lv_obj_is_valid(title)) return;
+    lv_label_set_text(title, PanelTitle(chat_cloud::IsCustom() && ValetProtocol::Live(), listening));
+    if (s_panel.sub && lv_obj_is_valid(s_panel.sub)) {
+        lv_obj_update_layout(title);
+        lv_obj_align(s_panel.sub, LV_ALIGN_LEFT_MID, kValetSide + lv_obj_get_width(title) + 24, 2);
+        lv_obj_set_width(s_panel.sub, LV_HOR_RES - kValetSide - 230 - lv_obj_get_width(title) - 24);
+    }
+}
+
+bool AssistantScreen::OpenPanel(lv_obj_t* host, lv_coord_t top, bool live) {
+    if (s_panel.root) return true;
+    if (!host || !chat_cloud::IsCustom()) return false;
+    if (!valet::SelectBookContext()) { ScreenShowToast(ValetText("当前页没有可提问的正文，请等待页面加载", "This page has no text to ask about yet")); return false; }
+    if (live && !chat_cloud::HasCallEntry()) { ScreenShowToast(ValetText("这个助理还没配置通话", "This assistant has no Call set up")); return false; }
+    ValetProtocol::SetLive(live);
+    // 书页（host）离开时先收起悬窗：不等它跟着书页一起被删
+    lv_obj_remove_event_cb(host, AssistantScreen_PanelHostUnload);
+    lv_obj_add_event_cb(host, AssistantScreen_PanelHostUnload, LV_EVENT_SCREEN_UNLOAD_START, nullptr);
+    auto* root = BuildAssistant(host, top);
+    s_panel.host = host; s_panel.root = root; s_panel.top = top;
+    lv_obj_add_event_cb(root, [](lv_event_t* e) {
+        if (lv_event_get_target(e) != s_panel.root) return;
+        const auto sub = s_panel.sub;
+        (void)sub;
+        s_panel = {};
+        Assistant_Leave();
+    }, LV_EVENT_DELETE, nullptr);
+    ESP_LOGI(TAG, "panel open at y=%d (%s), page %d", int(top), live ? "call" : "ask", valet::SelectedReadingContext().page);
+    Assistant_Enter(root);
+    return true;
+}
+
+void AssistantScreen::ClosePanel() {
+    if (!s_panel.root) return;
+    auto* root = s_panel.root;
+    s_panel = {};
+    Assistant_Leave();
+    if (lv_obj_is_valid(root)) lv_obj_delete(root);
+    ESP_LOGI(TAG, "panel closed");
+}
+
+void AssistantScreen_PanelHostUnload(lv_event_t* e) {
+    if (s_panel.root && lv_event_get_target(e) == s_panel.host) AssistantScreen::ClosePanel();
+}
+
+void AssistantScreen::PanelPageChanged() {
+    if (!s_panel.root) return;
+    if (!valet::SelectBookContext()) return;
+    if (s_panel.sub && lv_obj_is_valid(s_panel.sub)) lv_label_set_text(s_panel.sub, PanelSubtitle().c_str());
+    ValetProtocol::ReadingContextChanged();
+}
+
+void AssistantScreen::PanelFullScreen() {
+    if (!s_panel.root) return;
+    // 交给全屏页：同一场对话，语音不停（通话不断）；全屏页返回时悬窗接着开
+    s_keep_voice = true;
+    s_panel_return = true;
+    ClosePanel();
+    ScreenNavigateTo(AssistantScreen::Create);
+}
+
+bool AssistantScreen::ConsumePanelReturn() {
+    if (!s_panel_return) return false;
+    s_panel_return = false;
+    if (s_panel_return_timer) { lv_timer_delete(s_panel_return_timer); s_panel_return_timer = nullptr; }
+    return true;
+}
+
+bool AssistantScreen::PanelBootClick() {
+    if (!s_panel.root) return false;
+    if (BootKey_DidLongPress()) return true;
+    // AI 在说：打断；没在说：收起悬窗
+    if (Application::GetInstance().GetDeviceState() == kDeviceStateSpeaking) return Assistant_OnBootClick();
+    ScreenLvAsync([](void*) { AssistantScreen::ClosePanel(); });
+    return true;
+}
+bool AssistantScreen::PanelBootLongPress() {
+    if (!s_panel.root) return false;
+    if (chat_cloud::IsCustom() && ValetProtocol::Live()) return true;   // 通话里一直在听
+    return Assistant_OnBootLongPress();
+}
+bool AssistantScreen::PanelBootPressUp() {
+    if (!s_panel.root) return false;
+    return Assistant_OnBootPressUp();
+}
+
+// host = nullptr：整屏助手页；否则画进 host（阅读页）上从 top 到底的一块悬窗。
+lv_obj_t* BuildAssistant(lv_obj_t* host, lv_coord_t top) {
     RestoreContextHistory();
-    ESP_LOGI(TAG, "launch AssistantScreen");
+    const bool panel = host != nullptr;
+    ESP_LOGI(TAG, "launch AssistantScreen%s", panel ? " (panel over the page)" : "");
     const lv_font_t* ui_font = Assistant_UiFont();
     Assistant_UiFontBold();
 
-    lv_obj_t* scr = lv_obj_create(nullptr);
+    lv_obj_t* scr = lv_obj_create(panel ? host : nullptr);
+    const lv_coord_t view_h = panel ? LV_VER_RES - top : LV_VER_RES;
+    if (panel) {
+        lv_obj_remove_style_all(scr);
+        lv_obj_set_size(scr, LV_HOR_RES, view_h);
+        lv_obj_set_pos(scr, 0, top);
+        lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);   // 悬窗里的点按不漏到下面的书页
+    }
     lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_set_style_text_font(scr, ui_font, 0);
     lv_obj_set_style_text_color(scr, lv_color_black(), 0);
     Assistant_DisableScroll(scr);
+    Assistant_State().chrome.panel = panel;
 
-    // 顶栏与其它 App 共用 ScreenCreateStatusBar（25@2），勿用会话 30px 字
-    EpdStatusBar status = ScreenCreateStatusBar(scr);
-    lv_coord_t header_h = status.height;
+    // 顶栏与其它 App 共用 ScreenCreateStatusBar（25@2），勿用会话 30px 字；悬窗没有状态栏
+    EpdStatusBar status{};
+    if (!panel) status = ScreenCreateStatusBar(scr);
+    lv_coord_t header_h = panel ? 0 : status.height;
     lv_obj_t* context_header = nullptr;
     const bool custom = chat_cloud::IsCustom();
     const bool live_now = custom && ValetProtocol::Live();
-    {
+    if (panel) {
+        BuildPanelHead(scr, live_now);
+        header_h += kPanelHeadH;
+    } else {
         // Back, what this page is, who answers; "新对话" on the right while there is a conversation.
         auto* head = ValetBox(scr, 0, header_h, LV_HOR_RES, kValetHeadH);
         lv_obj_set_style_border_width(head, 3, 0);
@@ -718,7 +977,7 @@ lv_obj_t* AssistantScreen::Create() {
         context_header = head;
         header_h += kValetHeadH;
     }
-    if (custom) {
+    if (custom && !panel) {
         // What the talk is about: this page of the book, or nothing in particular.
         const auto reading = valet::SelectedReadingContext();
         const bool book = reading.Valid();
@@ -755,7 +1014,7 @@ lv_obj_t* AssistantScreen::Create() {
             lv_obj_set_pos(where, 20, 4);
             auto* text = lv_label_create(quote);
             // 补全过前后段落的正文以说明行开头：卡片上从这一页的第一个字显示
-            const auto start = reading.text.find("【本页开始】");
+            const auto start = reading.text.find("【本页开始】", reading.text.find('\n') == std::string::npos ? 0 : reading.text.find('\n'));   // 第一行是说明
             lv_label_set_text(text, start == std::string::npos ? reading.text.c_str()
                                                                 : reading.text.c_str() + start + std::strlen("【本页开始】"));
             lv_obj_set_style_text_font(text, fontpack_lv_font_ui(), 0);
@@ -771,7 +1030,7 @@ lv_obj_t* AssistantScreen::Create() {
         header_h += kLiveRowH;
     }
     Assistant_State().chrome.valet_body_top = header_h;
-    const lv_coord_t body_h = LV_VER_RES - header_h - kFooterH - kPageIndicatorH;
+    const lv_coord_t body_h = view_h - header_h - kFooterH - kPageIndicatorH;
     Assistant_State().layout.viewport_w = LV_HOR_RES - kContentPadX * 2;
     Assistant_State().layout.viewport_h = body_h - kContentPadY * 2;
     if (Assistant_State().layout.viewport_h < Assistant_FontLineHeight(ui_font)) {
@@ -779,7 +1038,7 @@ lv_obj_t* AssistantScreen::Create() {
     }
 
     lv_obj_t* container = lv_obj_create(scr);
-    lv_obj_set_size(container, LV_HOR_RES, LV_VER_RES - header_h);
+    lv_obj_set_size(container, LV_HOR_RES, view_h - header_h);
     lv_obj_align(container, LV_ALIGN_TOP_MID, 0, header_h);
     lv_obj_set_style_radius(container, 0, 0);
     lv_obj_set_style_pad_all(container, 0, 0);
@@ -805,21 +1064,24 @@ lv_obj_t* AssistantScreen::Create() {
     // 空会话页由 LVGL 控件绘制，状态栏保持在最上层。
     lv_obj_t* idle_hint = lv_obj_create(scr);
     lv_obj_remove_style_all(idle_hint);
-    lv_obj_set_size(idle_hint, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_size(idle_hint, LV_HOR_RES, view_h);
     lv_obj_add_flag(idle_hint, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(idle_hint, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    Assistant_State().chrome.valet_body_top = header_h;   // 欢迎页从标题下面排
     Assistant_BuildIdleHint(idle_hint);
-    lv_obj_move_foreground(status.bar);
-    lv_obj_move_foreground(status.overlay);
-
-    // 录音波形叠在状态栏条带居中：高度约半栏偏矮、竖条更密；不改状态栏尺寸；按住说话时盖住时钟
-    Assistant_State().ptt.ptt_wave_max_h = status.height / 2;
-    if (Assistant_State().ptt.ptt_wave_max_h < kPttWaveMinBarH) {
-        Assistant_State().ptt.ptt_wave_max_h = kPttWaveMinBarH;
-    }
-    lv_obj_t* ptt_wave = Assistant_CreatePttWaveHost(scr, Assistant_State().ptt.ptt_wave_max_h);
-    lv_obj_align(ptt_wave, LV_ALIGN_TOP_MID, 0, (status.height - Assistant_State().ptt.ptt_wave_max_h) / 2);
-    lv_obj_add_flag(ptt_wave, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t* ptt_wave = nullptr;
+    if (!panel) {
+        lv_obj_move_foreground(status.bar);
+        lv_obj_move_foreground(status.overlay);
+        // 录音波形叠在状态栏条带居中：高度约半栏偏矮、竖条更密；不改状态栏尺寸；按住说话时盖住时钟
+        Assistant_State().ptt.ptt_wave_max_h = status.height / 2;
+        if (Assistant_State().ptt.ptt_wave_max_h < kPttWaveMinBarH) {
+            Assistant_State().ptt.ptt_wave_max_h = kPttWaveMinBarH;
+        }
+        ptt_wave = Assistant_CreatePttWaveHost(scr, Assistant_State().ptt.ptt_wave_max_h);
+        lv_obj_align(ptt_wave, LV_ALIGN_TOP_MID, 0, (status.height - Assistant_State().ptt.ptt_wave_max_h) / 2);
+        lv_obj_add_flag(ptt_wave, LV_OBJ_FLAG_HIDDEN);
+    }   // 悬窗没有状态栏：在听时改标题（见 Assistant_ApplyPttWave）
 
     // 正文透明层只翻页，覆盖欢迎页但不覆盖顶栏或底栏。
     auto* page_hit = lv_obj_create(scr);
@@ -1121,6 +1383,11 @@ lv_obj_t* AssistantScreen::Create() {
         } else {
             Assistant_ShowIdleHint();
         }
+    }
+    if (panel) {
+        if (Assistant_State().chrome.panel_title) lv_obj_move_foreground(lv_obj_get_parent(Assistant_State().chrome.panel_title));
+        FirmwareMemoryCheckpoint("assistant-panel-ready");
+        return scr;   // 悬窗：按键归阅读页（它转给悬窗），进入 / 离开由悬窗自己管
     }
     if (auto* disp = LVAdapterDisplay::Instance()) {
         disp->SetStatusTitlePrefix(nullptr);

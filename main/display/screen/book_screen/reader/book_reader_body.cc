@@ -2,6 +2,9 @@
 #include "assets/lang_reader.h"
 #include "epd_content_policy.h"
 #include "valet_reading_context.h"
+#include "valet_protocol.h"
+#include "chat_cloud.h"
+#include "assistant_screen/assistant_screen.h"
 #include "epd_refresh.h"
 #pragma GCC optimize("O1")
 
@@ -57,6 +60,70 @@ std::vector<valet::PageLine> ContextLines(const std::vector<reader::PageItem>& i
     return lines;
 }
 
+// 悬窗上沿：在屏幕 1/4 高附近找正文位图里两行之间的空白，让悬窗不切过半行字。
+// 位图是 L8（白 = 255）；找不到（整页是图、位图不在）就用 1/4 高。
+lv_coord_t ReaderPanelTop() {
+    auto& st = Book_State();
+    const lv_coord_t want = LV_VER_RES / 4;
+    auto* image = st.reader.text_raster_image;
+    if (!image || !lv_obj_is_valid(image)) return want;
+    auto* raster = static_cast<reader::RasterImage*>(lv_obj_get_user_data(image));
+    if (!raster || raster->empty() || raster->dsc.header.cf != LV_COLOR_FORMAT_L8) return want;
+    lv_area_t at;
+    lv_obj_get_coords(image, &at);
+    const int stride = raster->dsc.header.stride ? raster->dsc.header.stride : raster->width;
+    const auto blank = [&](int row) {
+        if (row < 0 || row >= raster->height) return false;
+        const uint8_t* p = raster->pixels.data() + size_t(row) * stride;
+        for (int x = 0; x < raster->width; ++x) if (p[x] < 0xF0) return false;
+        return true;
+    };
+    constexpr int kGap = 6;   // 至少这么多行全白才算两行之间
+    const int target = want - at.y1;
+    for (int d = 0; d < LV_VER_RES / 8; ++d) {
+        for (int row : {target - d, target + d}) {
+            if (!blank(row)) continue;
+            int start = row, end = row;
+            while (blank(start - 1)) --start;
+            while (blank(end + 1)) ++end;
+            if (end - start + 1 < kGap) continue;
+            return lv_coord_t(at.y1 + start + 1);   // 紧贴上一行下面：上面露出的都是整行
+        }
+    }
+    return want;
+}
+// 悬窗上沿压着某一行时：往上找到这一行上面的空白，从那里盖白到上沿；没压着就返回上沿本身。
+lv_coord_t ReaderPanelTrim(lv_coord_t top) {
+    auto& st = Book_State();
+    auto* image = st.reader.text_raster_image;
+    if (!image || !lv_obj_is_valid(image)) return top;
+    auto* raster = static_cast<reader::RasterImage*>(lv_obj_get_user_data(image));
+    if (!raster || raster->empty() || raster->dsc.header.cf != LV_COLOR_FORMAT_L8) return top;
+    lv_area_t at;
+    lv_obj_get_coords(image, &at);
+    const int stride = raster->dsc.header.stride ? raster->dsc.header.stride : raster->width;
+    const auto blank = [&](int row) {
+        if (row < 0 || row >= raster->height) return true;
+        const uint8_t* p = raster->pixels.data() + size_t(row) * stride;
+        for (int x = 0; x < raster->width; ++x) if (p[x] < 0xF0) return false;
+        return true;
+    };
+    int row = top - 1 - at.y1;
+    if (blank(row)) return top;
+    while (row >= 0 && !blank(row)) --row;
+    return lv_coord_t(at.y1 + row + 1);
+}
+}  // namespace
+
+bool OpenReaderAskPanel(bool live) {
+    auto& st = Book_State();
+    if (!st.reader.read_scr || !lv_obj_is_valid(st.reader.read_scr)) return false;
+    if (AssistantScreen::PanelOpen()) return true;
+    if (st.reader.read_chrome != BookUiState::ReadChrome::kReading) HideReadChrome();
+    return AssistantScreen::OpenPanel(st.reader.read_scr, ReaderPanelTop(), live);
+}
+
+namespace {
 // 选中「这一页」时调用：读前后两页，把被翻页截断的首尾段落补全。阅读器忙、已关闭或读不到时返回空，用原来的本页文字。
 std::pair<int, std::string> ExpandReadingText() {
     auto& st = Book_State();
@@ -277,6 +344,13 @@ void RenderReaderPage() {
         st.reader.session->CurrentTocTitle(), st.reader.session->BookCurrentPage() + 1,
         valet::JoinPageLines(ContextLines(page->items)));
     valet::SetReadingTextExpander(ExpandReadingText);
+    // 问答悬窗开着：跟到这一页（画完再选，补全前后段落要读相邻页）；从「全屏」返回：悬窗接着开
+    if (AssistantScreen::PanelOpen()) ScreenLvAsync([](void*) {
+        AssistantScreen::PanelPageChanged();
+        AssistantScreen::PanelTrimAbove(ReaderPanelTrim(AssistantScreen::PanelTop()));
+    });
+    else if (chat_cloud::IsCustom() && AssistantScreen::ConsumePanelReturn())
+        ScreenLvAsync([](void*) { OpenReaderAskPanel(ValetProtocol::Live()); });
 
     if (prepared->direction != 0) {
         const int effect = BookReaderPrefsPageTurn();

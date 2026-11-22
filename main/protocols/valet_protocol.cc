@@ -366,6 +366,23 @@ void ValetProtocol::RunReconnect() {
     if (!ok) SetError("助理连接已断开，请重新进入");
 }
 #if CONFIG_VALET_DEV_LINK
+void ValetProtocol::ReadingContextChanged() {
+    auto* self = live_instance.load();
+    if (!self) return;
+    const auto next = valet::SelectedReadingContext();
+    std::lock_guard<std::recursive_mutex> lock(self->state_mutex_);
+    if (!self->opened_ || !self->authenticated_ || !self->context_supported_ || !next.Valid()) return;
+    // 换了书就是另一场会话，那要重开（悬窗跟着书页走，换书时悬窗已经收起）
+    if (!self->context_.Valid() || next.book_id != self->context_.book_id) return;
+    if (next.page == self->context_.page && next.text == self->context_.text) return;
+    self->context_ = next;
+    auto* request = valet::wire::Request("valet-context-update", "valet.context.set");
+    auto* params = cJSON_GetObjectItem(request, "params");
+    cJSON_AddStringToObject(params, "sessionKey", self->session_id_.c_str());
+    cJSON_AddItemToObject(params, "context", valet::ContextJson(next));
+    ESP_LOGI(TAG, "reading context: now page %d", next.page);
+    self->Send(request);
+}
 namespace { std::mutex s_test_question_mutex; std::string s_test_question; }
 void ValetProtocol::SetTestQuestion(const std::string& text) {
     std::lock_guard<std::mutex> lock(s_test_question_mutex);
@@ -763,6 +780,10 @@ void ValetProtocol::Handle(cJSON* root) {
         return;
     }
     if (id == "valet-subscribe") { xEventGroupSetBits(events_, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")) ? kSubscribed : kFailed); return; }
+    if (id == "valet-context-update") {   // 悬窗里翻页后补发的这一页：只记结果，不碰连接时等的事件
+        if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok"))) ESP_LOGW(TAG, "reading context: the gateway did not take the new page");
+        return;
+    }
     if (id == "valet-context") { context_selected_ = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")) && String(payload, "sessionKey") == session_id_; xEventGroupSetBits(events_, context_selected_ ? kContext : kFailed); return; }
     if (id.rfind("valet-a-", 0) == 0 && !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok"))) {
         // 通话刚结束（助理挂断、重建中）时还在路上的几包会被拒收，那不是格式问题

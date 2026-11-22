@@ -1782,9 +1782,7 @@ static void ValetAskFromCard(lv_event_t* e) {
     if (live) {
         // Same checks as Ask; then the assistant page opens straight into the call.
         if (Book_State().reader.opening || ReaderPageWorkPending()) { ScreenShowToast("请等待正文翻页完成"); return; }
-        if (!valet::SelectBookContext()) { ScreenShowToast("当前页没有可提问的正文，请等待页面加载"); return; }
-        ValetProtocol::SetLive(true);
-        ScreenNavigateTo(AssistantScreen::Create);
+        OpenReaderAskPanel(true);   // 聊这一页：在悬窗里接通，书页不动
         return;
     }
     RequestOpenAssistantFromReader();

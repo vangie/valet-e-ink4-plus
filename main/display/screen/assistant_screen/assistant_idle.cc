@@ -168,6 +168,13 @@ void Assistant_BuildIdleHint(lv_obj_t* host) {
     lv_obj_set_style_bg_opa(host, LV_OPA_COVER, 0);
 
     const int top = Assistant_ValetBodyTop();
+    if (Assistant_State().chrome.panel) {
+        // 悬窗：一句话就够，标题栏已经写着「问这一页 · 第几页」
+        Label(host, en ? "The page is attached. Hold to talk below, then keep reading."
+                       : "正文已经带上。按住下面说话，问完接着读。",
+              kSide, top + 30, width - 2 * kSide, regular);
+        return;
+    }
     lv_obj_t* headline = Label(host, book ? (en ? "Ask about this page" : "问这一页")
                                          : (en ? "What's on your mind?" : "想问什么？"),
                                kSide, top + 44, width - 2 * kSide, &kValetTitleFont);

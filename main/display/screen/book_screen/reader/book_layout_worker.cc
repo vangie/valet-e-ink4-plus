@@ -1,5 +1,6 @@
 #pragma GCC optimize("O1")
 
+#include "assistant_screen/assistant_screen.h"
 #include "book_screen/reader/book_layout_worker.h"
 #include "assets/lang_reader.h"
 #include "book_screen/book_screen_priv.h"
@@ -332,6 +333,11 @@ void OnReadContentClicked(lv_event_t* e) {
     if (cell < 0) {
         return;
     }
-    DispatchTapZoneAction(BookTapZonesActionAt(cell));
+    const auto action = BookTapZonesActionAt(cell);
+    if (AssistantScreen::PanelOpen() && action != BookTapZoneAction::kPrev && action != BookTapZoneAction::kNext) {
+        AssistantScreen::ClosePanel();   // 问答悬窗开着：点书页（不是翻页区）就收起
+        return;
+    }
+    DispatchTapZoneAction(action);
 }
 

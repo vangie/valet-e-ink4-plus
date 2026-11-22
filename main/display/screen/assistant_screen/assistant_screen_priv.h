@@ -183,6 +183,8 @@ struct AssistantUiState {
         lv_obj_t* valet_pager = nullptr;  // Valet footer: previous / "n / m" / next above the talk bar
         lv_obj_t* valet_new = nullptr;    // Valet header: "新对话", shown while there is a conversation
         lv_coord_t valet_body_top = 0;    // y of the area under the Valet header band
+        bool panel = false;               // 画在阅读页下方的悬窗里（不是整屏）
+        lv_obj_t* panel_title = nullptr;  // 悬窗标题：「问这一页」/「在听」/「聊这一页」
         lv_obj_t* status_label = nullptr;       // 状态栏居中时钟/文案
         lv_obj_t* notification_label = nullptr;
     } chrome;

@@ -30,6 +30,8 @@ void RequestRenderReaderPage();
 void AttachReadBodyInput(lv_obj_t* obj);
 /** @brief 目录页不挂正文触摸（不退出/不翻页）；章行自带点击 */
 void DetachReadBodyInput(lv_obj_t* obj);
+/** @brief 在书页下方打开问答悬窗（自建助理）：先收起阅读卡片；上沿落在两行之间。只在 LVGL 线程调用 */
+bool OpenReaderAskPanel(bool live);
 /** @brief 正文内容区点击（九宫格） */
 void OnReadContentClicked(lv_event_t* e);
 /** @brief 与进百问同源：open_token 失效 worker 回调；opening 时 deferred_cleanup，避免 UAF/泄漏 */

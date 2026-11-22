@@ -166,11 +166,14 @@ bool BookScreen::OnBootClick() {
     if (std::strcmp(VkKey_ActiveScreen(), kScreenRead) != 0) {
         return false;
     }
+    // 问答悬窗开着：AI 在说就打断，没在说就收起悬窗
+    if (AssistantScreen::PanelBootClick()) return true;
     BookLvAsync(ToggleReadSettingsSheetAsync);
     return true;
 }
 
 bool BookScreen::OnBootLongPress() {
+    if (AssistantScreen::PanelBootLongPress()) return true;   // 悬窗里按住说话
     RequestOpenAssistantFromBook();
     return true;
 }
@@ -216,6 +219,10 @@ bool BookScreen::OnVkKey(const char* key_name) {
             ReaderAutoTurnManualInput();
         // 正文 vk_home 短按：设置/目录浮层→收起；长按经阅读退出清理回系统首页
         if (std::strcmp(key_name, "vk_home") == 0) {
+            if (AssistantScreen::PanelOpen()) {   // 菜单：先收起问答悬窗
+                BookLvAsync([](void*) { AssistantScreen::ClosePanel(); });
+                return true;
+            }
             if (st.reader.read_chrome != BookUiState::ReadChrome::kReading) {
                 if (st.settings.reader_tab == 3 && st.settings.reader_settings_page != 0 &&
                     st.tap.tap_zone_ui == BookUiState::TapZoneUi::kClosed) {
