@@ -327,10 +327,11 @@ esp_err_t Ota::CheckResponseOnce(bool chat_only, int64_t deadline_us) {
 
         if (cJSON_IsString(version) && cJSON_IsString(url)) {
             // Check if the version is newer, for example, 0.1.0 is newer than 0.0.1
-            has_new_version_ = IsNewVersionAvailable(current_version_, firmware_version_);
-            if (has_new_version_) {
-                ESP_LOGI(TAG, "New version available: %s", firmware_version_.c_str());
-            }
+            // Valet 随行：官方服务器给的是官方固件，装上会把 Valet 整个换掉，所以只记日志、不提示升级。
+            // 官方的改动通过合并上游代码进入 Valet。版本检查本身保留（百问的激活靠它）。
+            has_new_version_ = false;
+            if (IsNewVersionAvailable(current_version_, firmware_version_))
+                ESP_LOGI(TAG, "Official firmware %s available; Valet does not offer it", firmware_version_.c_str());
             // 忽略服务端 firmware.force：仅按版本比较决定是否提示升级
         }
     } else if (!chat_only) {
