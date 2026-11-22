@@ -12,6 +12,7 @@ function menuClick() {
     log("菜单：回到首页第一页。");
     return render();
   }
+  if (state.screen === "reader" && state.float) return void v2CloseFloat("菜单");
   if (state.screen === "reader" && state.sheet) {
     state.sheet = false;
     log("菜单：收起阅读卡片。");

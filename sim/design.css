@@ -435,3 +435,25 @@ div.v-row { box-sizing: border-box; }
 .v-fld > .v-line.is-full { width: 100%; }
 /* 网络页多了顶部的状态卡：间距收一点，4G 那一版（状态卡、上网方式、选卡、两行入口、断网时间）一屏放得下。 */
 .v-pane.is-tight { gap: 7px; }
+
+/* 悬窗：正文页下方问这一页、聊这一页。书页留在上面，只刷这一块。外形沿用提问页：页底同一条胶囊，通话是同一个斜切。 */
+.v-float { position: absolute; left: 0; right: 0; bottom: 0; height: 56%; background: var(--paper); border-top: 1.2px solid var(--ink); display: flex; flex-direction: column; z-index: 3; }
+.v-float-head { flex: none; height: 30px; padding: 0 6px 0 14px; border-bottom: 1px solid var(--ink); display: flex; align-items: center; gap: 6px; }
+.v-float-head b { font-size: 11.5px; font-weight: 600; letter-spacing: 1px; }
+.v-float-head span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; color: var(--g1); }
+.v-float-head .v-txt { padding: 6px 4px; }
+.v-float-x { width: 26px; height: 26px; padding: 0; border: 0; background: none; display: grid; place-items: center; }
+.v-float-x .ic { width: 12px; height: 12px; }
+.v-float-body { flex: 1; min-height: 0; overflow: hidden; padding: 10px 14px 4px; display: flex; flex-direction: column; }
+.v-float-body .v-qa .a { font-size: 11.5px; line-height: 1.7; }
+.v-float-body .v-listen .ic { width: 30px; height: 30px; }
+.v-float-body .v-live { height: auto; flex: 1; }
+.v-float-tip { margin: 0; font-size: 10.8px; line-height: 1.6; color: var(--g1); }
+.v-float-sugs { margin-top: auto; border-top: 1.2px solid var(--ink); }
+.v-float-sugs button { width: 100%; height: 30px; padding: 0 2px; border: 0; border-bottom: 1px solid var(--ink); background: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10.8px; text-align: left; }
+.v-float-sugs button:last-child { border-bottom: 0; }
+.v-float-sugs .ic { width: 9px; height: 9px; }
+.v-float-more { margin-top: auto; align-self: flex-start; padding: 4px 0; border: 0; border-bottom: 1px solid var(--ink); background: none; display: flex; align-items: center; gap: 4px; font-size: 9px; }
+.v-float-more .ic { width: 8px; height: 8px; }
+.v-float .v-pages { height: 22px; }
+.v-float .v-talk { margin: 2px 12px 10px; }

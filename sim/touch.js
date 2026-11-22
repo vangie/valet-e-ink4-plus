@@ -22,6 +22,7 @@ panel.addEventListener("click", (e) => {
     const x = (e.clientX - box.left) / box.width;
     if (x < 1 / 3) return void turnPage(-1);
     if (x > 2 / 3) return void turnPage(1);
+    if (state.float) return void v2CloseFloat("点书页中间");
     state.sheet = true;
     log("点屏幕中间：弹出阅读卡片。");
     return render();
@@ -344,7 +345,7 @@ document.addEventListener("pointercancel", endScrollDrag);
 // 屏上的「按住说话」：按下开始听，松手发送。画面会重画，所以松手在 document 上等。
 let screenHold = false;
 panel.addEventListener("pointerdown", (e) => {
-  if (blocked() || state.screen !== "ai" || state.live || !e.target.closest("[data-hold]")) return;
+  if (blocked() || (state.screen !== "ai" && !state.float) || state.live || !e.target.closest("[data-hold]")) return;
   e.preventDefault();
   screenHold = true;
   log("按住屏上的「按住说话」：在听。");

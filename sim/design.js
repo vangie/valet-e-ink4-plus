@@ -157,11 +157,85 @@ function v2SwitchSubject(type) {
   log(type === "book" ? `换到「这一页」：带上第 ${state.fromPage + 1} 页。随口问那一场留着。` : "换到「随口问」：不带书。这一页的注留着。");
   render();
 }
+// ── 悬窗：在正文页下方问这一页、聊这一页，书页不动，不用切出去。
+// 回答太长、要看以前的问答、要随口问或拍照时点「展开」去完整助手页，同一场对话；从那里返回又回到悬窗。
+function v2OpenFloat(live) {
+  // 官方云拿不到正在读的这一页，照旧进完整的百问页；还没连上自己的助手也去完整页（那里有「去连接」）
+  if (state.provider !== "agent" || !agentReady()) return live ? v2GoLive() : go("ai");
+  if (live && !assistantCaps().live) return toast(L("这个助理还没配置通话", "This assistant has no Call set up"));
+  const was = state.float;
+  state.sheet = false;
+  state.float = true;
+  if (!was) {
+    v2FloatFollowPage();
+    state.liveMuted = false;
+    log(`在第 ${state.page + 1} 页下方打开悬窗${live ? "，接通" : ""}。书页不动。${state.answered ? "这一页问过，那条注接着显示。" : ""}`);
+  }
+  if (live && !state.live) startLive();
+  render();
+}
+// 悬窗跟着正在读的这一页走：每一页的问答各自留着，通话不断，下一句带上新的这一页。
+function v2FloatFollowPage() {
+  if (state.sessionType === "book" && state.fromPage !== null) nowTalk().p = state.answerPage;
+  state.aiBack = "reader";
+  state.sessionType = "book";
+  state.fromPage = state.page;
+  v2Load();
+}
+function v2CloseFloat(why) {
+  if (!state.float) return false;
+  nowTalk().p = state.answerPage;
+  stopSession();
+  state.float = false;
+  log(`${why}：收起悬窗，接着读第 ${state.page + 1} 页。${state.answered ? "这一页的注留着。" : ""}`);
+  render();
+  return true;
+}
+function v2ExpandFloat() {
+  nowTalk().p = state.answerPage;
+  const live = state.live, muted = state.liveMuted;
+  state.float = false;
+  go("ai");                 // 同一场：这一页的注、正在进行的通话都带过去
+  state.liveMuted = muted;
+  state.floatExpanded = true;
+  log(`展开到完整的助手页。${live ? "通话没断。" : ""}返回会回到第 ${state.page + 1} 页的悬窗。`);
+  render();
+}
+function v2FloatBody(s) {
+  if (state.live) return v2LiveBody();
+  if (state.listening) return `<div class="v-listen">${ic("mic")}<b>${L("在听", "Listening")}</b><span>${L("松开就发出去", "Release to send")}</span></div>`;
+  if (s.a.length) {
+    const long = s.a.length > 2
+      ? `<button class="v-float-more" data-float-expand>${L("回答较长 · 展开看全部", "Long answer · expand")}${ic("go")}</button>` : "";
+    return `${v2Answer(s)}${long}`;
+  }
+  const sugs = v2Sugs().slice(0, 2).map(([label], i) => `<button data-sug="${i}">${glyphs(esc(label))}${ic("go")}</button>`).join("");
+  return `<p class="v-float-tip">${L("正文已经带上。按住下面说话，问完接着读。", "The page is attached. Hold to talk, then keep reading.")}</p><div class="v-float-sugs">${sugs}</div>`;
+}
+function v2Float() {
+  const s = nowTalk();
+  const pager = !state.live && s.a.length > 1 && !state.listening
+    ? `<div class="v-pages"><button data-answer="-1" ${state.answerPage > 0 ? "" : "disabled"}>${ic("back")}</button><span>${state.speaking ? L("在说 · 短按 AI 唤醒键停下", "Speaking") : `${state.answerPage + 1} / ${s.a.length}`}</span><button data-answer="1" ${state.answerPage < s.a.length - 1 ? "" : "disabled"}>${ic("go")}</button></div>`
+    : "";
+  const foot = state.live
+    ? `<div class="v-talk v-callbar">
+      <button data-mute>${ic(state.liveMuted ? "micOff" : "mic")}${state.liveMuted ? L("取消静音", "Unmute") : L("静音", "Mute")}</button>
+      <button data-interrupt>${ic("stop", "stop")}${L("打断", "Interrupt")}</button>
+      <button class="tolive" data-mode="ask">${ic("x")}${L("挂断", "End")}</button></div>`
+    : `<div class="v-talk${state.listening ? " rec" : ""}"><i></i><span data-hold>${state.listening ? L("松开发送", "Release to send") : L("按住说话", "Hold to talk")}</span>
+      ${callEntry() ? `<button class="tolive" data-live>${ic("wave")}${L("通话", "Call")}</button>` : ""}</div>`;
+  return `<div class="v-float">
+    <div class="v-float-head"><b>${state.live ? L("聊这一页", "Talking about it") : L("问这一页", "Ask this page")}</b><span>${L(`第 ${state.page + 1} 页`, `p.${state.page + 1}`)} · ${esc(v2Who())}</span>
+      <button class="v-txt" data-float-expand>${L("展开", "Expand")}</button><button class="v-float-x" data-float-close aria-label="${L("收起", "Close")}">${ic("x")}</button></div>
+    <div class="v-float-body">${v2FloatBody(s)}</div>${pager}${foot}</div>`;
+}
 function v2Ask() {
+  if (state.screen === "reader") return v2OpenFloat(false);
   if (state.screen !== "ai") return go("ai");
   if (state.live) switchMode("ask");
 }
 function v2GoLive() {
+  if (state.screen === "reader" && state.provider === "agent" && agentReady()) return v2OpenFloat(true);
   if (state.screen !== "ai") go("ai");
   if (state.provider !== "agent") return toast(L("通话要用「自建」", "Calls need Custom"));
   if (!agentReady()) return render();
@@ -181,6 +255,18 @@ function openSetting(id) {
 const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "device", about: "device", proxy: "net", bt: "sound", pager: "read" };
 // 返回 true = 这次返回已经在设置里往上走了一级。
 function v2Back() {
+  if (state.screen === "ai" && state.floatExpanded && stack[stack.length - 1] === "reader") {
+    // 从悬窗展开出来的：回到书页，悬窗还在，通话不断
+    v2LeaveAi();
+    state.floatExpanded = false;
+    state.screen = stack.pop();
+    state.float = true;
+    v2FloatFollowPage();
+    log(`回到第 ${state.page + 1} 页，悬窗还在。${state.live ? "通话没断。" : ""}`);
+    flash();
+    render();
+    return true;
+  }
   if (state.screen !== "settings") return false;
   if (state.settingsScreen === "talk" && state.assistantDetail) {
     if (state.assistantUnpair) state.assistantUnpair = false;
@@ -429,7 +515,7 @@ function v2Reader() {
     <div class="read-head"><span>三国演义 · 第一回</span>${marked ? `<button class="v-mark" data-ask>${L("注", "Note")}</button>` : ""}</div>
     <div class="read-body">${body}</div>
     <div class="read-foot"><span>10:48</span>${miss ? `<button class="v-miss" data-fontfix>${L(`缺 ${miss} 个字`, `${miss} missing`)}</button>` : `<span>${state.battery}%</span>`}<span>${state.page + 1} / ${pages.length}</span></div>
-    ${sheet}</div>`;
+    ${sheet}${state.float ? v2Float() : ""}</div>`;
 }
 
 // ── 设置：按「我想做什么」分六项，每项直接写着现在的值。不滚动。
@@ -776,8 +862,10 @@ panel.addEventListener("click", (e) => {
   }
   if (hit("[data-back]")) return back();
   if ((el = hit("[data-setting]"))) return openSetting(el.dataset.setting);
+  if (hit("[data-float-close]")) return void v2CloseFloat("点了 ✕");
+  if (hit("[data-float-expand]")) return v2ExpandFloat();
   if (hit("[data-ask]")) return v2Ask();
-  if (hit("[data-live]")) return v2GoLive();
+  if (hit("[data-live]")) return state.float ? v2OpenFloat(true) : v2GoLive();
   if ((el = hit("[data-subject]"))) return v2SwitchSubject(el.dataset.subject);
   if ((el = hit("[data-homepage]"))) return void v2Chin(Number(el.dataset.homepage) ? 1 : -1);
   if ((el = hit("[data-sug]"))) {

@@ -42,6 +42,8 @@ const state = {
   wifiTest: false,
   page: 0,
   sheet: false,
+  float: false,         // 新设计：正文页下方的问答悬窗开着
+  floatExpanded: false, // 从悬窗展开到完整助手页，返回时回到悬窗
   sheetTab: 3,
   homePage: 0,
   // 设置页：list = 分类列表，其他值 = 具体分类 ID

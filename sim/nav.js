@@ -40,8 +40,13 @@ function leave(from, deeper = false) {
   if (from === "ai") {
     if (isV2()) v2LeaveAi();
     stopSession();
+    state.floatExpanded = false;
   }
-  if (from === "reader") state.sheet = false;
+  if (from === "reader") {
+    state.sheet = false;
+    // 离开正文（不是展开悬窗）：悬窗收起，通话挂断
+    if (state.float) { state.float = false; stopSession(); }
+  }
   if (from === "settings") { state.wifiTest = false; state.diagnostic = ""; }
   if (from === "settings" && !(deeper && isV2())) {
     state.settingsScreen = "list";
