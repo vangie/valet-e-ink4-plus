@@ -6,3 +6,8 @@
 
 # "@DEV" commands on the USB console: screenshots and injected input.
 CONFIG_VALET_DEV_LINK=y
+
+# Keep Info logs and error names on the desk (release drops them to save ~110 KB).
+# CONFIG_LOG_DEFAULT_LEVEL_WARN is not set
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_ESP_ERR_TO_NAME_LOOKUP=y

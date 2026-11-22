@@ -340,7 +340,7 @@ lv_obj_t* Button(lv_obj_t* parent, const char* text, int width, lv_event_cb_t ca
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_set_style_pad_all(button, 0, 0);
     lv_obj_set_style_text_color(button, lv_color_black(), 0);
-    lv_obj_set_style_text_font(button, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(button, Assistant_UiFont(), 0);
     Assistant_DisableScroll(button);
     auto* label = lv_label_create(button);
     lv_label_set_text(label, text);
@@ -529,7 +529,7 @@ void AssistantPhoto_Create(lv_obj_t* screen) {
     EpdSetContentRole(s_thumbnail, EpdContentRole::Photo);
     lv_obj_center(s_thumbnail);
     lv_obj_add_event_cb(s_tray, OpenPreview, LV_EVENT_CLICKED, nullptr);
-    auto* remove = Button(s_tray, LV_SYMBOL_CLOSE, UiSx(40), [](lv_event_t*) {
+    auto* remove = Button(s_tray, "", UiSx(40), [](lv_event_t*) {
         if (s_operation.load() != PhotoOperation::Idle || s_preview || AssistantScreen::IsPttHeld()) {
             ScreenShowToast(Lang::Strings::ASSISTANT_PHOTO_BUSY);
             return;
@@ -540,6 +540,23 @@ void AssistantPhoto_Create(lv_obj_t* screen) {
         Assistant_UpdatePhotoAction();
     });
     lv_obj_set_height(remove, UiSx(40));
+    // ✕ 用两条线画：原来为这一个符号编进了整套 28 号 Montserrat 字体（37 KB）。
+    lv_obj_add_event_cb(remove, [](lv_event_t* e) {
+        lv_area_t a;
+        lv_obj_get_coords(static_cast<lv_obj_t*>(lv_event_get_target(e)), &a);
+        const int cx = (a.x1 + a.x2) / 2, cy = (a.y1 + a.y2) / 2, r = UiSx(8);
+        lv_draw_line_dsc_t line;
+        lv_draw_line_dsc_init(&line);
+        line.color = lv_color_black();
+        line.width = 3;
+        line.round_start = line.round_end = 1;
+        line.p1 = {static_cast<lv_value_precise_t>(cx - r), static_cast<lv_value_precise_t>(cy - r)};
+        line.p2 = {static_cast<lv_value_precise_t>(cx + r), static_cast<lv_value_precise_t>(cy + r)};
+        lv_draw_line(lv_event_get_layer(e), &line);
+        line.p1 = {static_cast<lv_value_precise_t>(cx - r), static_cast<lv_value_precise_t>(cy + r)};
+        line.p2 = {static_cast<lv_value_precise_t>(cx + r), static_cast<lv_value_precise_t>(cy - r)};
+        lv_draw_line(lv_event_get_layer(e), &line);
+    }, LV_EVENT_DRAW_MAIN_END, nullptr);
     lv_obj_set_style_radius(remove, LV_RADIUS_CIRCLE, 0);
     lv_obj_align(remove, LV_ALIGN_TOP_RIGHT, -UiSx(4), UiSy(4));
 }
