@@ -302,6 +302,8 @@ void AssistantScreen::FlushYunxinSpeech() {
 
 void AssistantScreen::ShowLiveReply(const char* text, bool done) {
     auto& stream = Assistant_State().stream;
+    ESP_LOGI(TAG, "live reply: %u bytes done=%d active=%d rendered=%d same=%d flow=%u", text ? unsigned(std::strlen(text)) : 0u,
+             done, IsActive(), stream.yunxin_rendered, text && stream.yunxin_text == text, unsigned(Assistant_State().layout.flow.size()));
     if (IsActive() && text && text[0] && stream.yunxin_text != text) {
         FlowItem item;
         item.kind = FlowKind::RichText;

@@ -354,6 +354,12 @@ void ChangeTalkMode(lv_event_t*) {
         ScreenLoadReplace(AssistantScreen::Create());
     })) ScreenShowToast("操作繁忙，请重试");
 }
+}  // namespace
+void AssistantScreen::EndLiveCall() {
+    ESP_LOGI(TAG, "call ended by the assistant: back to ask, flow=%u", unsigned(Assistant_State().layout.flow.size()));
+    if (ValetProtocol::Live()) ChangeTalkMode(nullptr);
+}
+namespace {
 void ChangeReadingContext(lv_event_t*) {
     auto* context = new bool(valet::SelectedReadingContext().Valid());
     if (!ScreenLvAsync([](void* ptr) {

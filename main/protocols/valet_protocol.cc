@@ -291,7 +291,7 @@ void ValetProtocol::CloseAudioChannel() {
     recording_ = false; live_ready_ = false; awaiting_ = false; speech_active_ = false; recording_data_.clear(); input_decoder_.reset(); call_id_.clear(); early_ready_.clear();
     marks_.clear(); playback_sequence_ = 0; output_started_ = false; audio_done_ = false; call_pending_ = false; tool_call_.clear(); tool_queue_.clear(); steering_.clear(); finished_tools_.clear();
     captions_.clear(); quiet_since_ = 0; reply_so_far_.clear(); ResetLiveReply();
-    call_ready_seen_ = false; call_retries_ = 0; recreate_at_ = 0; call_retrying = false;
+    call_ready_seen_ = false; call_retries_ = 0; recreate_at_ = 0; call_retrying = false; hangup_pending_ = false;
     if (was_open && on_audio_channel_closed_) on_audio_channel_closed_();
 }
 bool ValetProtocol::IsAudioChannelOpened() const { return opened_ && (authenticated_ || reconnecting_) && !error_occurred_; }
@@ -750,6 +750,8 @@ void ValetProtocol::Handle(cJSON* root) {
     if (id == "valet-subscribe") { xEventGroupSetBits(events_, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")) ? kSubscribed : kFailed); return; }
     if (id == "valet-context") { context_selected_ = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok")) && String(payload, "sessionKey") == session_id_; xEventGroupSetBits(events_, context_selected_ ? kContext : kFailed); return; }
     if (id.rfind("valet-a-", 0) == 0 && !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "ok"))) {
+        // 通话刚结束（助理挂断、重建中）时还在路上的几包会被拒收，那不是格式问题
+        if (hangup_pending_ || !live_ready_ || call_id_.empty()) return;
         live_ready_ = false; SetError("网关拒绝实时音频，请检查插件格式"); return;
     }
     if (id == "valet-call") {
@@ -845,6 +847,12 @@ void ValetProtocol::Handle(cJSON* root) {
             return;
         }
         call_retrying = false;
+        if (call_ready_seen_ && opened_) {   // 通话中被助理挂断（用户说「挂掉吧」，或网关到了时限）
+            ESP_LOGI(TAG, "call: ended by the assistant, hanging up after playback");
+            hangup_pending_ = true;
+            call_id_.clear();   // 上行任务不再往这个通话发
+            return;
+        }
         SetError("通话已结束"); return;
     }
     if (type == "error") {
@@ -1222,6 +1230,13 @@ void ValetProtocol::DrainPlayback() {
         Send(root); marks_.pop_front();
     }
     if (session_live_) RevealLiveReply(esp_timer_get_time());
+    if (hangup_pending_ && idle) {
+        hangup_pending_ = false;
+        FinishLiveReply();
+        FlushCaptions();
+        Application::GetInstance().Schedule([] { AssistantScreen::EndLiveCall(); });
+        return;
+    }
     if (!idle) { quiet_since_ = 0; return; }
     const int64_t now_us = esp_timer_get_time();
     if (!quiet_since_) quiet_since_ = now_us;

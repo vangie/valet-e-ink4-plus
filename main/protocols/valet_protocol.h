@@ -171,6 +171,7 @@ private:
     void KeepInterruptedReply();
     int64_t quiet_since_ = 0;   // 扬声器从什么时候开始没在播（0 = 正在播）
     int64_t interrupt_at_ = 0;   // 发出打断的时刻，等网关回复用
+    bool hangup_pending_ = false;   // 助理结束了通话：等扬声器把最后一句（「好的，再见」）播完再挂断
     std::string tool_call_, tool_run_, tool_key_;
     // 助理一句话里可能连着叫两次工具（2026-11-22：「帮我记一下明天八点开会」第一次还没回来就叫了第二次，
     // 旧代码直接结束通话）。一次只跑一个，其余排队；失败或超时只把错误交回给助理，不挂断。

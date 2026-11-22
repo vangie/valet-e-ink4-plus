@@ -49,6 +49,8 @@ public:
     // 通话（自建）：助理这段回答到目前为止要显示的文字。第一次追加一条「AI：」，之后原地替换这一条
     // （只重排最后一页）；done 表示这段回答结束，下一次再显示就是新的一条。
     static void ShowLiveReply(const char* text, bool done);
+    // 助理那边结束了通话（用户说「挂掉吧」等）：和按「挂断」一样回到提问页。
+    static void EndLiveCall();
 
     /** @brief 设置情绪表情（当前可为空操作） */
     static void SetEmotion(const char* emotion);
