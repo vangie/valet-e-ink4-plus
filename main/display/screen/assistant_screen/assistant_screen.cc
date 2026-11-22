@@ -15,6 +15,7 @@
 #include "application.h"
 #include "epd_refresh.h"
 #include <esp_timer.h>
+#include <atomic>
 #include <cmath>
 #include "firmware_memory.h"
 #include "assistant_boot_photo.h"
@@ -344,20 +345,35 @@ void RestoreContextHistory() {
     Assistant_State().stream.coalesce_buf.clear();
     displayed_context_key = key;
 }
-void ChangeTalkMode(lv_event_t*) {
-    if (!ScreenLvAsync([](void*) {
-        if (!AssistantScreen::IsActive()) return;
-        const bool next = !ValetProtocol::Live();
+// 「挂断」和提问页的「通话」在同一个位置。墨水屏换页要一秒左右，用户以为没点上会再点一下，
+// 第二下落在新页面的「通话」上又打了出去（2026-11-23 用户反馈）。所以：
+// - 切换时带上目标状态（挂断 = 回提问，通话 = 进通话），排队的两次点击结果一样，不会来回切；
+// - 每次切换后 2 秒内（从新页面建好算起，覆盖墨水屏刷新）不理会这两个按钮。
+std::atomic<int64_t> s_talk_mode_switched_at{0};
+constexpr int64_t kTalkModeCooldownUs = 2000000;
+void SwitchTalkMode(bool live) {
+    s_talk_mode_switched_at = esp_timer_get_time();
+    if (!ScreenLvAsync([](void* arg) {
+        const bool next = arg != nullptr;
+        if (!AssistantScreen::IsActive() || ValetProtocol::Live() == next) return;
         Application::GetInstance().StopXiaozhiVoice();
         ValetProtocol::SetLive(next);
         ScreenLoadReplace(lv_obj_create(nullptr));
         ScreenLoadReplace(AssistantScreen::Create());
-    })) ScreenShowToast("操作繁忙，请重试");
+        s_talk_mode_switched_at = esp_timer_get_time();
+    }, live ? reinterpret_cast<void*>(1) : nullptr)) ScreenShowToast("操作繁忙，请重试");
+}
+void ChangeTalkMode(lv_event_t*) {   // 按钮：通话 / 挂断
+    if (esp_timer_get_time() - s_talk_mode_switched_at.load() < kTalkModeCooldownUs) {
+        ESP_LOGI(TAG, "talk mode tap ignored: screen just switched");
+        return;
+    }
+    SwitchTalkMode(!ValetProtocol::Live());
 }
 }  // namespace
 void AssistantScreen::EndLiveCall() {
     ESP_LOGI(TAG, "call ended by the assistant: back to ask, flow=%u", unsigned(Assistant_State().layout.flow.size()));
-    if (ValetProtocol::Live()) ChangeTalkMode(nullptr);
+    if (ValetProtocol::Live()) SwitchTalkMode(false);
 }
 namespace {
 void ChangeReadingContext(lv_event_t*) {
