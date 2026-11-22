@@ -44,6 +44,7 @@ function render() {
   if (state.toast && !state.off && !state.booting) html += `<div class="toast">${esc(state.toast)}</div>`;
   panel.classList.toggle("v2", isV2());
   panel.innerHTML = html;
+  if (isV2() && state.float) v2SnapFloatSoon();
   const where = state.off ? "关机" : state.booting ? "开机中" : state.standby ? "待机" : names()[state.screen];
   nowEl.innerHTML = `<p>现在在「${where}」，按键是：</p><dl>${keyHelp()
     .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;

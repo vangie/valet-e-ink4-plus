@@ -191,6 +191,30 @@ function v2CloseFloat(why) {
   render();
   return true;
 }
+// 悬窗上沿落在两行之间：在 3/4 高附近找书页上一行的下沿，不让悬窗切过半行字。
+function v2SnapFloat() {
+  const float = document.querySelector(".v-float"), body = document.querySelector(".v-read .read-body");
+  if (!float || !body) return;
+  const read = float.parentElement.getBoundingClientRect();
+  const want = read.top + read.height * 0.25;   // 3/4 高时的上沿
+  let best = 0;
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    range.selectNodeContents(node);
+    for (const r of range.getClientRects()) if (r.bottom <= want + 6 && r.bottom > best) best = r.bottom;
+  }
+  // 只在 3/4 附近（上下两行以内）对齐；量不到或离谱就保留 CSS 的 75%
+  // 屏幕整体是缩放画的：量到的是屏幕像素，样式高度要换回页面自己的像素
+  const scale = read.height / float.parentElement.offsetHeight || 1;
+  if (best && best > want - read.height * 0.12) float.style.height = `${Math.round((read.bottom - best) / scale - 3)}px`;
+  else float.style.height = "";
+}
+function v2SnapFloatSoon() {
+  v2SnapFloat();
+  requestAnimationFrame(v2SnapFloat);          // 排版落定后再量一次
+  document.fonts?.ready.then(v2SnapFloat);     // 宋体加载完行高会变
+}
 function v2ExpandFloat() {
   nowTalk().p = state.answerPage;
   const live = state.live, muted = state.liveMuted;
