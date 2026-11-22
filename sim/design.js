@@ -207,7 +207,7 @@ function v2SnapFloat() {
   // 只在 3/4 附近（上下两行以内）对齐；量不到或离谱就保留 CSS 的 75%
   // 屏幕整体是缩放画的：量到的是屏幕像素，样式高度要换回页面自己的像素
   const scale = read.height / float.parentElement.offsetHeight || 1;
-  if (best && best > want - read.height * 0.12) float.style.height = `${Math.round((read.bottom - best) / scale - 3)}px`;
+  if (best && best > want - read.height * 0.12) float.style.height = `${Math.round((read.bottom - best) / scale - 8)}px`;   // 留出上沿的抖点阴影
   else float.style.height = "";
 }
 function v2SnapFloatSoon() {

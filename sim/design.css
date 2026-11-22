@@ -437,11 +437,14 @@ div.v-row { box-sizing: border-box; }
 .v-pane.is-tight { gap: 7px; }
 
 /* 悬窗：正文页下方问这一页、聊这一页，占 3/4 屏（上沿对齐到两行之间，见 v2SnapFloat）。书页留在上面，只刷这一块。外形沿用提问页：页底同一条胶囊，通话是同一个斜切。 */
-.v-float { position: absolute; left: 0; right: 0; bottom: 0; height: 75%; background: var(--paper); border-top: 1.2px solid var(--ink); display: flex; flex-direction: column; z-index: 3; }
-.v-float-head { flex: none; height: 30px; padding: 0 6px 0 14px; border-bottom: 1px solid var(--ink); display: flex; align-items: center; gap: 6px; }
+.v-float { position: absolute; left: 0; right: 0; bottom: 0; height: 75%; background: var(--paper); display: flex; flex-direction: column; z-index: 3; }
+/* 和书页分开：上沿外面一条抖点阴影（墨水屏只有黑白和抖点），标题栏整条黑底 */
+.v-float::before { content: ""; position: absolute; left: 0; right: 0; top: -5px; height: 5px; background-image: radial-gradient(var(--ink) 0.55px, transparent 0.75px); background-size: 2px 2px; }
+.v-float-head { flex: none; height: 32px; padding: 0 6px 0 14px; background: var(--ink); color: var(--paper); display: flex; align-items: center; gap: 6px; }
 .v-float-head b { font-size: 11.5px; font-weight: 600; letter-spacing: 1px; }
-.v-float-head span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; color: var(--g1); }
-.v-float-head .v-txt { padding: 6px 4px; }
+.v-float-head span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; }
+.v-float-head .v-txt { padding: 6px 4px; color: var(--paper); }
+.v-float-head .v-float-x { color: var(--paper); }
 .v-float-x { width: 26px; height: 26px; padding: 0; border: 0; background: none; display: grid; place-items: center; }
 .v-float-x .ic { width: 12px; height: 12px; }
 .v-float-body { flex: 1; min-height: 0; overflow: hidden; padding: 10px 14px 4px; display: flex; flex-direction: column; }
