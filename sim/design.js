@@ -158,7 +158,7 @@ function v2SwitchSubject(type) {
   render();
 }
 // ── 悬窗：在正文页下方问这一页、聊这一页，书页不动，不用切出去。
-// 回答太长、要看以前的问答、要随口问或拍照时点「展开」去完整助手页，同一场对话；从那里返回又回到悬窗。
+// 回答太长、要看以前的问答、要随口问或拍照时点「全屏」去完整助手页，同一场对话；从那里返回又回到悬窗。
 function v2OpenFloat(live) {
   // 官方云拿不到正在读的这一页，照旧进完整的百问页；还没连上自己的助手也去完整页（那里有「去连接」）
   if (state.provider !== "agent" || !agentReady()) return live ? v2GoLive() : go("ai");
@@ -222,7 +222,7 @@ function v2ExpandFloat() {
   go("ai");                 // 同一场：这一页的注、正在进行的通话都带过去
   state.liveMuted = muted;
   state.floatExpanded = true;
-  log(`展开到完整的助手页。${live ? "通话没断。" : ""}返回会回到第 ${state.page + 1} 页的悬窗。`);
+  log(`全屏：换到完整的助手页。${live ? "通话没断。" : ""}返回会回到第 ${state.page + 1} 页的悬窗。`);
   render();
 }
 function v2FloatBody(s) {
@@ -230,7 +230,7 @@ function v2FloatBody(s) {
   if (state.listening) return `<div class="v-listen">${ic("mic")}<b>${L("在听", "Listening")}</b><span>${L("松开就发出去", "Release to send")}</span></div>`;
   if (s.a.length) {
     const long = s.a.length > 2
-      ? `<button class="v-float-more" data-float-expand>${L("回答较长 · 展开看全部", "Long answer · expand")}${ic("go")}</button>` : "";
+      ? `<button class="v-float-more" data-float-expand>${L("回答较长 · 全屏看全部", "Long answer · full screen")}${ic("go")}</button>` : "";
     return `${v2Answer(s)}${long}`;
   }
   const sugs = v2Sugs().slice(0, 2).map(([label], i) => `<button data-sug="${i}">${glyphs(esc(label))}${ic("go")}</button>`).join("");
@@ -250,7 +250,7 @@ function v2Float() {
       ${callEntry() ? `<button class="tolive" data-live>${ic("wave")}${L("通话", "Call")}</button>` : ""}</div>`;
   return `<div class="v-float">
     <div class="v-float-head"><b>${state.live ? L("聊这一页", "Talking about it") : L("问这一页", "Ask this page")}</b><span>${L(`第 ${state.page + 1} 页`, `p.${state.page + 1}`)} · ${esc(v2Who())}</span>
-      <button class="v-txt" data-float-expand>${L("展开", "Expand")}</button><button class="v-float-x" data-float-close aria-label="${L("收起", "Close")}">${ic("x")}</button></div>
+      <button class="v-txt" data-float-expand>${L("全屏", "Full screen")}</button><button class="v-float-x" data-float-close aria-label="${L("收起", "Close")}">${ic("x")}</button></div>
     <div class="v-float-body">${v2FloatBody(s)}</div>${pager}${foot}</div>`;
 }
 function v2Ask() {
@@ -280,7 +280,7 @@ const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "d
 // 返回 true = 这次返回已经在设置里往上走了一级。
 function v2Back() {
   if (state.screen === "ai" && state.floatExpanded && stack[stack.length - 1] === "reader") {
-    // 从悬窗展开出来的：回到书页，悬窗还在，通话不断
+    // 从悬窗点「全屏」出来的：回到书页，悬窗还在，通话不断
     v2LeaveAi();
     state.floatExpanded = false;
     state.screen = stack.pop();
