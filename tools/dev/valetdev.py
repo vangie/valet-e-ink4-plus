@@ -308,6 +308,7 @@ def main():
     p = sub.add_parser("assistant-url"); p.add_argument("url")
     p = sub.add_parser("livebars"); p.add_argument("state", choices=["on", "off"])
     p = sub.add_parser("micgate"); p.add_argument("state", choices=["on", "off"])
+    sub.add_parser("droplink", help="close the link to the assistant (test call reconnection)")
     p = sub.add_parser("proxy", help="set the proxy: proxy http 192.168.0.10 6152 --wifi; proxy off")
     p.add_argument("kind", choices=["http", "socks5", "off"]); p.add_argument("host", nargs="?"); p.add_argument("port", nargs="?", type=int)
     p.add_argument("--wifi", action="store_true"); p.add_argument("--cell", action="store_true")
@@ -351,6 +352,8 @@ def main():
         req = {"cmd": "proxy", "wifi": args.wifi and args.kind != "off", "cell": args.cell and args.kind != "off"}
         if args.kind != "off": req.update({"kind": args.kind, "host": args.host or "", "port": args.port or 0})
         dev(req)
+    elif args.command == "droplink":
+        dev({"cmd": "droplink"})
     elif args.command == "micgate":
         dev({"cmd": "micgate", "on": args.state == "on"})
     elif args.command == "livebars":

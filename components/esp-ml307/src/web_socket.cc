@@ -133,7 +133,7 @@ bool WebSocket::Connect(const char* uri) {
 
     connected_ = false;
     // 给建连（含 TLS 握手）和握手请求一个总时限；之后的长连接不受它限制。
-    tcp_->SetRequestDeadline(esp_timer_get_time() + 20LL * 1000000);
+    tcp_->SetRequestDeadline(esp_timer_get_time() + int64_t(connect_timeout_ms_) * 1000);
     // 使用 tcp 建立连接
     if (!tcp_->Connect(host, std::stoi(port))) {
         ESP_LOGE(TAG, "Failed to connect to server");
@@ -304,6 +304,7 @@ void WebSocket::FailHandshake(const char* reason) {
 
 void WebSocket::OnTcpData(const std::string& data) {
     // 将新数据追加到接收缓冲区
+    last_receive_us_.store(esp_timer_get_time());
     receive_buffer_.append(data);
     const size_t max_rx = receive_buffer_size_ * 4;
     if (receive_buffer_.size() > max_rx) {

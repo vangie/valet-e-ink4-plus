@@ -1,6 +1,7 @@
 #ifndef WEBSOCKET_H
 #define WEBSOCKET_H
 
+#include <atomic>
 #include <functional>
 #include <string>
 #include <map>
@@ -21,6 +22,10 @@ public:
 
     void SetHeader(const char* key, const char* value);
     void SetReceiveBufferSize(size_t size);
+    // 建连（含 TLS 握手）和握手请求的总时限，默认 20 秒。
+    void SetConnectTimeout(int ms) { connect_timeout_ms_ = ms; }
+    // 最后一次从服务器收到数据的时刻（esp_timer 微秒），用来发现悄悄断掉的连接。
+    int64_t LastReceiveUs() const { return last_receive_us_.load(); }
     bool IsConnected() const;
     bool Connect(const char* uri);
     bool Send(const std::string& data);
@@ -48,6 +53,8 @@ private:
     std::string receive_buffer_;
     bool handshake_completed_ = false;
     bool connected_ = false;
+    int connect_timeout_ms_ = 20000;
+    std::atomic<int64_t> last_receive_us_{0};
 
     // Mutex for sending data and replying pong
     std::mutex send_mutex_;

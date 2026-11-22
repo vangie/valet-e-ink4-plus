@@ -1,5 +1,6 @@
 #pragma once
 #include "protocol.h"
+#include "sdkconfig.h"
 #include "assistant_profiles.h"
 #include "valet_reading_context.h"
 #include "opus_decoder.h"
@@ -22,6 +23,11 @@ public:
     static bool Muted();
     // 通话里麦克风最近一包的声音大小（均方根，满幅 32767）和时刻；通话页的波形用。
     static int MicLevel(int64_t* at_us = nullptr);
+    // 通话中线路断了、正在自动接回（通话页显示「重新连接」）。
+    static bool Reconnecting();
+#if CONFIG_VALET_DEV_LINK
+    static void DropLinkForTest();   // 仅测试版：主动关掉当前连接，模拟线路断开
+#endif
     // 配对结果。Refused* 是网关给出的明确原因，Unreachable 是没连到网关。
     enum class Pairing { Paired, NeedsApproval, CodeExpired, ScopeDenied, Refused, Unreachable, SaveFailed, NoProfile };
     // 用配对码登录一次并保存长期凭据；已有长期凭据时直接返回 Paired。Network 任务调用，阻塞。
@@ -67,6 +73,19 @@ private:
     bool ConnectOnce(bool bootstrap);
     void RunReceiver();
     void StopReceiver();
+    // 通话中断线自动重连：新开一个任务重新登录、订阅、建通话，最多试 90 秒；
+    // 期间通话不结束（IsAudioChannelOpened 仍为真，麦克风不上传），接不回来才报错。
+    std::atomic<bool> reconnecting_{false}, stop_reconnect_{false};
+    TaskHandle_t reconnector_ = nullptr;
+    int connect_timeout_ms_ = 20000;   // 单次建连时限；重连时缩短，挂断时不用久等
+    void StartReconnect();
+    // 通话还没就绪就被网关关掉（多半是网关连 OpenAI 实时语音一时失败）：隔 2 秒重建，最多 3 次。
+    bool call_ready_seen_ = false;
+    int call_retries_ = 0;
+    int64_t recreate_at_ = 0;
+    void RunReconnect();
+    void JoinReconnect();
+    const char* Prepare();   // 登录后：选阅读会话、订阅消息；失败返回给用户看的原因
     std::unique_ptr<OpusDecoderWrapper> input_decoder_;
     OpusResampler input_resampler_;
     std::vector<uint8_t> recording_data_;

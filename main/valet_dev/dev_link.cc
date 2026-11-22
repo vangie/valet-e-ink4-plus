@@ -17,6 +17,7 @@
 #include "usb_virtual_disk.h"
 #include "assistant_profiles.h"
 #include "valet_net/proxy.h"
+#include "protocols/valet_protocol.h"
 #include "application.h"
 #include "standby_screen/standby_classic.h"
 #include "standby_screen/standby_screen.h"
@@ -339,6 +340,9 @@ void ValetDevLinkHandle(const char* json) {
         else if (!valet::proxy::Update(prefs)) error = "BUSY";
         else ESP_LOGW(TAG, "proxy: %s %s:%d wifi=%d cell=%d", prefs.kind == net_proxy::Kind::kSocks5 ? "socks5" : "http",
                       prefs.host.c_str(), prefs.port, prefs.on_wifi, prefs.on_cell);
+    } else if (!strcmp(cmd, "droplink")) {
+        // 仅测试版：关掉当前和助理的连接（发关闭帧，网关回关闭），看通话能不能自己接回来。
+        ValetProtocol::DropLinkForTest();
     } else if (!strcmp(cmd, "micgate")) {
         extern bool g_valet_mic_gate;
         g_valet_mic_gate = !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root, "on"));

@@ -533,17 +533,18 @@ void LiveTick(lv_timer_t*) {
     const auto device = Application::GetInstance().GetDeviceState();
     const bool muted = ValetProtocol::Muted();
     const int64_t now = esp_timer_get_time();
-    int state;   // 0 接通中 1 在听 2 在说 3 静音 4 没接通
-    if (device == kDeviceStateConnecting) state = 0;
+    int state;   // 0 接通中 1 在听 2 在说 3 静音 4 没接通 5 重新连接
+    if (ValetProtocol::Reconnecting()) state = 5;
+    else if (device == kDeviceStateConnecting) state = 0;
     else if (device == kDeviceStateSpeaking) state = 2;
     else if (device == kDeviceStateListening) state = muted ? 3 : 1;
     else state = 4;
     if (state != s_live.state) {
         s_live.state = state;
-        static const char* const kLabel[] = {"接通中", "在听", "在说", "静音", "没接通"};
-        static const char* const kLabelEn[] = {"Connecting", "Listening", "Speaking", "Muted", "Not connected"};
-        static const char* const kHint[] = {"马上就好", "直接说，不用按键", "按「打断」可以插话", "麦克风关着，助手听不到", "按挂断后再点通话"};
-        static const char* const kHintEn[] = {"One moment", "Just speak", "Tap Interrupt to cut in", "Mic is off", "End, then call again"};
+        static const char* const kLabel[] = {"接通中", "在听", "在说", "静音", "没接通", "重新连接"};
+        static const char* const kLabelEn[] = {"Connecting", "Listening", "Speaking", "Muted", "Not connected", "Reconnecting"};
+        static const char* const kHint[] = {"马上就好", "直接说，不用按键", "按「打断」可以插话", "麦克风关着，助手听不到", "按挂断后再点通话", "线路断了，正在接回"};
+        static const char* const kHintEn[] = {"One moment", "Just speak", "Tap Interrupt to cut in", "Mic is off", "End, then call again", "Line dropped, reconnecting"};
         lv_label_set_text(s_live.label, ValetText(kLabel[state], kLabelEn[state]));
         lv_label_set_text(s_live.hint, ValetText(kHint[state], kHintEn[state]));
     }

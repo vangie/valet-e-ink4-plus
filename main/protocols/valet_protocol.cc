@@ -14,6 +14,8 @@
 #include <esp_log.h>
 #include "sdkconfig.h"
 #include <esp_timer.h>
+#include <esp_heap_caps.h>
+#include <freertos/idf_additions.h>
 #include <psa/crypto.h>
 #include <nvs.h>
 #include <cstring>
@@ -28,12 +30,17 @@ std::string device_id;
 std::atomic<bool> live_mode{false}, muted{false};
 std::atomic<int> mic_level{0};
 std::atomic<int64_t> mic_level_at{0};
+std::atomic<bool> link_reconnecting{false}, call_retrying{false};
+#if CONFIG_VALET_DEV_LINK
+std::atomic<ValetProtocol*> live_instance{nullptr};
+#endif
 constexpr size_t kMaxFrame = 65536;
-constexpr EventBits_t kHello = BIT0, kFailed = BIT1, kInbox = BIT2, kExit = BIT3, kContext = BIT4, kSubscribed = BIT5;
+constexpr EventBits_t kHello = BIT0, kFailed = BIT1, kInbox = BIT2, kExit = BIT3, kContext = BIT4, kSubscribed = BIT5, kReconnectExit = BIT6;
 using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 using valet::wire::String;
 }
 int ValetProtocol::MicLevel(int64_t* at_us) { if (at_us) *at_us = mic_level_at.load(); return mic_level.load(); }
+bool ValetProtocol::Reconnecting() { return link_reconnecting.load() || call_retrying.load(); }
 bool ValetProtocol::InitializeIdentity() {
     nvs_handle_t handle;
     if (nvs_open("valet_identity", NVS_READWRITE, &handle) != ESP_OK) return false;
@@ -54,7 +61,13 @@ bool ValetProtocol::Live() { return live_mode.load(); }
 void ValetProtocol::SetMuted(bool enabled) { muted.store(enabled); }
 bool ValetProtocol::Muted() { return muted.load(); }
 ValetProtocol::ValetProtocol() : events_(xEventGroupCreate()) { server_sample_rate_ = 24000; server_frame_duration_ = 60; }
-ValetProtocol::~ValetProtocol() { CloseAudioChannel(); vEventGroupDelete(events_); if (vad_) fvad_free(vad_); }
+ValetProtocol::~ValetProtocol() {
+    CloseAudioChannel();
+#if CONFIG_VALET_DEV_LINK
+    ValetProtocol* self = this; live_instance.compare_exchange_strong(self, nullptr);
+#endif
+    vEventGroupDelete(events_); if (vad_) fvad_free(vad_);
+}
 bool ValetProtocol::SendText(const std::string& text) {
     std::lock_guard<std::mutex> lock(send_mutex_);
     if (closing_ || !socket_ || !socket_->IsConnected()) return false;
@@ -100,19 +113,25 @@ void ValetProtocol::RunReceiver() {
 void ValetProtocol::StopReceiver() {
     closing_ = true;
     if (receiver_) { xEventGroupSetBits(events_, kInbox); xEventGroupWaitBits(events_, kExit, pdFALSE, pdFALSE, portMAX_DELAY); receiver_ = nullptr; }
-    socket_.reset(); // Receiver has stopped; join network callbacks before freeing this object.
+    { std::lock_guard<std::mutex> send(send_mutex_); socket_.reset(); } // Receiver has stopped; join network callbacks before freeing this object.
     std::lock_guard<std::mutex> lock(inbox_mutex_); inbox_.clear();
 }
 bool ValetProtocol::ConnectOnce(bool bootstrap) {
     StopReceiver(); closing_ = false; authenticated_ = false; bootstrap_ = bootstrap; reached_ = false; refusal_.clear();
     xEventGroupClearBits(events_, kHello | kFailed | kExit | kInbox | kContext | kSubscribed);
-    socket_ = Board::GetInstance().GetNetwork()->CreateWebSocket(1);
+    { std::lock_guard<std::mutex> send(send_mutex_); socket_ = Board::GetInstance().GetNetwork()->CreateWebSocket(1); }
     if (!socket_) return false;
+    socket_->SetConnectTimeout(connect_timeout_ms_);
     // 登录成功的回复带着网关的状态快照，实测 26.8 KB（2026-11-22，OpenClaw 2026.11.4）；
     // 16 KB 的上限会让它被当成超限断开，设备以为被拒绝。大块内存走 PSRAM。
     socket_->SetReceiveBufferSize(kMaxFrame);
     socket_->OnData([this](const char* data, size_t count, bool binary) { if (!binary) Receive(data, count); });
-    socket_->OnDisconnected([this] { authenticated_ = false; live_ready_ = false; xEventGroupSetBits(events_, kFailed); if (!closing_) SetError("助理连接已断开，请重新进入"); });
+    socket_->OnDisconnected([this] {
+        authenticated_ = false; live_ready_ = false; xEventGroupSetBits(events_, kFailed);
+        if (closing_ || reconnecting_) return;   // 重连过程中的失败由重连任务自己处理
+        if (opened_ && session_live_) { StartReconnect(); return; }
+        SetError("助理连接已断开，请重新进入");
+    });
     if (xTaskCreate([](void* arg) { static_cast<ValetProtocol*>(arg)->RunReceiver(); }, "valet_receive", 10240, this, 4, &receiver_) != pdPASS) return false;
     const auto endpoint = valet::wire::Endpoint(profile_.connection.url);
     const int64_t started = esp_timer_get_time();
@@ -122,7 +141,12 @@ bool ValetProtocol::ConnectOnce(bool bootstrap) {
     }
     reached_ = true;
     const int link_ms = static_cast<int>((esp_timer_get_time() - started) / 1000);
-    const auto bits = xEventGroupWaitBits(events_, kHello | kFailed, pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
+    // 等登录结果；重连时按 0.2 秒一段等，挂断了就不再等。
+    EventBits_t bits = 0;
+    for (int waited = 0; waited < (reconnecting_ ? 10000 : 30000) && !(reconnecting_ && stop_reconnect_); waited += 200) {
+        bits = xEventGroupWaitBits(events_, kHello | kFailed, pdFALSE, pdFALSE, pdMS_TO_TICKS(200));
+        if (bits & (kHello | kFailed)) break;
+    }
     const bool ok = (bits & kHello) && !(bits & kFailed) && authenticated_;
     ESP_LOGI(TAG, "connect: link %d ms, %s (%s)", link_ms, ok ? "authenticated" : "not authenticated", bootstrap ? "pairing" : "device");
     // 连上了却没等到网关的任何回答（既没放行也没拒绝）：多半是网络或入口卡住，按「连不上」处理并允许重试，
@@ -203,11 +227,24 @@ bool ValetProtocol::OpenAudioChannel() {
                        : "网关签名认证失败，请检查插件版本与设备授权");
         CloseAudioChannel(); return false;
     }
+    if (const char* why = Prepare()) { SetError(why); CloseAudioChannel(); return false; }
+    pushed_packets_ = 0; ResyncPlayback(); agc_gain_ = 3.0f; agc_env_ = 0.f; live_errors_ = 0; gate_reset_ = true;
+    input_decoder_ = std::make_unique<OpusDecoderWrapper>(16000, 1, 60);
+    input_resampler_.Configure(16000, 24000);
+    opened_ = true;
+#if CONFIG_VALET_DEV_LINK
+    live_instance = this;
+#endif
+    if (on_audio_channel_opened_) on_audio_channel_opened_();
+    if (on_connected_) on_connected_();
+    return true;
+}
+const char* ValetProtocol::Prepare() {
     if (context_.Valid() && session_live_ && !book_live_supported_) {
-        SetError("网关未支持带书通话，请升级共享网关"); CloseAudioChannel(); return false;
+        return "网关未支持带书通话，请升级共享网关";
     }
     if (context_.Valid() && !context_supported_) {
-        SetError("网关未支持阅读上下文，请升级共享网关插件"); CloseAudioChannel(); return false;
+        return "网关未支持阅读上下文，请升级共享网关插件";
     }
     if (context_supported_) {
         context_selected_ = false;
@@ -216,32 +253,108 @@ bool ValetProtocol::OpenAudioChannel() {
         cJSON_AddStringToObject(params, "sessionKey", session_id_.c_str());
         cJSON_AddItemToObject(params, "context", valet::ContextJson(context_));
         if (!Send(request) || !(xEventGroupWaitBits(events_, kContext | kFailed, pdFALSE, pdFALSE, pdMS_TO_TICKS(10000)) & kContext) || !context_selected_) {
-            SetError("阅读会话选择失败，问题未发送"); CloseAudioChannel(); return false;
+            return "阅读会话选择失败，问题未发送";
         }
     }
     auto* subscribe = valet::wire::Request("valet-subscribe", "sessions.messages.subscribe");
     cJSON_AddStringToObject(cJSON_GetObjectItem(subscribe, "params"), "key", session_id_.c_str());
     if (!Send(subscribe) || !(xEventGroupWaitBits(events_, kSubscribed | kFailed, pdFALSE, pdFALSE, pdMS_TO_TICKS(10000)) & kSubscribed)) {
-        SetError("会话订阅失败，问题未发送"); CloseAudioChannel(); return false;
+        return "会话订阅失败，问题未发送";
     }
-    pushed_packets_ = 0; ResyncPlayback(); agc_gain_ = 3.0f; agc_env_ = 0.f; live_errors_ = 0; gate_reset_ = true;
-    input_decoder_ = std::make_unique<OpusDecoderWrapper>(16000, 1, 60);
-    input_resampler_.Configure(16000, 24000);
-    opened_ = true;
-    if (on_audio_channel_opened_) on_audio_channel_opened_();
-    if (on_connected_) on_connected_();
-    return true;
+    return nullptr;
 }
 void ValetProtocol::CloseAudioChannel() {
     const bool was_open = opened_.exchange(false);
+    JoinReconnect();
     // Join before touching state owned by the receiver.
     StopReceiver();
     recording_ = false; live_ready_ = false; awaiting_ = false; speech_active_ = false; recording_data_.clear(); input_decoder_.reset(); call_id_.clear(); early_ready_.clear();
     marks_.clear(); playback_sequence_ = 0; output_started_ = false; audio_done_ = false; call_pending_ = false; tool_call_.clear(); tool_queue_.clear(); steering_.clear(); finished_tools_.clear();
     captions_.clear(); quiet_since_ = 0; reply_so_far_.clear();
+    call_ready_seen_ = false; call_retries_ = 0; recreate_at_ = 0; call_retrying = false;
     if (was_open && on_audio_channel_closed_) on_audio_channel_closed_();
 }
-bool ValetProtocol::IsAudioChannelOpened() const { return opened_ && authenticated_ && !error_occurred_; }
+bool ValetProtocol::IsAudioChannelOpened() const { return opened_ && (authenticated_ || reconnecting_) && !error_occurred_; }
+void ValetProtocol::StartReconnect() {
+    if (reconnecting_.exchange(true)) return;
+    stop_reconnect_ = false;
+    link_reconnecting = true;
+    if (reconnector_) {   // 上一次重连留下的任务：等它真正停住再删
+        xEventGroupWaitBits(events_, kReconnectExit, pdFALSE, pdFALSE, portMAX_DELAY);
+        while (eTaskGetState(reconnector_) != eSuspended) vTaskDelay(1);
+        vTaskDeleteWithCaps(reconnector_); reconnector_ = nullptr;
+    }
+    xEventGroupClearBits(events_, kReconnectExit);
+    // 栈放 PSRAM（TLS 握手要 8 KB 左右，内部内存紧）；带 caps 建的任务不能自己删，做完就停住，由下次重连或挂断时删。
+    const auto created = xTaskCreateWithCaps([](void* arg) {
+        auto* self = static_cast<ValetProtocol*>(arg);
+        self->RunReconnect();
+        xEventGroupSetBits(self->events_, kReconnectExit);
+        vTaskSuspend(nullptr);
+    }, "valet_reconnect", 12288, this, 4, &reconnector_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (created != pdPASS) {
+        reconnector_ = nullptr; reconnecting_ = false; link_reconnecting = false;
+        SetError("助理连接已断开，请重新进入");
+    }
+}
+void ValetProtocol::JoinReconnect() {
+    stop_reconnect_ = true;
+    if (!reconnector_) return;
+    xEventGroupWaitBits(events_, kReconnectExit, pdFALSE, pdFALSE, portMAX_DELAY);
+    while (eTaskGetState(reconnector_) != eSuspended) vTaskDelay(1);
+    vTaskDeleteWithCaps(reconnector_);
+    reconnector_ = nullptr;
+}
+void ValetProtocol::RunReconnect() {
+    const int64_t started = esp_timer_get_time();
+    ESP_LOGW(TAG, "call: link lost, reconnecting");
+    {   // 这一段通话已经没了：已说出的半句留在屏幕上，扬声器里剩下的不再播，工具结果也收不到了
+        std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+        KeepInterruptedReply();
+        for (const auto& caption : captions_)
+            Event(caption.user ? "stt" : "tts", caption.user ? nullptr : "sentence_start", caption.text);
+        captions_.clear();
+        call_id_.clear(); early_ready_.clear(); call_pending_ = false; live_ready_ = false;
+        marks_.clear(); output_started_ = false; audio_done_ = false; interrupted_ = false;
+        tool_call_.clear(); tool_queue_.clear(); steering_.clear();
+        Application::GetInstance().GetAudioService().ResetDecoder(); ResyncPlayback();
+        Event("tts", "stop");
+    }
+    connect_timeout_ms_ = 8000;
+    bool ok = false;
+    int attempt = 0;
+    while (!stop_reconnect_ && esp_timer_get_time() - started < 90000000) {
+        ++attempt;
+        if (ConnectOnce(false)) {
+            const char* why = Prepare();
+            if (!why) { ok = true; break; }
+            ESP_LOGW(TAG, "call: reconnected but %s", why);
+        } else if (reached_ && !refusal_.empty()) {
+            ESP_LOGW(TAG, "call: gateway refused the reconnect (%s)", refusal_.c_str());
+            break;   // 网关不认了，再试也没用
+        }
+        // 每次之间等 2 秒（挂断立即停）
+        for (int i = 0; i < 10 && !stop_reconnect_; ++i) vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    connect_timeout_ms_ = 20000;
+    if (stop_reconnect_) { reconnecting_ = false; link_reconnecting = false; return; }
+    if (ok) {
+        std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+        live_errors_ = 0; gate_reset_ = true;
+        CreateCall();
+        ESP_LOGW(TAG, "call: reconnected after %d s (%d attempts)", int((esp_timer_get_time() - started) / 1000000), attempt);
+    } else ESP_LOGW(TAG, "call: could not reconnect (%d attempts)", attempt);
+    reconnecting_ = false; link_reconnecting = false;
+    if (!ok) SetError("助理连接已断开，请重新进入");
+}
+#if CONFIG_VALET_DEV_LINK
+void ValetProtocol::DropLinkForTest() {
+    auto* self = live_instance.load();
+    if (!self || !self->opened_) { ESP_LOGW(TAG, "droplink: no open channel"); return; }
+    std::lock_guard<std::mutex> send(self->send_mutex_);
+    if (self->socket_) { ESP_LOGW(TAG, "droplink: closing the link"); self->socket_->Close(); }
+}
+#endif
 void ValetProtocol::Event(const char* type, const char* state, const std::string& text) {
     Json root(cJSON_CreateObject(), cJSON_Delete);
     cJSON_AddStringToObject(root.get(), "type", type);
@@ -405,7 +518,8 @@ bool ValetProtocol::Submit() {
 }
 void ValetProtocol::SendStopListening() { std::lock_guard<std::recursive_mutex> lock(state_mutex_); if (recording_.exchange(false)) { Submit(); recording_data_.clear(); } }
 void ValetProtocol::CreateCall() {
-    call_pending_ = true;
+    call_pending_ = true; call_ready_seen_ = false; recreate_at_ = 0;
+    playback_sequence_ = 0;   // 每个新通话的音频序号都从头算；留着旧通话的序号会把新回答的声音全当成过期包丢掉
     auto* root = valet::wire::Request("valet-call", "talk.session.create"); auto* params = cJSON_GetObjectItem(root, "params");
     cJSON_AddStringToObject(params, "mode", "realtime"); cJSON_AddStringToObject(params, "transport", "gateway-relay");
     cJSON_AddStringToObject(params, "brain", "agent-consult"); cJSON_AddStringToObject(params, "language", std::strcmp(Lang::Current(), "zh-CN") == 0 ? "zh" : "en");
@@ -556,7 +670,18 @@ void ValetProtocol::Handle(cJSON* root) {
     const std::string type = String(payload, "type"), owner = String(payload, "relaySessionId");
     if (type == "ready") { early_ready_ = owner; if (owner == call_id_) live_ready_ = true; }
     if (!speech_event && (call_id_.empty() || owner != call_id_)) return;
-    if (type == "close") { live_ready_ = false; SetError("通话已结束"); return; }
+    if (type == "close") {
+        live_ready_ = false;
+        if (!call_ready_seen_ && call_retries_ < 3 && opened_) {
+            ++call_retries_;
+            ESP_LOGW(TAG, "call: closed before it was ready, creating it again (%d/3)", call_retries_);
+            call_id_.clear(); early_ready_.clear();
+            recreate_at_ = esp_timer_get_time() + 2000000; call_retrying = true;
+            return;
+        }
+        call_retrying = false;
+        SetError("通话已结束"); return;
+    }
     if (type == "error") {
         // 和徽章一样：只有回答阶段的错误、或者错误一再出现，才结束通话。其余（比如 OpenAI 的
         // active-response：上一个回答还没完，新的回答请求被忽略）不影响通话，记下来继续
@@ -779,6 +904,18 @@ void ValetProtocol::DrainPlayback() {
     if (!tool_call_.empty() && esp_timer_get_time() > tool_deadline_) FinishTool("error", "处理超时（2 分钟没有结果）");
     const auto now = esp_timer_get_time();
     if (authenticated_ && now - last_ping_ > 20000000) { socket_->Ping(); last_ping_ = now; }
+    if (live_ready_ && !call_ready_seen_) { call_ready_seen_ = true; call_retries_ = 0; call_retrying = false; }
+    if (recreate_at_ && now >= recreate_at_ && authenticated_ && session_live_ && opened_) CreateCall();
+    // 连接悄悄断了（没有关闭帧也没有 RST，比如隧道挂了）：每 20 秒一次的 ping 连着 2 次没回音就当断线。
+    if (authenticated_ && session_live_ && opened_ && !reconnecting_ && socket_) {
+        const int64_t heard = socket_->LastReceiveUs();
+        if (heard && now - heard > 50000000) {
+            ESP_LOGW(TAG, "call: nothing from the gateway for %d s", int((now - heard) / 1000000));
+            authenticated_ = false; live_ready_ = false;
+            StartReconnect();
+            return;
+        }
+    }
     if (awaiting_ && now > ask_deadline_) { awaiting_ = false; SetError("助理回复超时，请重新提问"); }
     if (awaiting_ && !run_id_.empty() && now - last_poll_ > 3000000) {
         last_poll_ = now;
