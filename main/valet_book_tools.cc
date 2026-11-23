@@ -197,7 +197,7 @@ cJSON* Search(Book& book, const BookSource& source, const cJSON* request) {
     cJSON_AddNumberToObject(root, "chapters", chapters);
     if (current >= 0) cJSON_AddStringToObject(root, "current", bs::FormatPosition(source.chapter, current).c_str());
     ESP_LOGI(TAG, "search: %d hit(s), more=%d, chapters %d..%d of %d%s", count, more, from, next_chapter < 0 ? last : next_chapter - 1,
-             chapters, next_chapter >= 0 ? " (time budget reached)" : "");
+             chapters, next_chapter < 0 ? "" : more ? " (hit limit)" : " (time budget reached)");
     return root;
 }
 

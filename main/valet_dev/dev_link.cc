@@ -385,6 +385,15 @@ void ValetDevLinkHandle(const char* json) {
                 esp_wifi_disconnect();
             });
         }
+    } else if (!strcmp(cmd, "wifitx")) {
+        // 仅测试版：改 Wi-Fi 发射功率上限（单位 0.25 dBm），断开让它重连
+        int q = 0; Int(root, "q", &q, 0);
+        Application::GetInstance().Schedule([q] {
+            const esp_err_t err = esp_wifi_set_max_tx_power(int8_t(q));
+            int8_t now = 0; esp_wifi_get_max_tx_power(&now);
+            ESP_LOGW(TAG, "wifitx: set %d -> %s, now %d (x0.25 dBm)", q, esp_err_to_name(err), now);
+            esp_wifi_disconnect();
+        });
     } else if (!strcmp(cmd, "sd")) {
         // 仅测试版：SD 卡状态（挂上没有、卡在不在、上次初始化的错误）；mount=true 时重试挂载
         auto& sd = SdCardManager::GetInstance();

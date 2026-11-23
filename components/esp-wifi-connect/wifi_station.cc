@@ -415,8 +415,12 @@ void WifiStation::SetPowerSaveMode(bool /*enabled*/) {
 }
 
 // Static event handler functions
-void WifiStation::WifiEventHandler(void* arg, esp_event_base_t /*event_base*/, int32_t event_id, void* /*event_data*/) {
+void WifiStation::WifiEventHandler(void* arg, esp_event_base_t /*event_base*/, int32_t event_id, void* event_data) {
     auto* this_ = static_cast<WifiStation*>(arg);
+    if (event_id == WIFI_EVENT_STA_DISCONNECTED && event_data) {   // 连不上时要知道路由器给的原因
+        const auto* d = static_cast<const wifi_event_sta_disconnected_t*>(event_data);
+        ESP_LOGW(TAG, "disconnected: reason %d, rssi %d", d->reason, d->rssi);
+    }
     wifi_mode_t mode = WIFI_MODE_NULL;
     if (!this_->IsUserEnabled() || this_->lp_paused_ || esp_wifi_get_mode(&mode) != ESP_OK || (mode & WIFI_MODE_STA) == 0) {
         if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
