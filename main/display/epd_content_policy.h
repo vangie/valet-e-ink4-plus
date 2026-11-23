@@ -5,7 +5,8 @@
 // visible content opts into gray. Everything else, including icons, is binary.
 enum class EpdContentRole {
     Monochrome, FastMonochrome, Shelf, Cover, Illustration, WallpaperThumbnail,
-    WallpaperPreview, Photo, ReaderAntialias, AssistantImage
+    WallpaperPreview, Photo, ReaderAntialias, AssistantImage,
+    GrayPanel   // a UI overlay drawn in gray while it is open (the quick panel): fills, text and icons
 };
 // FastMonochrome forces its whole subtree to binary without changing saved images.
 void EpdSetContentRole(lv_obj_t* object, EpdContentRole role);

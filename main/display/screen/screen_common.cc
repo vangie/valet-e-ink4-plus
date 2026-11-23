@@ -1,4 +1,5 @@
 #include "screen_common.h"
+#include "status_bar_icons.h"
 #include "screen_frontlight.h"
 #include "screen_common_ui.h"
 #include "screen_common_nav.h"
@@ -409,6 +410,7 @@ EpdStatusBar ScreenCreateStatusBar(lv_obj_t* scr) {
     lv_obj_center(low_battery_label);
     lv_obj_add_flag(out.low_battery_popup, LV_OBJ_FLAG_HIDDEN);
 
+    StatusBarIconsAttach(out);
     if (auto* disp = LvAdapterEpdiy::Instance()) {
         disp->BindStatusBar(out.status_label, out.notification_label, out.network_label,
                             out.battery_label, out.battery_pct_label, out.mute_label);

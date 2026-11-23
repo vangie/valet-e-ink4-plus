@@ -1,76 +1,84 @@
-#include "assets/lang_screen.h"
 #include "assets/lang_config.h"
 #pragma GCC optimize("O1")
 
+// 快捷面板（从状态栏往下拉）：
+//  - 上面两块：网络（点一下在 自动 → 4G → Wi-Fi 之间轮换）、代理（点一下开 / 关当前这条网的代理）；长按进对应的设置页。
+//  - 下面两排：前光、色温，各 10 格，点格子调到那一档；前光的灯泡图标就是开关。
+//    图标跟着档位变：灯泡 关 / 暗 / 亮，温度计 冷 / 中 / 暖。音量有实体键，黑色深度调一次就不动，都不放这里。
+// 面板打开时整屏按灰度画（深灰块、平滑的图标），关掉后回到黑白。
+
 #include "screen_frontlight.h"
 #include "screen_common.h"
-#include "screen_text.h"
-#include "screen_wifi.h"
 #include "ota_upgrade_screen/ota_upgrade_screen.h"
 #include "standby_screen/standby_screen.h"
+#include "settings_screen/settings_screen.h"
+#include "settings_screen/settings_frontlight_tab.h"
 #include "dual_network_board.h"
+#include "epd_content_policy.h"
 #include "fontpack_lvgl.h"
 #include "frontlight.h"
-#include "quick_control_icons.h"
 #include "haptic_feedback.h"
+#include "home_icon_source.h"
 #include "lv_adapter_epdiy.h"
 #include "settings.h"
-#include "settings_screen/settings_frontlight_tab.h"
-#include "ui_scale.h"
+#include "status_icons.h"
+#include "valet_net/proxy.h"
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <string>
+
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <wifi_station.h>
-#include <font_awesome.h>
 
-LV_FONT_DECLARE(font_awesome_30_1);
-
-#define TAG "QuickControls"
+#define TAG "QuickPanel"
 
 namespace {
-constexpr int kDesignWidth = 743; // 参考布局宽度
-constexpr int kDesignHeight = 327; // 参考布局高度
-constexpr int kDefaultBrightness = 40; // 零亮度重新开启时使用的亮度
+constexpr int kDefaultBrightness = 40;   // 零亮度重新开启时使用的亮度
+constexpr int kLevels = 10;              // 每排几格
+// 尺寸（面板像素），照模拟界面 × 2.125
+constexpr int kPad = 22, kTileH = 94, kTileGap = 16, kTileBorder = 2;
+constexpr int kRowH = 52, kRowGap = 10, kRowIconW = 52, kBlockH = 34, kBlockGap = 5, kValueW = 64;
+constexpr int kGripW = 64, kGripH = 6;
+const lv_color_t kDark = lv_color_hex(0x4a4a48);   // 开着的块、亮着的格子：深灰，不用纯黑
+const lv_color_t kDim = lv_color_hex(0x9a9a98);    // 没设置的代理：浅灰边
 
-enum class WifiState {
-    Unknown = -1, // 尚未绘制
-    Switching, // 开关切换中
-    Failed, // 开关操作失败
-    Off, // Wi-Fi 已关闭或当前为蜂窝网络
-    AccessPoint, // 热点已开启
-    Connected, // 已连接无线网络
-    Connecting, // 正在连接无线网络
-    Disconnected, // 已开启但未连接
+const char* T(const char* zh, const char* en) { return std::strcmp(Lang::Current(), "zh-CN") == 0 ? zh : en; }
+
+struct Tile {
+    lv_obj_t* box = nullptr;
+    lv_obj_t* icon = nullptr;
+    lv_obj_t* title = nullptr;
+    lv_obj_t* sub = nullptr;
+    lv_obj_t* corner = nullptr;
+    std::string drawn;   // 上次画出来的内容；没变就不动对象，免得墨水屏反复刷
 };
-
+struct Row {
+    lv_obj_t* row = nullptr;
+    lv_obj_t* icon = nullptr;
+    lv_obj_t* blocks[kLevels] = {};
+    lv_obj_t* value = nullptr;
+};
 struct PanelUi {
-    lv_obj_t* root = nullptr; // 全屏触摸遮罩
-    EpdStatusBar previous_status; // 原页面状态栏绑定
-    lv_obj_t* panel_status_label = nullptr; // 下拉状态栏绑定标识
-    lv_obj_t* wifi = nullptr; // Wi-Fi 用户开关
-    lv_obj_t* wifi_icon = nullptr; // Wi-Fi 图标
-    lv_obj_t* wifi_title = nullptr; // Wi-Fi 标题
-    lv_obj_t* wifi_status = nullptr; // 网络状态
-    lv_obj_t* wifi_paw = nullptr; // Wi-Fi 右侧猫爪
-    lv_obj_t* light_switch = nullptr; // 前光开关
-    lv_obj_t* light_title = nullptr; // 前光标题
-    lv_obj_t* light_status = nullptr; // 前光开关状态
-    lv_obj_t* light_icon = nullptr; // 前光开关图标
-    lv_obj_t* brightness = nullptr; // 亮度滑条
-    lv_obj_t* warmth = nullptr; // 色温滑条
-    lv_timer_t* timer = nullptr; // 网络状态刷新
-    WifiState wifi_state = WifiState::Unknown; // 已绘制的网络状态
-    int light_state = -1; // 已绘制的前光开关状态
+    lv_obj_t* root = nullptr;          // 全屏：圆点遮住下面的页面，点空白处收起
+    EpdStatusBar previous_status;      // 原页面状态栏绑定
+    lv_obj_t* panel_status_label = nullptr;
+    Tile link, proxy;
+    Row light, warm;
+    lv_timer_t* timer = nullptr;       // 网络状态刷新
 };
 PanelUi s_ui;
+std::atomic<bool> s_switching{false};    // 正在换上网方式（后台任务）
 std::atomic<bool> s_save_running{false};
-std::atomic<uint32_t> s_saved_value{0}; // 低三个字节依次保存亮度、暖光比例和通道组合
-bool s_light_dirty = false; // LVGL 上下文持有，保存任务创建失败后跨面板保留
+std::atomic<uint32_t> s_saved_value{0};  // 低三个字节依次保存亮度、暖光比例和通道组合
+bool s_light_dirty = false;              // LVGL 上下文持有，保存任务创建失败后跨面板保留
 
+// ── 前光保存（与原面板相同：后台写 NVS） ──
 void SaveLightTask(void*) {
     for (;;) {
         const uint32_t value = s_saved_value.load();
@@ -105,40 +113,208 @@ bool LightIsOn() {
     return light.cct() != FrontlightCct::kOff && light.target_brightness() > 0;
 }
 
-void RefreshLightSwitch() {
-    const bool on = LightIsOn();
-    if (s_ui.light_state == static_cast<int>(on)) return;
-    s_ui.light_state = static_cast<int>(on);
-    lv_obj_set_style_bg_color(s_ui.light_switch, on ? lv_color_black() : lv_color_white(), 0);
-    for (auto* label : {s_ui.light_title, s_ui.light_status})
-        lv_obj_set_style_text_color(label, on ? lv_color_white() : lv_color_black(), 0);
-    lv_label_set_text(s_ui.light_status, on ? Lang::Strings::QUICK_ENABLED : Lang::Strings::QUICK_DISABLED);
-    for (auto* slider : {s_ui.brightness, s_ui.warmth})
-        lv_obj_set_style_bg_color(slider, on ? lv_color_black() : lv_color_white(), LV_PART_INDICATOR);
-    lv_image_set_src(s_ui.light_icon, on ? &kQuickBrightnessImage.image : &kQuickBrightnessMask.image);
-    lv_obj_set_style_image_recolor(s_ui.light_icon, lv_color_black(), 0);
-    lv_obj_set_style_image_recolor_opa(s_ui.light_icon, on ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+// ── 小部件 ──
+lv_obj_t* Box(lv_obj_t* parent, int x, int y, int width, int height) {
+    auto* obj = lv_obj_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_set_pos(obj, x, y);
+    lv_obj_set_size(obj, width, height);
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    return obj;
 }
 
-void LightChanged(lv_event_t* event) {
-    auto& light = Frontlight::GetInstance();
-    const auto code = lv_event_get_code(event);
-    if (code == LV_EVENT_VALUE_CHANGED) {
-        auto* slider = static_cast<lv_obj_t*>(lv_event_get_target(event));
-        const auto value = static_cast<uint8_t>(lv_slider_get_value(slider));
-        if (slider == s_ui.brightness) {
-            light.SetBrightness(value, false);
-            if (light.cct() == FrontlightCct::kOff) light.SetWarmth(light.warmth());
-        } else {
-            light.SetWarmth(value);
-            if (light.target_brightness() == 0) light.SetBrightness(kDefaultBrightness, false);
-            lv_slider_set_value(s_ui.brightness, light.target_brightness(), LV_ANIM_OFF);
-        }
-        s_light_dirty = true;
-        RefreshLightSwitch();
-    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
-        SaveLight();
+lv_obj_t* Label(lv_obj_t* parent, const lv_font_t* font) {
+    auto* label = lv_label_create(parent);
+    lv_label_set_text(label, "");
+    lv_obj_set_style_text_font(label, font, 0);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    return label;
+}
+
+lv_obj_t* IconImage(lv_obj_t* parent) {
+    auto* image = lv_image_create(parent);
+    lv_obj_clear_flag(image, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
+    return image;
+}
+
+void SetIcon(lv_obj_t* image, ValetIcon icon, lv_color_t color) {
+    if (lv_image_get_src(image) != &valet_icons[icon]) lv_image_set_src(image, &valet_icons[icon]);
+    lv_obj_set_style_image_recolor(image, color, 0);
+}
+
+void SetText(lv_obj_t* label, const char* text) {
+    const char* cur = lv_label_get_text(label);
+    if (!cur || std::strcmp(cur, text) != 0) lv_label_set_text(label, text);
+}
+
+// ── 网络、代理两块 ──
+DualNetworkBoard* Dual() { return dynamic_cast<DualNetworkBoard*>(&Board::GetInstance()); }
+
+bool ProxyUsable(const valet::proxy::Prefs& p) {
+    return p.HasAddress() && p.kind != net_proxy::Kind::kNone && (!p.PasswordOnly() || !p.password.empty());
+}
+
+const char* ProxyKindName(net_proxy::Kind kind) {
+    switch (kind) {
+        case net_proxy::Kind::kHttp: return "HTTP";
+        case net_proxy::Kind::kSocks5: return "SOCKS5";
+        case net_proxy::Kind::kShadowsocks: return "SS";
+        case net_proxy::Kind::kTrojan: return "Trojan";
+        default: return "";
     }
+}
+
+// on：深灰底白字；dim：浅灰边（还没设置）；否则白底黑边
+void PaintTile(Tile& tile, ValetIcon icon, const char* title, const char* sub, const char* corner, bool on, bool dim) {
+    char key[160];
+    std::snprintf(key, sizeof(key), "%d|%s|%s|%s|%d|%d", int(icon), title, sub, corner, on, dim);
+    if (tile.drawn == key) return;
+    tile.drawn = key;
+    const lv_color_t fg = on ? lv_color_white() : lv_color_black();
+    lv_obj_set_style_bg_color(tile.box, on ? kDark : lv_color_white(), 0);
+    lv_obj_set_style_border_color(tile.box, on ? kDark : dim ? kDim : lv_color_black(), 0);
+    SetIcon(tile.icon, icon, fg);
+    for (auto* label : {tile.title, tile.sub, tile.corner}) lv_obj_set_style_text_color(label, fg, 0);
+    SetText(tile.title, title);
+    SetText(tile.sub, sub);
+    SetText(tile.corner, corner);
+    lv_obj_align(tile.icon, LV_ALIGN_LEFT_MID, 18 + (56 - int(valet_icons[icon].header.w)) / 2, 0);   // 图标在左边 56 宽的格里居中
+}
+
+void RefreshTiles(lv_timer_t* = nullptr) {
+    if (!s_ui.root) return;
+    auto* dual = Dual();
+    const bool cell = dual && dual->GetNetworkType() == NetworkType::CELLULAR;
+    const bool auto_mode = dual && dual->GetNetworkMode() == NetworkMode::AUTO;
+    std::string sub;
+    if (s_switching.load()) {
+        sub = T("正在换…", "Switching…");
+    } else if (cell) {
+        sub = Board::GetInstance().IsNetworkReady() ? T("已连上", "Connected") : T("正在连", "Connecting");
+    } else {
+        auto& wifi = WifiStation::GetInstance();
+        wifi_ap_record_t ap{};
+        if (wifi.IsUserEnabled() && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) sub = reinterpret_cast<const char*>(ap.ssid);
+        else if (wifi.IsUserEnabled() && wifi.IsLinkInProgress()) sub = T("正在连", "Connecting");
+        // 空闲省电时网络会先睡下，要用时再连：这时写记着的那个网，不写「没连上」
+        else if (wifi.IsUserEnabled() && !wifi.GetSsid().empty()) sub = wifi.GetSsid();
+        else sub = T("没连上", "Offline");
+    }
+    PaintTile(s_ui.link, cell ? VALET_ICON_Q_CELL : VALET_ICON_Q_WIFI, cell ? "4G" : "Wi-Fi", sub.c_str(),
+              auto_mode ? T("自动", "Auto") : "", true, false);
+
+    const auto prefs = valet::proxy::Get();
+    const bool usable = ProxyUsable(prefs);
+    const bool on = usable && (valet::proxy::OnWifi() ? prefs.on_wifi : prefs.on_cell);
+    PaintTile(s_ui.proxy, VALET_ICON_Q_PROXY, T("代理", "Proxy"), usable ? ProxyKindName(prefs.kind) : T("还没设置", "Not set up"),
+              !usable ? "" : on ? T("开启", "On") : T("关闭", "Off"), on, !usable);
+}
+
+struct ModeJob { NetworkMode mode; };
+void SetModeTask(void* arg) {
+    auto* job = static_cast<ModeJob*>(arg);
+    auto* dual = Dual();
+    if (dual) dual->SetNetworkMode(job->mode);
+    delete job;
+    s_switching.store(false);
+    ScreenLvAsync([](void*) { RefreshTiles(); });
+    vTaskDelete(nullptr);
+}
+
+// 自动 → 4G → Wi-Fi → 自动。换的时候不重启；通话中由网络层自己挡住。
+void OnLinkClicked(lv_event_t*) {
+    auto* dual = Dual();
+    if (!dual || s_switching.load()) return;
+    const auto mode = dual->GetNetworkMode();
+    const auto next = mode == NetworkMode::AUTO ? NetworkMode::CELLULAR
+                    : mode == NetworkMode::CELLULAR ? NetworkMode::WIFI : NetworkMode::AUTO;
+    s_switching.store(true);
+    RefreshTiles();
+    ScreenShowToast(next == NetworkMode::AUTO ? T("上网方式：自动", "Network: Auto")
+                    : next == NetworkMode::CELLULAR ? T("上网方式：4G", "Network: 4G") : T("上网方式：Wi-Fi", "Network: Wi-Fi"));
+    auto* job = new ModeJob{next};
+    // 内部内存的栈：切换会停 Wi-Fi 驱动、写 NVS
+    if (xTaskCreate(SetModeTask, "quick_net", 6144, job, 5, nullptr) != pdPASS) {
+        delete job;
+        s_switching.store(false);
+        RefreshTiles();
+    }
+}
+
+void OnProxyClicked(lv_event_t*) {
+    auto prefs = valet::proxy::Get();
+    if (!ProxyUsable(prefs)) {
+        ScreenFrontlightHide();
+        ScreenNavigateTo(SettingsScreen::CreateProxy);
+        return;
+    }
+    // 只开关现在这条网的代理，另一条网的开关不动
+    bool& on = valet::proxy::OnWifi() ? prefs.on_wifi : prefs.on_cell;
+    on = !on;
+    if (!valet::proxy::Update(prefs)) return;
+    ScreenShowToast(on ? T("代理已开启", "Proxy on") : T("代理已关闭", "Proxy off"));
+    RefreshTiles();
+}
+
+void OpenSettings(lv_event_t* e) {
+    const bool proxy = lv_event_get_user_data(e) != nullptr;
+    ScreenFrontlightHide();
+    ScreenNavigateTo(proxy ? SettingsScreen::CreateProxy : SettingsScreen::CreateNetwork);
+}
+
+void BuildTile(Tile& tile, lv_obj_t* panel, int x, int y, int w, lv_event_cb_t on_click, bool proxy) {
+    tile.box = Box(panel, x, y, w, kTileH);
+    lv_obj_set_style_bg_opa(tile.box, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(tile.box, kTileBorder, 0);
+    lv_obj_add_flag(tile.box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(tile.box, LV_OBJ_FLAG_EVENT_BUBBLE);
+    HapticAttachClick(tile.box);
+    // 长按进设置；短按才切换（长按之后不再当作一次点击）
+    lv_obj_add_event_cb(tile.box, on_click, LV_EVENT_SHORT_CLICKED, nullptr);
+    lv_obj_add_event_cb(tile.box, OpenSettings, LV_EVENT_LONG_PRESSED, proxy ? &s_ui : nullptr);
+    tile.icon = IconImage(tile.box);
+    const auto* big = fontpack_lv_font_get(30, 2);
+    const auto* small = fontpack_lv_font_get(25, 2);
+    constexpr int kTextX = 86;
+    tile.title = Label(tile.box, big);
+    lv_obj_set_pos(tile.title, kTextX, 12);
+    tile.sub = Label(tile.box, small);
+    lv_label_set_long_mode(tile.sub, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(tile.sub, w - kTextX - 12);
+    lv_obj_set_pos(tile.sub, kTextX, 52);
+    tile.corner = Label(tile.box, small);
+    lv_obj_align(tile.corner, LV_ALIGN_TOP_RIGHT, -14, 8);
+}
+
+// ── 前光、色温两排 ──
+void RefreshRows() {
+    if (!s_ui.root) return;
+    auto& light = Frontlight::GetInstance();
+    const bool on = LightIsOn();
+    const int bright = light.target_brightness(), warm = light.warmth();
+    const auto paint = [](Row& row, int value, bool off) {
+        // 开着就至少亮一格（亮度 2 也是开着）
+        const int lit = off ? 0 : std::max(value > 0 ? 1 : 0, (value + 5) / 10);
+        for (int i = 0; i < kLevels; ++i) {
+            const bool fill = i < lit;
+            lv_obj_set_style_bg_color(row.blocks[i], fill ? kDark : lv_color_white(), 0);
+            lv_obj_set_style_border_color(row.blocks[i], fill ? kDark : lv_color_black(), 0);
+        }
+    };
+    paint(s_ui.light, bright, !on);
+    paint(s_ui.warm, warm, false);
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d", bright);
+    SetText(s_ui.light.value, on ? text : T("关", "Off"));
+    std::snprintf(text, sizeof(text), "%d", warm);
+    SetText(s_ui.warm.value, text);
+    SetIcon(s_ui.light.icon, !on ? VALET_ICON_ROW_BULB_OFF : bright <= 50 ? VALET_ICON_ROW_BULB_MIN : VALET_ICON_ROW_BULB_MAX,
+            lv_color_black());
+    SetIcon(s_ui.warm.icon, warm < 40 ? VALET_ICON_ROW_THERMO_COLD : warm > 60 ? VALET_ICON_ROW_THERMO_WARM
+                                                                                : VALET_ICON_ROW_THERMO_MID, lv_color_black());
+    // 前光关着时色温那排变淡：调了也看不出来
+    lv_obj_set_style_opa(s_ui.warm.row, on ? LV_OPA_COVER : LV_OPA_50, 0);
 }
 
 void ToggleLight(lv_event_t*) {
@@ -149,151 +325,64 @@ void ToggleLight(lv_event_t*) {
         light.SetWarmth(light.warmth());
         if (light.target_brightness() == 0) light.SetBrightness(kDefaultBrightness, false);
     }
-    lv_slider_set_value(s_ui.brightness, light.target_brightness(), LV_ANIM_OFF);
     s_light_dirty = true;
-    RefreshLightSwitch();
+    RefreshRows();
     SaveLight();
 }
 
-bool WifiNetworkSelected() {
-    auto* dual = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
-    return dual == nullptr || dual->GetNetworkType() == NetworkType::WIFI;
-}
-
-void RefreshWifi(lv_timer_t*) {
-    if (!s_ui.root) return;
-    const bool available = WifiNetworkSelected();
-    auto* wifi = available ? &WifiStation::GetInstance() : nullptr;
-    const bool enabled = wifi != nullptr && wifi->IsUserEnabled();
-    const auto switch_state = ScreenWifiGetSwitchState();
-    wifi_mode_t mode = WIFI_MODE_NULL;
-    const bool ap = esp_wifi_get_mode(&mode) == ESP_OK && (mode & WIFI_MODE_AP) != 0;
-    wifi_ap_record_t ap_info = {};
-    const bool connected = enabled && esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK;
-    WifiState state = WifiState::Off;
-    if (available) {
-        if (switch_state == ScreenWifiSwitchState::kSwitching) state = WifiState::Switching;
-        else if (switch_state == ScreenWifiSwitchState::kFailed) state = WifiState::Failed;
-        else if (!enabled) state = WifiState::Off;
-        else if (ap) state = WifiState::AccessPoint;
-        else if (connected) state = WifiState::Connected;
-        else if (wifi->IsLinkInProgress()) state = WifiState::Connecting;
-        else state = WifiState::Disconnected;
+// 点第 n 格调到 n×10；再点一下已经是这一档的格子，退一档（点最左边那格可以调到 0 / 关）
+void OnBlockClicked(lv_event_t* e) {
+    const int code = int(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+    const bool is_light = code >= 100;
+    const int value = (code % 100) * 10;
+    auto& light = Frontlight::GetInstance();
+    if (is_light) {
+        const bool on = LightIsOn();
+        const int next = !on ? value : light.target_brightness() == value ? value - 10 : value;
+        if (next <= 0) {
+            light.SetCct(FrontlightCct::kOff);
+        } else {
+            light.SetBrightness(uint8_t(next), false);
+            if (light.cct() == FrontlightCct::kOff) light.SetWarmth(light.warmth());
+        }
+    } else {
+        light.SetWarmth(uint8_t(light.warmth() == value ? value - 10 : value));
+        if (light.target_brightness() == 0) light.SetBrightness(kDefaultBrightness, false);
     }
-    // 网络状态不变时不改对象，避免周期性触发墨水屏刷新。
-    if (state == s_ui.wifi_state) return;
-    s_ui.wifi_state = state;
-    const char* status[] = {Lang::Strings::QUICK_SWITCHING, Lang::Strings::QUICK_FAILED, Lang::Strings::QUICK_DISABLED, Lang::Strings::QUICK_ENABLED, Lang::Strings::QUICK_CONNECTED, Lang::Strings::QUICK_CONNECTING, Lang::Strings::QUICK_DISCONNECTED};
-    lv_label_set_text(s_ui.wifi_status, status[static_cast<int>(state)]);
-    lv_obj_update_layout(s_ui.wifi);
-    ScreenFitLabel(s_ui.wifi_status, lv_obj_get_width(s_ui.wifi_status),
-                   lv_obj_get_height(s_ui.wifi) * 2 / 5 - 4, fontpack_lv_font_get(25, 2));
-    lv_obj_set_style_text_align(s_ui.wifi_status, LV_TEXT_ALIGN_LEFT, 0);
-    const auto foreground = enabled ? lv_color_white() : lv_color_black();
-    lv_obj_set_style_bg_color(s_ui.wifi, enabled ? lv_color_black() : lv_color_white(), 0);
-    for (auto* label : {s_ui.wifi_icon, s_ui.wifi_title, s_ui.wifi_status})
-        lv_obj_set_style_text_color(label, foreground, 0);
-    lv_obj_set_style_image_recolor(s_ui.wifi_paw, foreground, 0);
-    lv_obj_set_style_image_recolor_opa(s_ui.wifi_paw, LV_OPA_COVER, 0);
-    if (!available || switch_state == ScreenWifiSwitchState::kSwitching) lv_obj_add_state(s_ui.wifi, LV_STATE_DISABLED);
-    else lv_obj_remove_state(s_ui.wifi, LV_STATE_DISABLED);
+    s_light_dirty = true;
+    RefreshRows();
+    SaveLight();
 }
 
-void ToggleWifi(lv_event_t*) {
-    ScreenWifiToggle();
-    RefreshWifi(nullptr);
-}
-
-lv_obj_t* Box(lv_obj_t* parent, int x, int y, int width, int height) {
-    auto* obj = lv_obj_create(parent);
-    lv_obj_remove_style_all(obj);
-    lv_obj_set_pos(obj, x, y);
-    lv_obj_set_size(obj, width, height);
-    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-    return obj;
-}
-
-lv_obj_t* Label(lv_obj_t* parent, const char* text) {
-    auto* label = lv_label_create(parent);
-    lv_label_set_text(label, text);
-    lv_obj_set_style_text_font(label, fontpack_lv_font_ui(), 0);
-    lv_obj_set_style_text_color(label, lv_color_black(), 0);
-    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
-    return label;
-}
-
-lv_obj_t* NativeIcon(lv_obj_t* parent, const lv_image_dsc_t* source) {
-    auto* image = lv_image_create(parent);
-    lv_image_set_src(image, source);
-    lv_obj_clear_flag(image, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(image, LV_OBJ_FLAG_FLOATING);
-    return image;
-}
-
-void DrawSliderIcon(lv_event_t* event) {
-    auto* icon = static_cast<lv_obj_t*>(lv_event_get_target(event));
-    auto* slider = lv_obj_get_parent(icon);
-    auto* layer = lv_event_get_layer(event);
-    lv_area_t icon_area, slider_area;
-    lv_obj_get_coords(icon, &icon_area);
-    lv_obj_get_coords(slider, &slider_area);
-    const int fill_top = slider_area.y2 + 1 -
-        lv_area_get_height(&slider_area) * lv_slider_get_value(slider) / 100;
-    const auto clip = layer->_clip_area;
-    const bool on = LightIsOn();
-    lv_draw_image_dsc_t dsc;
-    lv_draw_image_dsc_init(&dsc);
-    dsc.src = lv_event_get_user_data(event);
-    dsc.recolor_opa = LV_OPA_COVER;
-    // 两段裁剪共用原尺寸透明轮廓，边界与无内边距的竖向滑条填充一致。
-    for (bool filled : {false, true}) {
-        lv_area_t part = icon_area;
-        if (on) {
-            if (filled) part.y1 = std::max<int>(part.y1, fill_top);
-            else part.y2 = std::min<int>(part.y2, fill_top - 1);
-        } else if (filled) continue;
-        part.x1 = std::max(part.x1, clip.x1);
-        part.x2 = std::min(part.x2, clip.x2);
-        part.y1 = std::max(part.y1, clip.y1);
-        part.y2 = std::min(part.y2, clip.y2);
-        if (part.x1 > part.x2 || part.y1 > part.y2) continue;
-        layer->_clip_area = part;
-        dsc.recolor = filled ? lv_color_white() : lv_color_black();
-        lv_draw_image(layer, &dsc, &icon_area);
+void BuildRow(Row& row, lv_obj_t* panel, int y, int width, bool is_light) {
+    row.row = Box(panel, kPad, y, width - 2 * kPad, kRowH);
+    auto* icon_box = Box(row.row, 0, 0, kRowIconW, kRowH);
+    row.icon = IconImage(icon_box);
+    lv_obj_center(row.icon);
+    if (is_light) {
+        lv_obj_add_flag(icon_box, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(icon_box);
+        lv_obj_add_event_cb(icon_box, ToggleLight, LV_EVENT_CLICKED, nullptr);
     }
-    layer->_clip_area = clip;
-}
-
-lv_obj_t* Slider(lv_obj_t* parent, int x, int y, int width, int height, int value, bool warmth) {
-    auto* slider = lv_slider_create(parent);
-    lv_obj_remove_style_all(slider);
-    lv_obj_set_pos(slider, x, y);
-    lv_obj_set_size(slider, width, height);
-    lv_slider_set_orientation(slider, LV_SLIDER_ORIENTATION_VERTICAL);
-    lv_slider_set_range(slider, 0, 100);
-    lv_slider_set_value(slider, value, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(slider, lv_color_white(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(slider, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_post(slider, true, LV_PART_MAIN);
-    lv_obj_set_style_border_color(slider, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_radius(slider, width / 5, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(slider, lv_color_black(), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(slider, 0, LV_PART_INDICATOR);
-    lv_obj_set_style_opa(slider, LV_OPA_TRANSP, LV_PART_KNOB);
-    lv_obj_clear_flag(slider, LV_OBJ_FLAG_EVENT_BUBBLE);
-    lv_obj_clear_flag(slider, LV_OBJ_FLAG_SCROLLABLE);
-    for (auto code : {LV_EVENT_VALUE_CHANGED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST})
-        lv_obj_add_event_cb(slider, LightChanged, code, nullptr);
-    const auto* mask = warmth ? &kQuickColorTempMask.image : &kQuickBrightnessMask.image;
-    auto* icon = Box(slider, 0, 0, mask->header.w, mask->header.h);
-    lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(icon, LV_OBJ_FLAG_FLOATING);
-    lv_obj_add_event_cb(icon, DrawSliderIcon, LV_EVENT_DRAW_MAIN,
-                        const_cast<lv_image_dsc_t*>(mask));
-    lv_obj_align(icon, LV_ALIGN_BOTTOM_MID, 0, -UiSy(8));
-    return slider;
+    const int blocks_x = kRowIconW + 14;
+    const int blocks_w = width - 2 * kPad - blocks_x - kValueW - 8;
+    const int block_w = (blocks_w - (kLevels - 1) * kBlockGap) / kLevels;
+    for (int i = 0; i < kLevels; ++i) {
+        auto* block = Box(row.row, blocks_x + i * (block_w + kBlockGap), (kRowH - kBlockH) / 2, block_w, kBlockH);
+        lv_obj_set_style_bg_opa(block, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(block, 2, 0);
+        lv_obj_add_flag(block, LV_OBJ_FLAG_CLICKABLE);
+        // 格子小，点的范围往上下各扩一点
+        lv_obj_set_ext_click_area(block, 8);
+        HapticAttachClick(block);
+        lv_obj_add_event_cb(block, OnBlockClicked, LV_EVENT_CLICKED,
+                            reinterpret_cast<void*>(intptr_t((is_light ? 100 : 0) + i + 1)));
+        row.blocks[i] = block;
+    }
+    row.value = Label(row.row, fontpack_lv_font_get(25, 2));
+    lv_obj_set_width(row.value, kValueW);
+    lv_obj_set_style_text_align(row.value, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(row.value, LV_ALIGN_RIGHT_MID, 0, 0);
 }
 } // namespace
 
@@ -301,14 +390,8 @@ bool ScreenFrontlightIsVisible() {
     return s_ui.root != nullptr;
 }
 
-bool ScreenFrontlightOwnsDrag(int x, int y) {
-    for (auto* slider : {s_ui.brightness, s_ui.warmth}) {
-        if (!slider) continue;
-        lv_area_t area;
-        lv_obj_get_coords(slider, &area);
-        if (x >= area.x1 && x <= area.x2 && y >= area.y1 && y <= area.y2) return true;
-    }
-    return false;
+bool ScreenFrontlightOwnsDrag(int, int) {
+    return false;   // 没有滑条了：格子是点的
 }
 
 void ScreenFrontlightHide() {
@@ -325,6 +408,8 @@ void ScreenFrontlightShow() {
         s_ui.root || !Frontlight::GetInstance().initialized()) return;
     auto* root = Box(lv_layer_top(), 0, 0, LV_HOR_RES, LV_VER_RES);
     s_ui.root = root;
+    ScreenApplyPopupDots(root);
+    lv_obj_add_flag(root, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(root, [](lv_event_t*) {
         if (s_ui.timer) lv_timer_delete(s_ui.timer);
         if (auto* display = LvAdapterEpdiy::Instance(); display &&
@@ -343,69 +428,35 @@ void ScreenFrontlightShow() {
     lv_obj_set_style_bg_color(status.bar, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(status.bar, LV_OPA_COVER, 0);
     if (auto* display = LvAdapterEpdiy::Instance()) display->UpdateStatusBar(true);
+
     const int width = LV_HOR_RES;
-    const int panel_y = ScreenStatusBarHeight();
-    const int height = std::min<int>(LV_VER_RES - panel_y, width * kDesignHeight / kDesignWidth);
-    const int radius = width * 28 / kDesignWidth;
-    auto* clip = Box(root, 0, panel_y, width, height);
-    // 将顶部圆角移出矩形裁剪区，保留底部圆角和连续的两侧边框。
-    auto* panel = Box(clip, 0, -radius, width, height + radius);
+    const int tiles_y = kPad;
+    const int rows_y = tiles_y + kTileH + 18;
+    const int grip_y = rows_y + 2 * kRowH + kRowGap + 16;
+    const int height = grip_y + kGripH + 16;
+    auto* panel = Box(root, 0, ScreenStatusBarHeight(), width, height);
     lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(panel, lv_color_black(), 0);
     lv_obj_set_style_border_width(panel, 2, 0);
-    lv_obj_set_style_border_side(panel, static_cast<lv_border_side_t>(
-        LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_RIGHT | LV_BORDER_SIDE_BOTTOM), 0);
-    lv_obj_set_style_radius(panel, radius, 0);
-    lv_obj_set_style_clip_corner(panel, true, 0);
+    lv_obj_set_style_border_side(panel, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);   // 点面板里的空白不收起
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_EVENT_BUBBLE);
-    const int top = radius + height * 40 / kDesignHeight;
-    const int slider_h = height * 249 / kDesignHeight;
-    const int slider_w = width * 122 / kDesignWidth;
-    const int wifi_h = height * 107 / kDesignHeight;
-    const auto* status_font = fontpack_lv_font_get(25, 2);
-    const int switch_w = width * 310 / kDesignWidth;
-    s_ui.wifi = Box(panel, width * 58 / kDesignWidth, top, switch_w, wifi_h);
-    lv_obj_set_style_bg_opa(s_ui.wifi, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(s_ui.wifi, 2, 0);
-    lv_obj_set_style_border_color(s_ui.wifi, lv_color_black(), 0);
-    lv_obj_set_style_radius(s_ui.wifi, wifi_h * 2 / 5, 0);
-    HapticAttachClick(s_ui.wifi);
-    lv_obj_add_event_cb(s_ui.wifi, ToggleWifi, LV_EVENT_CLICKED, nullptr);
-    s_ui.wifi_icon = Label(s_ui.wifi, FONT_AWESOME_WIFI);
-    lv_obj_set_style_text_font(s_ui.wifi_icon, &font_awesome_30_1, 0);
-    lv_obj_set_style_transform_scale(s_ui.wifi_icon, 384, 0);
-    lv_obj_align(s_ui.wifi_icon, LV_ALIGN_LEFT_MID, width * 25 / kDesignWidth, -width * 8 / kDesignWidth);
-    s_ui.wifi_title = Label(s_ui.wifi, "Wi-Fi");
-    lv_obj_set_pos(s_ui.wifi_title, width * 100 / kDesignWidth, wifi_h / 5);
-    s_ui.wifi_status = Label(s_ui.wifi, "");
-    lv_obj_set_width(s_ui.wifi_status, switch_w - kQuickCatPawImage.image.header.w - 4 - width * 100 / kDesignWidth - 8);
-    lv_obj_set_style_text_font(s_ui.wifi_status, status_font, 0);
-    lv_obj_set_height(s_ui.wifi_status, status_font->line_height);
-    lv_label_set_long_mode(s_ui.wifi_status, LV_LABEL_LONG_DOT);
-    lv_obj_set_pos(s_ui.wifi_status, width * 100 / kDesignWidth, wifi_h * 3 / 5);
-    s_ui.wifi_paw = NativeIcon(s_ui.wifi, &kQuickCatPawImage.image);
-    lv_obj_align(s_ui.wifi_paw, LV_ALIGN_RIGHT_MID, -4, 0);
-    s_ui.light_switch = Box(panel, width * 58 / kDesignWidth, top + slider_h - wifi_h, switch_w, wifi_h);
-    lv_obj_set_style_bg_opa(s_ui.light_switch, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(s_ui.light_switch, 2, 0);
-    lv_obj_set_style_border_color(s_ui.light_switch, lv_color_black(), 0);
-    lv_obj_set_style_radius(s_ui.light_switch, wifi_h * 2 / 5, 0);
-    HapticAttachClick(s_ui.light_switch);
-    lv_obj_add_event_cb(s_ui.light_switch, ToggleLight, LV_EVENT_CLICKED, nullptr);
-    s_ui.light_icon = NativeIcon(s_ui.light_switch, &kQuickBrightnessImage.image);
-    lv_obj_align(s_ui.light_icon, LV_ALIGN_LEFT_MID, 6, -16);
-    s_ui.light_title = Label(s_ui.light_switch, Lang::Strings::SETTINGS_FRONTLIGHT_TITLE);
-    lv_obj_set_pos(s_ui.light_title, width * 100 / kDesignWidth, wifi_h / 5);
-    s_ui.light_status = Label(s_ui.light_switch, "");
-    lv_obj_set_style_text_font(s_ui.light_status, status_font, 0);
-    lv_obj_set_pos(s_ui.light_status, width * 100 / kDesignWidth, wifi_h * 3 / 5);
-    auto& light = Frontlight::GetInstance();
-    s_ui.brightness = Slider(panel, width * 383 / kDesignWidth, top, slider_w, slider_h,
-                             light.target_brightness(), false);
-    s_ui.warmth = Slider(panel, width * 545 / kDesignWidth, top, slider_w, slider_h, light.warmth(), true);
-    RefreshLightSwitch();
-    RefreshWifi(nullptr);
-    s_ui.timer = lv_timer_create(RefreshWifi, 1000, nullptr);
+    // 面板开着时整屏按灰度画
+    EpdSetContentRole(panel, EpdContentRole::GrayPanel);
+
+    const int tile_w = (width - 2 * kPad - kTileGap) / 2;
+    BuildTile(s_ui.link, panel, kPad, tiles_y, tile_w, OnLinkClicked, false);
+    BuildTile(s_ui.proxy, panel, kPad + tile_w + kTileGap, tiles_y, tile_w, OnProxyClicked, true);
+    BuildRow(s_ui.light, panel, rows_y, width, true);
+    BuildRow(s_ui.warm, panel, rows_y + kRowH + kRowGap, width, false);
+    auto* grip = Box(panel, (width - kGripW) / 2, grip_y, kGripW, kGripH);
+    lv_obj_set_style_bg_color(grip, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(grip, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(grip, kGripH / 2, 0);
+
+    RefreshTiles();
+    RefreshRows();
+    s_ui.timer = lv_timer_create(RefreshTiles, 1000, nullptr);
     if (auto* display = LvAdapterEpdiy::Instance()) display->RequestFullOnNextCommit();
 }

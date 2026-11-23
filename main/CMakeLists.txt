@@ -136,6 +136,15 @@ else()
     message(STATUS "Cloud endpoints: blank (official cloud features disabled)")
 endif()
 
+# Status bar / quick panel icons (tools/icons/gen_status_icons.py). The git-ignored local set — icons the
+# user exported for personal use — wins when it is there; otherwise our own drawings.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/display/icons/local/status_icons.c")
+    set(VALET_STATUS_ICONS_SOURCE "display/icons/local/status_icons.c")
+    message(STATUS "Status icons: local set (display/icons/local, not in git)")
+else()
+    set(VALET_STATUS_ICONS_SOURCE "display/icons/status_icons.c")
+endif()
+
 idf_component_register(
     SRCS
         "app_main.cc"
@@ -189,6 +198,7 @@ idf_component_register(
         "display/font/ttf_runtime.cc"
         "display/font/font_misans_regular_160_2.c"
         "display/font/font_awesome_30_1.c"
+        "${VALET_STATUS_ICONS_SOURCE}"
         "display/lvgl_display/emoji_collection.cc"
         "display/lvgl_display/jpg/jpeg_to_image.c"
         "display/lvgl_display/jpg/jpeg_memory.cc"
@@ -198,6 +208,7 @@ idf_component_register(
         "display/screen/screen_keyboard.cc"
         "display/screen/screen_common_nav.cc"
         "display/screen/screen_frontlight.cc"
+        "display/screen/status_bar_icons.cc"
         "display/screen/screen_wifi.cc"
         "display/screen/vk_key_handler.cc"
         "display/screen/vk_page_repeat.cc"
@@ -249,6 +260,7 @@ idf_component_register(
         "display/font"
         "display/lvgl_display"
         "display/lvgl_display/jpg"
+        "display/icons"
         "display/screen"
         "display/screen/home_screen"
         "display/screen/settings_screen"

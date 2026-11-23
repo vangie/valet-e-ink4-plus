@@ -945,6 +945,12 @@ lv_obj_t* SettingsScreen::CreateNetwork() {
     return CreateInternal();
 }
 
+lv_obj_t* SettingsScreen::CreateProxy() {
+    auto* scr = CreateNetwork();
+    ShowProxy();
+    return scr;
+}
+
 lv_obj_t* SettingsScreen::CreatePager() {
     s_open_overview = false;
     s_pending_tab = SettingsTab::kPager;

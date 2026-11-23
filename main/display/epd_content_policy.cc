@@ -96,7 +96,7 @@ void Blend(lv_draw_task_t* task,const lv_draw_sw_blend_dsc_t* dsc) {
     const auto role=ContentRole(base->obj);
     const bool gray=task->type==LV_DRAW_TASK_TYPE_LAYER || GrayRole(role);
     const bool darken=gray && task->type==LV_DRAW_TASK_TYPE_IMAGE &&
-        role!=EpdContentRole::ReaderAntialias && role!=EpdContentRole::Shelf;
+        role!=EpdContentRole::ReaderAntialias && role!=EpdContentRole::Shelf && role!=EpdContentRole::GrayPanel;
     const bool label=task->type==LV_DRAW_TASK_TYPE_LABEL;
     lv_area_t relative=area; lv_area_move(&relative,-layer->buf_area.x1,-layer->buf_area.y1);
     const int width=lv_area_get_width(&area),height=lv_area_get_height(&area);

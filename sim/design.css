@@ -481,3 +481,84 @@ div.v-row { box-sizing: border-box; }
 /* 项少（不用滚）时面板缩到刚好放下，列表不显示滚动条。 */
 .v-pick-panel.fit { height: auto; padding-bottom: 12px; }
 .v-pick-list.fit { overflow-y: hidden; }
+
+/* ── 状态栏（新设计）：三组按同一条中线摆，图标都用 SVG 画，不靠字体基线 ── */
+.panel.v2 .bar.sb { height: 24px; padding: 0 10px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; cursor: pointer; }
+.panel.v2 .bar.sb .sb-left { display: flex; align-items: center; gap: 4px; height: 100%; }
+.panel.v2 .bar.sb .c { font-size: 10px; font-weight: 600; letter-spacing: .3px; line-height: 1; }
+.panel.v2 .bar.sb .right { display: flex; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; }
+.sb i { display: flex; align-items: center; justify-content: center; }
+/* 所有图标轮廓都是 10px 高（加上线宽正好和信号格的 11px 一样高），线宽都是 1.5px，不跟着缩放变粗变细 */
+.sb .sbi { height: 9.5px; width: auto; overflow: visible; }
+.sb .sbi :not(.solid) { vector-effect: non-scaling-stroke; stroke-width: 1.5px; }
+/* 盾牌里的两支箭头比外框细一档，小尺寸下不挤成一团 */
+.sb .sb-proxy .sbi path:last-child { stroke-width: 1.05px; }
+/* 4G 信号是实心的柱子，没有线宽撑出来的那圈，直接画 11px 高，和 Wi-Fi（9.5px + 线宽）一样高；块里同理 */
+.sb .sb-sig .sbi, .sb .sb-wifi .sbi { height: 11px; }
+/* 实心图标（Wi-Fi）不吃上面的固定像素线宽：它的线宽就是弧带的粗细和扇形的圆角，写在图形自己身上，跟着图标一起缩放 */
+/* 电池，照 iPhone：没有描边的圆角块，没电的部分浅灰、有电的部分中灰（按电量从左往右），黑色粗体数字铺满整块。
+   进度用灰不用黑，数字始终是白底上的黑字，不用反显。墨水屏能显示 16 级灰（GL16 刷新），电量一般几分钟才变一次。 */
+.sb-batt { position: relative; width: 25px; height: 13px; box-sizing: border-box; border-radius: 4px; margin-right: 3px;
+  background: linear-gradient(90deg, #9c9c9a calc(var(--lvl) * 1%), #dcdcda 0); }
+.sb-batt::after { content: ""; position: absolute; right: -2.6px; top: 4px; width: 1.8px; height: 5px; background: #dcdcda; border-radius: 0 1.2px 1.2px 0; }
+.sb-batt b { position: relative; z-index: 1; font-family: "Helvetica Neue", Arial, sans-serif; font-style: normal; display: flex; align-items: center; gap: .4px;
+  font-size: 9.6px; font-weight: 800; line-height: 1; color: var(--ink); letter-spacing: -.4px; font-variant-numeric: tabular-nums; }
+.sb-batt .bolt { width: 4.4px; height: 7.6px; fill: currentColor; margin-left: .2px; }
+/* 充电时框跟着内容变宽，闪电右边不留多余的空 */
+.sb-batt.charging { width: auto; min-width: 25px; padding: 0 2.4px 0 2.8px; }
+
+/* ── 快捷面板（从状态栏往下拉）── */
+.q-mask { position: absolute; inset: 0; z-index: 14; background-image: radial-gradient(var(--ink) 0.5px, transparent 0.7px); background-size: 3px 3px; }
+.q-panel { position: absolute; left: 0; right: 0; top: 24px; z-index: 15; padding: 10px 10px 14px; background: var(--paper); border-bottom: 1.2px solid var(--ink); display: flex; flex-direction: column; gap: 8px; }
+/* 两块一样宽：1fr 的最小宽度是内容宽，长的小字会把一列撑宽，所以用 minmax(0, 1fr) */
+.q-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.q-grid .q-tile { min-width: 0; }
+.q-tile { height: 44px; padding: 0 8px; border: 1.2px solid var(--ink); background: var(--paper); color: var(--ink); display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; }
+/* 块里的图标：裁到轮廓、一样高（18px），线宽 1.8px；放在 24px 宽的格子里居中，两块的字左边对齐 */
+.q-tile .q-ic { width: 24px; flex: none; display: flex; justify-content: center; }
+/* 等高时 Wi-Fi 比盾牌宽一半，放大后看着大一号。改成都装进同样大的方框（20×20，按比例缩到放得下）：
+   宽的 Wi-Fi 顶满宽、矮一些，高的盾牌顶满高、窄一些，看着一样大 */
+.q-tile .qi { width: 20px; height: 20px; overflow: visible; }
+/* 盾牌是封闭的轮廓，里面还有箭头，同样大的框里看着比 Wi-Fi 的几道弧重，缩一点点找齐 */
+.q-tile[data-quick="proxy"] .qi { width: 19px; height: 19px; }
+.q-tile[data-quick="link"] .qi rect { stroke: none; }
+.q-tile .qi :not(.solid) { vector-effect: non-scaling-stroke; stroke-width: 1.8px; }
+.q-tile[data-quick="proxy"] .qi path:last-child { stroke-width: 1.4px; }
+.q-tile span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.q-tile b { font-size: 10.8px; font-weight: 600; }
+.q-tile em { font-style: normal; font-size: 8.4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 开着的块用深灰，不用纯黑：墨水屏能显示灰阶，深灰上的白字照样清楚，看着没那么重 */
+.q-tile.on { background: #4a4a48; border-color: #4a4a48; color: var(--paper); }
+.q-tile.dim { border-style: dashed; }
+.q-tile { position: relative; }
+/* 右上角的小标：反色小方块，和开关同色系 */
+.q-corner { position: absolute; top: 5px; right: 7px; font-style: normal; font-size: 8px; font-weight: 600; line-height: 1; }
+.q-level { height: 24px; display: flex; align-items: center; gap: 7px; font-size: 9px; }
+.q-level .ic { width: 14px; height: 14px; }
+/* 一排左边的图标兼开关：有框，一看就能点；关着时反白（黑底白图标） */
+/* 三个图标一个样子，都不加框：框会让人以为它和色温不是一类东西。前光、音量的图标就是这一排的「0 档」，点它关掉；关了换成划掉的图标，右边写「关」「静音」 */
+.q-switch { width: 24px; height: 22px; flex: none; padding: 0; border: 0; background: transparent; color: var(--ink); display: grid; place-items: center; cursor: pointer; }
+/* 面板里填上的格子也用同一种深灰，和上面两块一致 */
+.q-level .v-blocks button.on { background: #4a4a48; border-color: #4a4a48; }
+.q-switch.label { border-color: transparent; cursor: default; }
+.q-level.dim .v-blocks, .q-level.dim b, .q-level.dim .q-switch { opacity: .45; }
+.q-level .v-blocks { height: 16px; }
+.q-level b { width: 22px; text-align: right; font-weight: 600; white-space: nowrap; }
+.q-tip { margin: 0; font-size: 8.4px; color: var(--g1); }
+.q-grip { align-self: center; width: 34px; height: 3px; border-radius: 2px; background: var(--ink); margin-top: 2px; }
+
+/* 本机图标（sim/local/icons.js）：同一个比例缩放，Wi-Fi 在状态栏 11px、块里 15px 高，其余按各自原来的高矮 */
+.sb .sbi.local { height: calc(var(--h) * 11px / 63.09); width: auto; }
+.q-tile[data-quick] .qi.local { height: calc(var(--h) * 15px / 63.09); width: auto; }
+
+/* 本机电池框：和 Wi-Fi 一样 11px 高；灰色块用中灰（16 级灰里稳的一档），数字黑色粗体 */
+.sb-batt2 { position: relative; display: block; height: 11px; margin-right: 2px; }
+.sb-batt2 svg { height: 100%; width: auto; display: block; overflow: visible; }
+.sb-batt2 .lvl { fill: #a3a3a0; }
+.sb-batt2 b { position: absolute; display: flex; align-items: center; justify-content: center; gap: .3px; font: 700 7.2px/1 "Helvetica Neue", Arial, sans-serif; letter-spacing: -.1px; }
+.sb-batt2 .bolt { width: 3.4px; height: 5.8px; fill: currentColor; }
+/* 本机闪电（sim/local）：比数字略矮，紧贴在数字右边 */
+.sb-batt2 .bolt2 { height: 5.4px; width: auto; fill: currentColor; margin-left: .4px; }
+.q-level .q-rowic { display: block; overflow: visible; }
+.q-level .q-rowic .erase { fill: var(--paper); }
+.sbi .erase, .qi .erase { fill: var(--paper); }

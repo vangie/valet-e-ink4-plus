@@ -35,7 +35,7 @@ function screenHtml() {
   if (state.off) return `<img class="full" src="${SIM_IMAGES["bg_shutdown_zh.png"]}" alt="关机画面：按键说明" />`;
   if (state.booting) return `<div class="boot">Metalio</div>`;
   if (state.standby) return isV2() ? v2Standby() : standbyScreen();
-  if (isV2()) return v2Screen();
+  if (isV2()) return v2Screen() + (state.quick ? v2QuickPanel() : "");
   return { home, detail, reader, ai, settings, wallpaper, wall, tasks, transfer, store, shelf, book, buddy, wifi, pager }[state.screen]();
 }
 

@@ -7,6 +7,8 @@ function stopSession() {
   state.listening = false;
   state.speaking = false;
   state.caption = "";
+  // 自动模式下通话中该换网没换的，挂断后换
+  if (state.linkPending && typeof settleLink === "function") settleLink(L("通话结束", "Call ended"));
 }
 
 function enterAi(from) {

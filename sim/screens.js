@@ -24,6 +24,7 @@ function battIcon() {
   return `<i class="batt${state.charging ? " bolt" : ""}" data-fill="${n}"></i>`;
 }
 function bar(center = "10:48") {
+  if (isV2()) return v2Bar(center);
   const mute = state.volume === 0 ? `<i class="mute"></i>` : "";
   return `<div class="bar">${netIcon()}<span class="c">${center}</span><span class="right">${mute}<span class="pct">${state.battery}%</span>${battIcon()}</span></div>`;
 }

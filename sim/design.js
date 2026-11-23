@@ -37,12 +37,22 @@ const V2_ICONS = {
   back: '<path d="M14.5 5l-7 7 7 7"/>',
   go: '<path d="M9.5 5l7 7-7 7"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  proxy: '<path d="M12 2.6 19 5.1c.6.2 1 .8 1 1.4v4.9c0 4.5-3.2 8-8 9.9-4.8-1.9-8-5.4-8-9.9V6.5c0-.6.4-1.2 1-1.4z"/><path d="M15.4 9.6H8.6m1.9-1.9L8.6 9.6l1.9 1.9M8.6 14.3h6.8m-1.9-1.9 1.9 1.9-1.9 1.9"/>',
+  // Wi-Fi：自己画的，比例照 iPhone 量：同一圆心、±45°；沿中轴 扇形 4.7 / 空 1.67 / 弧带 3.68 / 空 1.67 / 弧带 3.68。
+  // 每块先往里缩一圈、再用同宽的圆角描边撑回来，角就是圆的（扇形 0.8，弧带 0.55）
+  wifi: '<path class="solid" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M10.65 14.27L8.52 12.14A3.9 3.9 0 0 1 12.79 12.14Z"/><path class="solid" fill="currentColor" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" d="M4.34 8.3A9.5 9.5 0 0 1 16.97 8.3L15.14 10.13A6.92 6.92 0 0 0 6.17 10.13Z"/><path class="solid" fill="currentColor" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" d="M0.55 4.52A14.85 14.85 0 0 1 20.76 4.52L18.93 6.34A12.27 12.27 0 0 0 2.38 6.34Z"/>',
+  // 4G 信号：自己画的，比例照 iPhone 量：四根实心圆角柱，柱宽比空隙宽两成，高 36% / 54% / 75% / 100%
+  cell: '<g fill="currentColor" stroke="none"><rect x="0.00" y="7.7" width="3.0" height="4.3" rx="1.1"/><rect x="5.53" y="5.5" width="3.0" height="6.5" rx="1.1"/><rect x="11.06" y="3" width="3.0" height="9.0" rx="1.1"/><rect x="16.59" y="0" width="3.0" height="12" rx="1.1"/></g>',
+  thermo: '<path d="M10 4.5a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0z"/><path d="M12 9.5v6.2"/>',
+  plane: '<path d="M10.5 3.5h1.8l3.4 7h4.1a1.7 1.7 0 0 1 0 3.4h-4.1l-3.4 7h-1.8l1.6-7H8.3l-1.6 2.2H5l1-3.9-1-3.9h1.7l1.6 2.2h3.8z"/>',
+  mute: '<path d="M4 9.5v5h3.5l5 4v-13l-5 4zM16.5 9.5l5 5M21.5 9.5l-5 5"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   pause: '<path d="M8.5 5v14M15.5 5v14"/>',
   stop: '<rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" stroke="none"/>',
   cam: '<path d="M3.5 8h3.2l1.6-2.5h7.4L17.3 8h3.2v11h-17z"/><circle cx="12" cy="13.2" r="3.2"/>',
   speaker: '<path d="M4 9.5v5h3.5l5 4v-13l-5 4zM16 9a4.2 4.2 0 0 1 0 6M18.6 6.4a7.8 7.8 0 0 1 0 11.2"/>',
   net: '<path d="M4.5 20v-3M9.5 20v-7M14.5 20V9M19.5 20V4"/>',
+  sunOff: '<circle cx="12" cy="12" r="3.6"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M4 4l16 16"/>',
   sun: '<circle cx="12" cy="12" r="3.6"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>',
   device: '<rect x="6.5" y="2.5" width="11" height="19" rx="2"/><path d="M10 18h4"/>',
   shelf: '<path d="M5 4v15.5M9.5 4v15.5M13.5 5.5l4.5 14M3 20h18"/>',
@@ -51,6 +61,113 @@ const V2_ICONS = {
 };
 function ic(name, cls = "") {
   return `<svg class="ic${cls ? " " + cls : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${V2_ICONS[name]}</svg>`;
+}
+
+// ── 状态栏（新设计）。左：网络，走代理时紧挨着一个盾牌；中：时间；右：静音、电池（数字反白写在电池里，不带 %）。
+// 三组都按同一条中线摆，不靠字体基线。点左边或往下拉，出快捷面板。
+function proxyInForce() {
+  if (!state.proxyAddr || (proxyPasswordOnly() && !state.proxySsPass)) return false;
+  return state.link === "wifi" ? state.proxyWifi : state.proxyCell;
+}
+// 状态栏图标：每个都裁到自己的轮廓（不是 24×24 的整格），再统一画成同样高、同样粗的线。
+// 整格里留白各不相同（Wi-Fi 只占 5–20，盾牌占 3–21），直接放进同样大的框里就会一个高一个矮、一个上一个下。
+const SB_BOX = { wifi: "0 0 21.31 15.07", proxy: "4 2.6 16 18.7", plane: "5 3.5 16.5 17.4", mute: "4 5.5 17.5 13", cell: "0 0 19.59 12" };
+// 本机有 sim/local/icons.js（不进 git）就用里面的图标，同一比例画，各自高矮照原样；没有就用上面自己画的
+const LOCAL_ICON = window.LOCAL_ICONS || {};
+for (const [k, v] of Object.entries(LOCAL_ICON)) if (v.svg) { V2_ICONS[k] = v.svg; SB_BOX[k] = v.box; }
+function sbIcon(name, cls = "sbi") {
+  if (LOCAL_ICON[name]) return `<svg class="${cls} local" style="--h:${LOCAL_ICON[name].h}" viewBox="${SB_BOX[name]}" aria-hidden="true">${V2_ICONS[name]}</svg>`;
+  return `<svg class="${cls}" viewBox="${SB_BOX[name]}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${V2_ICONS[name]}</svg>`;
+}
+function v2NetGlyph() {
+  if (state.link === "4G") return `<i class="sb-sig" aria-label="4G">${sbIcon("cell")}</i>`;
+  if (!state.wifiNearby && state.linkMode === "wifi") return `<i class="sb-plane" aria-label="${L("Wi-Fi 没连上", "Wi-Fi offline")}">${sbIcon("plane")}</i>`;
+  return `<i class="sb-wifi" aria-label="Wi-Fi">${sbIcon("wifi")}</i>`;
+}
+function v2Battery() {
+  const n = Math.max(0, Math.min(100, state.battery));
+  return v2BatteryOutlined(n);
+  // 电量越少，底色越短；数字一直写在中间。墨水屏上黑底白字和白底黑字交界处用描边保证两边都读得出。
+  // 充电时数字后面跟一道闪电，都在电池框里（照 iPhone）
+  const bolt = state.charging ? `<svg class="bolt" viewBox="0 0 6.4 11" aria-hidden="true"><path d="M3.9 0 .2 6.2h2.6L2.3 11 6.2 4.6H3.6z"/></svg>` : "";
+  return `<i class="sb-batt${state.charging ? " charging" : ""}" style="--lvl:${n}" aria-label="${L("电量", "Battery")} ${n}${state.charging ? L("，在充电", ", charging") : ""}"><b>${n}${bolt}</b></i>`;
+}
+// 电池：自己画的外框（比例照 iPhone 量：框厚 7、外圆角 20、内圆角 13，单位是 53 高的格子），
+// 空腔正好写下三个字：「100」，或者「57」加闪电（满电不会在充电，所以不会出现「100」加闪电）。
+// 里面一块中灰圆角块按电量从左往右长（满格先画好、右边按电量裁掉，左边圆角一直在），四周和外框留一圈纸色细缝；
+// 黑色粗体数字在空腔正中，不带 %，充电时后面跟闪电
+const BATT = { h: 53.12, t: 7, ro: 20, ri: 13, cavityW: 71, capGap: 5.7, capW: 7.3, capH: 20.5, gap: 3.5 };
+function battOutline() {
+  const { h, t, ro, ri, cavityW, capGap, capW, capH } = BATT;
+  const w = cavityW + 2 * t, iw = cavityW, ih = h - 2 * t;
+  const rr = (x, y, w2, h2, r) => `M${x + r} ${y}H${x + w2 - r}A${r} ${r} 0 0 1 ${x + w2} ${y + r}V${y + h2 - r}A${r} ${r} 0 0 1 ${x + w2 - r} ${y + h2}H${x + r}A${r} ${r} 0 0 1 ${x} ${y + h2 - r}V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`;
+  const cx = w + capGap, cy = (h - capH) / 2;
+  const cap = `M${cx} ${cy}C${cx + capW * 0.66} ${cy + 0.1} ${cx + capW} ${cy + capH * 0.22} ${cx + capW} ${cy + capH / 2}S${cx + capW * 0.66} ${cy + capH - 0.1} ${cx} ${cy + capH}Z`;
+  return { d: rr(0, 0, w, h, ro) + rr(t, t, iw, ih, ri) + cap, box: `0 0 ${cx + capW} ${h}`, cavity: [t, t, iw, ih], total: cx + capW };
+}
+function v2BatteryOutlined(n) {
+  const o = battOutline(), [cx, cy, cw, ch] = o.cavity, gap = BATT.gap;
+  const fx = cx + gap, fy = cy + gap, fw = cw - 2 * gap, fh = ch - 2 * gap, fr = BATT.ri - gap;
+  const pct = (v, total) => `${(v / total) * 100}%`;
+  const bolt = !state.charging ? "" : LOCAL_ICON.bolt
+    ? `<svg class="bolt2" viewBox="${LOCAL_ICON.bolt.box}" aria-hidden="true"><path d="${LOCAL_ICON.bolt.d}"/></svg>`
+    : `<svg class="bolt2" viewBox="0 0 6.4 11" aria-hidden="true"><path d="M3.9 0 .2 6.2h2.6L2.3 11 6.2 4.6H3.6z"/></svg>`;
+  return `<i class="sb-batt2" aria-label="${L("电量", "Battery")} ${n}${state.charging ? L("，在充电", ", charging") : ""}">
+    <svg viewBox="${o.box}" aria-hidden="true"><defs><clipPath id="batt-lvl"><rect x="${fx}" y="${fy}" width="${(fw * n) / 100}" height="${fh}"/></clipPath></defs>
+      <path d="${o.d}" fill="currentColor" fill-rule="evenodd"/><rect class="lvl" x="${fx}" y="${fy}" width="${fw}" height="${fh}" rx="${fr}" clip-path="url(#batt-lvl)"/></svg>
+    <b style="left:${pct(cx, o.total)};top:${pct(cy, BATT.h)};width:${pct(cw, o.total)};height:${pct(ch, BATT.h)}">${n}${bolt}</b></i>`;
+}
+function v2Bar(center) {
+  const proxy = proxyInForce() ? `<i class="sb-proxy" aria-label="${L("在走代理", "Proxy in use")}">${sbIcon("proxy")}</i>` : "";
+  const mute = state.volume === 0 ? `<i class="sb-mute">${sbIcon("mute")}</i>` : "";
+  return `<div class="bar sb" data-quick-open><span class="sb-left">${v2NetGlyph()}${proxy}</span><span class="c">${center}</span><span class="right">${mute}${v2Battery()}</span></div>`;
+}
+
+// ── 快捷面板：从状态栏往下拉。上面四个开关（点一下切换，长按进设置），下面前光和音量。
+function v2QuickPanel() {
+  const net = state.link === "4G" ? "4G" : "Wi-Fi";
+  const netSub = state.link === "4G" ? L("已连上", "Connected") : state.wifiNearby || state.linkMode !== "wifi" ? "Metalio-Home" : L("没连上", "Offline");
+  const modeName = { auto: L("自动", "Auto"), "4G": "4G", wifi: "Wi-Fi" }[state.linkMode];
+  const proxyOk = state.proxyAddr && (!proxyPasswordOnly() || state.proxySsPass);
+  const proxyOn = state.link === "wifi" ? state.proxyWifi : state.proxyCell;
+  const proxyKind = { http: "HTTP", socks5: "SOCKS5", ss: "SS", trojan: "Trojan" }[state.proxyKind];
+  // 小字写用的哪种代理；开没开写在右上角，和网络那块的「自动」一个位置
+  const proxySub = !proxyOk ? L("还没设置", "Not set up") : proxyKind;
+  const proxyCorner = !proxyOk ? "" : proxyOn ? L("开启", "On") : L("关闭", "Off");
+  // corner：右上角的小标（「自动」），不占标题和小字的位置
+  // 图标和状态栏一样裁到轮廓：Wi-Fi、4G、盾牌一样高，不会一个大一个小
+  const tile = (key, icon, title, sub, on, dim, corner = "") =>
+    `<button class="q-tile${on ? " on" : ""}${dim ? " dim" : ""}" data-quick="${key}"><i class="q-ic">${sbIcon(icon, "qi")}</i><span><b>${title}</b><em>${sub}</em></span>${corner ? `<i class="q-corner">${corner}</i>` : ""}</button>`;
+  // 一排：左边的图标就是开关（前光：开 / 关；音量：有声 / 静音），点格子调到那一档。
+  // 关掉时格子全空、右边写「关」或「静音」，原来的档位记着，再点图标回到原来那一档。色温没有「关」，图标只是标签。
+  const RK = 0.172;   // 本机图标：每单位多少 px（喇叭约 13px 高）
+  const rowIc = ([local, fallback]) => {
+    const v = LOCAL_ICON[local];
+    if (!v || !v.row) return ic(fallback);
+    return `<svg class="q-rowic" viewBox="${v.x} -106 ${v.w} 117" style="width:${(v.w * RK).toFixed(1)}px;height:${(117 * RK).toFixed(1)}px" fill="currentColor" aria-hidden="true">${v.row}</svg>`;
+  };
+  const level = (icon, label, value, key, off, offText, dim, steps = 10, valueText) => {
+    const blocks = Array.from({ length: steps }, (_, i) => `<button data-level="${key}:${steps === 10 ? i + 1 : i + 1}" class="${!off && i < (steps === 10 ? Math.round(value / 10) : value) ? "on" : ""}" aria-label="${label} ${steps === 10 ? (i + 1) * 10 : i + 1}"></button>`).join("");
+    const head = offText !== undefined
+      ? `<button class="q-switch${off ? " off" : ""}" data-level-off="${key}" aria-label="${label}${off ? L("：已关，点一下打开", " off, tap to turn on") : L("：点一下关掉", ", tap to turn off")}">${rowIc(icon)}</button>`
+      : `<span class="q-switch label">${rowIc(icon)}</span>`;
+    return `<div class="q-level${dim ? " dim" : ""}">${head}<div class="v-blocks${steps !== 10 ? " s" + steps : ""}">${blocks}</div><b>${off ? offText : valueText ?? value}</b></div>`;
+  };
+  const lightOff = state.light === "off" || state.brightness === 0;
+  // 只放前光和色温：音量有实体键，黑色深度是调一次就不动的设置，都不占这里。
+  // 每排左边的图标跟着档位变：灯泡 关 / 暗 / 亮，温度计 冷 / 中 / 暖。
+  // 本机有 sim/local 的图标就用它们（同一个比例、同一条基线），没有就用自己画的线条图标
+  const bulb = lightOff ? "lightbulb.slash" : state.brightness <= 50 ? "lightbulb.min" : "lightbulb.max";
+  const thermo = state.warmth < 40 ? "thermometer.snowflake" : state.warmth > 60 ? "thermometer.sun" : "thermometer.variable";
+  return `<div class="q-mask" data-quick-close></div><section class="q-panel">
+      <div class="q-grid">
+        ${tile("link", state.link === "4G" ? "cell" : "wifi", net, netSub, true, false, state.linkMode === "auto" ? modeName : "")}
+        ${tile("proxy", "proxy", L("代理", "Proxy"), proxySub, proxyOk && proxyOn, !proxyOk, proxyCorner)}
+      </div>
+      ${level([bulb, lightOff ? "sunOff" : "sun"], L("前光", "Light"), state.brightness, "bright", lightOff, L("关", "Off"))}
+      ${level([thermo, "thermo"], L("色温", "Warmth"), state.warmth, "warm", false, undefined, lightOff)}
+      <i class="q-grip"></i>
+    </section>`;
 }
 
 function v2Head(title, sub = "", right = "") {
@@ -573,7 +690,7 @@ function pickL(pair) {
 function v2SettingsHome() {
   const rows = [
     ["talk", "wave", L("助手", "Assistant"), v2Who()],
-    ["net", "net", L("网络", "Network"), state.link === "4G" ? `4G · ${state.sim === "int" ? L("内置卡", "built-in SIM") : L("外置卡", "external SIM")}` : "Wi-Fi · Metalio-Home"],
+    ["net", "net", L("网络", "Network"), (state.linkMode === "auto" ? L("自动 · ", "Auto · ") : "") + (state.link === "4G" ? `4G · ${state.sim === "int" ? L("内置卡", "built-in SIM") : L("外置卡", "external SIM")}` : "Wi-Fi · Metalio-Home")],
     ["screen", "sun", L("显示", "Display"), `${pickL(LIGHT[state.light])} · ${pickL(REFRESH[state.refresh])}${L("刷新", "")}`],
     ["read", "book", L("阅读与字库", "Reading & fonts"), `${state.fontName} ${state.fontSize} · ${L("扩展字库", "extended fonts ")}${state.fontpack ? L("已装", "on") : L("未装", "missing")}`],
     ["sound", "speaker", L("声音与蓝牙", "Sound & Bluetooth"), `${pickL(BT[state.btMode])} · ${state.tts ? L("回答出声", "spoken replies") : L("回答只看字", "text only")}`],
@@ -677,13 +794,26 @@ function v2SettingsPane(id) {
   }
   if (id === "net") {
     const cell = state.link === "4G";
-    const sim = cell ? v2Fld(L("用哪张卡", "SIM"), v2Seg([["int", L("内置卡", "Built-in")], ["ext", L("外置卡", "External")]], state.sim, "data-sim"), L("卡号（ICCID）", "Card number (ICCID)") + " 89860000000000000000") : "";
+    const auto = state.linkMode === "auto";
+    // 选了「自动」或「4G」都可能用到卡，所以两种都给选卡；只用 Wi-Fi 时不给。
+    const sim = state.linkMode !== "wifi" ? v2Fld(L("用哪张卡", "SIM"), v2Seg([["int", L("内置卡", "Built-in")], ["ext", L("外置卡", "External")]], state.sim, "data-sim"), L("卡号（ICCID）", "Card number (ICCID)") + " 89860000000000000000") : "";
     // 最上面先说现在连得怎么样：进这一页多半就是来看这个的。强度用话说，数字放后面。
-    const status = `<div class="v-card">${ic("check")}<span><b>${cell ? "4G" : "Wi-Fi"} · ${L("信号好", "good signal")}</b><em>${cell ? L("已连上 · 强度 24 / 31", "Connected · strength 24 / 31") : "Metalio-Home · -42 dBm"}</em></span></div>`;
-    return `${status}${v2Fld(L("怎么上网", "Connection"), v2Seg([["4G", "4G"], ["wifi", "Wi-Fi"]], state.link, "data-link"), L("换上网方式马上生效，不用重启；换卡会重启一次。", "Switching takes effect at once; changing the SIM restarts the device."))}${sim}
+    // 自动时卡片上说明为什么用的是它；挂断后要换的也写在这里。
+    const why = state.linkPending ? L(` · 挂断后换到 ${state.linkPending === "4G" ? "4G" : "Wi-Fi"}`, ` · switches to ${state.linkPending === "4G" ? "4G" : "Wi-Fi"} after the call`)
+      : !auto ? "" : cell ? L(" · 附近没有存过的 Wi-Fi", " · no saved Wi-Fi nearby") : L(" · 自动选的", " · picked automatically");
+    const lost = !cell && !state.wifiNearby;   // 只用 Wi-Fi，又不在它附近
+    const status = lost
+      ? `<div class="v-card bad">${ic("x")}<span><b>Wi-Fi · ${L("没连上", "not connected")}</b><em>${L("附近没有存过的网络。出门也要用网就选「自动」", "No saved network nearby. Choose Auto to use 4G away from it")}</em></span></div>`
+      : `<div class="v-card">${ic("check")}<span><b>${cell ? "4G" : "Wi-Fi"} · ${L("信号好", "good signal")}</b><em>${cell ? L("已连上 · 强度 24 / 31", "Connected · strength 24 / 31") : "Metalio-Home · -42 dBm"}${why}</em></span></div>`;
+    const modeNote = auto ? L("有存过的 Wi-Fi 就用 Wi-Fi，没有就用 4G。通话中不换，换的时候不用重启。", "Saved Wi-Fi when there is one, otherwise 4G. Not during a call; no restart.")
+      : state.linkMode === "4G" ? L("一直用 4G。换上网方式马上生效，不用重启。", "Always 4G. Takes effect at once, no restart.")
+      : L("只用 Wi-Fi，离开存过的网络就上不了网。", "Wi-Fi only: no connection away from saved networks.");
+    const near = `<button class="v-line dashed is-full" data-wifi-near>${state.wifiNearby ? L("假的：当作出门了（附近没有存过的 Wi-Fi）", "Fake: leave home") : L("假的：当作回到家（附近有存过的 Wi-Fi）", "Fake: come home")}</button>`;
+    return `${status}${v2Fld(L("怎么上网", "Connection"), v2Seg([["auto", L("自动", "Auto")], ["4G", "4G"], ["wifi", "Wi-Fi"]], state.linkMode, "data-link"), modeNote + (sim ? L("换卡会重启一次。", " Changing the SIM restarts.") : ""))}${sim}
       <nav class="v-rows">${`<button class="v-row" data-go="wifi"><span><b>Wi-Fi</b><em>${state.link === "wifi" ? L("点这里选网络、换网络", "Tap to choose or change the network") : L("没在用。点这里选网络", "Not in use. Tap to choose")}</em></span>${ic("go", "chev")}</button>`}
         <button class="v-row" data-setting="proxy"><span><b>${L("代理", "Proxy")}</b><em>${proxySummary()}</em></span>${ic("go", "chev")}</button></nav>
-      ${v2Fld(L("不用网时，多久断开", "Disconnect when idle after"), v2Seg([["30", L("30 秒", "30 s")], ["60", L("1 分钟", "1 min")], ["120", L("2 分钟", "2 min")], ["0", L("不断", "Never")]], state.netGrace, "data-grace"), L("断得快更省电，下一次提问要多等一两秒连网。", "Sooner saves battery; the next question waits to reconnect."))}`;
+      ${v2Fld(L("不用网时，多久断开", "Disconnect when idle after"), v2Seg([["30", L("30 秒", "30 s")], ["60", L("1 分钟", "1 min")], ["120", L("2 分钟", "2 min")], ["0", L("不断", "Never")]], state.netGrace, "data-grace"), L("断得快更省电，下一次提问要多等一两秒连网。", "Sooner saves battery; the next question waits to reconnect."))}
+      <div class="v-fld">${near}</div>`;
   }
   if (id === "proxy") {
     const onoff = [["off", L("直连", "Direct")], ["on", L("走代理", "Use proxy")]];
@@ -802,6 +932,26 @@ function v2SettingsPane(id) {
 }
 // 网络页「代理」一行的说明：没设置 / 没开 / 在用 / 只在另一种上网方式下才走。
 // SS 和 Trojan 只有一个密码，没有账号（和设备上 Prefs::PasswordOnly 一样）。
+// 上网方式。state.linkMode 是选的，state.link 是现在在用的。自动：有存过的 Wi-Fi 就用 Wi-Fi，没有就 4G。
+// 真机上：用 Wi-Fi 时连不上就转 4G；用 4G 时空闲每隔几分钟扫一次 Wi-Fi，扫到存过的就换回来。都不重启，通话中不换。
+function linkWanted() {
+  return state.linkMode === "auto" ? (state.wifiNearby ? "wifi" : "4G") : state.linkMode;
+}
+function settleLink(why) {
+  const want = linkWanted();
+  const name = want === "4G" ? "4G" : "Wi-Fi";
+  if (want === state.link) { state.linkPending = ""; return; }
+  if (state.live) {
+    state.linkPending = want;
+    log(`${why}：正在通话，先不换，挂断后换到 ${name}。`);
+    return;
+  }
+  state.link = want;
+  state.linkPending = "";
+  if (want === "wifi" && !state.wifiNearby) toast(L("只用 Wi-Fi：附近没有存过的网络", "Wi-Fi only: no saved network nearby"));
+  else toast(L(`已切换到${name}`, `Switched to ${name}`));
+  log(`${why}：换到 ${name}，不重启；正在用的连接自己重连。`);
+}
 function proxyPasswordOnly() { return state.proxyKind === "ss" || state.proxyKind === "trojan"; }
 function proxySummary() {
   if (!state.proxyAddr) return L("没设置。点这里填", "Not set. Tap to set up");
@@ -874,6 +1024,56 @@ panel.addEventListener("click", (e) => {
   if (!isV2() || blocked()) return;
   const hit = (sel) => e.target.closest(sel);
   let el;
+  // 快捷面板：开着时只处理面板里的点按，点面板外收起
+  if (state.quick) {
+    if (hit("[data-quick-close]") || hit("[data-quick-open]")) { state.quick = false; return render(); }
+    if ((el = hit("[data-quick]"))) {
+      const k = el.dataset.quick;
+      if (k === "link") {
+        // 和设置页同一套：自动 → 4G → Wi-Fi → 自动
+        state.linkMode = { auto: "4G", "4G": "wifi", wifi: "auto" }[state.linkMode];
+        settleLink(L(`快捷面板：上网方式改成「${{ auto: "自动", "4G": "4G", wifi: "Wi-Fi" }[state.linkMode]}」`, "Quick panel"));
+      } else if (k === "proxy") {
+        if (!state.proxyAddr || (proxyPasswordOnly() && !state.proxySsPass)) { state.quick = false; return openSetting("proxy"); }
+        const key = state.link === "wifi" ? "proxyWifi" : "proxyCell";
+        state[key] = !state[key];
+        toast(state[key] ? L("代理已开启", "Proxy on") : L("代理已关闭", "Proxy off"));
+        log(`快捷面板：${state.link === "wifi" ? "连 Wi-Fi 时" : "用 4G 时"}${state[key] ? "走代理" : "直连"}（另一条网的开关不动）。`);
+      }
+      return render();
+    }
+    // 一排左边的图标：前光关 / 开、静音 / 有声。关掉时记着原来的档位，打开时回到那一档。
+    if ((el = hit("[data-level-off]"))) {
+      if (el.dataset.levelOff === "bright") {
+        const off = state.light === "off" || state.brightness === 0;
+        if (off) { state.light = "both"; if (state.brightness === 0) state.brightness = state.brightnessBefore || 40; }
+        else state.light = "off";
+        log(off ? `快捷面板：前光打开，回到 ${state.brightness}。` : "快捷面板：前光关掉（档位记着）。");
+      } else {
+        if (state.volume === 0) state.volume = state.volumeBefore || 60;
+        else { state.volumeBefore = state.volume; state.volume = 0; }
+        log(state.volume ? `快捷面板：取消静音，回到 ${state.volume}。` : "快捷面板：静音（档位记着）。");
+      }
+      return render();
+    }
+    if (hit("[data-level]")) {
+      el = hit("[data-level]");
+      const [key, n] = el.dataset.level.split(":");
+      const value = Number(n) * 10;
+      if (key === "bright") {
+        if (state.light === "off") state.brightness = value;   // 关着时点格子：直接开到那一档
+        else state.brightness = state.brightness === value ? value - 10 : value;
+        if (state.brightness > 0) state.brightnessBefore = state.brightness;
+        state.light = state.brightness > 0 ? (state.light === "off" ? "both" : state.light) : "off";
+      }
+      else if (key === "warm") state.warmth = state.warmth === value ? value - 10 : value;
+      else { state.volume = state.volume === value ? value - 10 : value; if (state.volume > 0) state.volumeBefore = state.volume; }
+      return render();
+    }
+    if (hit(".q-panel")) return;
+    state.quick = false; return render();
+  }
+  if (hit("[data-quick-open]")) { state.quick = true; log("点了状态栏（真机上是从顶上往下拉）：出快捷面板。"); return render(); }
   if ((el = hit("[data-use-assistant]"))) {
     useAssistant(el.dataset.useAssistant);
     return render();
@@ -988,6 +1188,15 @@ panel.addEventListener("click", (e) => {
   if (hit(".v-pick")) return;
   // 「更多协议」回到上次用的那种（没用过时是 SS）；具体哪种在「协议」那一行里换。
   if ((el = hit("[data-proxy-kind]"))) { const k = el.dataset.proxyKind; state.proxyKind = k === "more" ? state.proxyMore : k; state.proxyTest = ""; return render(); }
+  if (hit("[data-wifi-near]")) {
+    state.wifiNearby = !state.wifiNearby;
+    if (state.linkMode !== "auto") {
+      log(state.wifiNearby ? "假的：回到有存过的 Wi-Fi 的地方。没选「自动」，不换。" : "假的：出门了。没选「自动」，不换。");
+      return render();
+    }
+    settleLink(state.wifiNearby ? "空闲时扫到存过的 Wi-Fi（Metalio-Home）" : "Wi-Fi 连不上了");
+    return render();
+  }
   if ((el = hit("[data-proxy-cert]"))) { state.proxyInsecure = el.dataset.proxyCert === "skip"; state.proxyTest = ""; return render(); }
   if (hit("[data-proxy-sni]")) {
     state.proxySni = state.proxySni ? "" : "cdn.example.com";
@@ -1055,4 +1264,15 @@ panel.addEventListener("click", (e) => {
     if (state.haptic === "on") state.hapticLevel = el.dataset.hapt;
     return render();
   }
+});
+
+// 快捷面板里长按开关进对应设置（模拟界面里用右键代替长按）
+panel.addEventListener("contextmenu", (e) => {
+  const tile = isV2() && state.quick && e.target.closest("[data-quick]");
+  if (!tile) return;
+  e.preventDefault();
+  state.quick = false;
+  const target = { link: "net", proxy: "proxy" }[tile.dataset.quick];
+  log(`长按快捷面板的开关：进设置 → ${target}。`);
+  openSetting(target);
 });

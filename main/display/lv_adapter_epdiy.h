@@ -158,10 +158,12 @@ private:
     lv_obj_t* mute_label_ = nullptr;
     char status_title_prefix_[32] = {};
     char status_body_cache_[64] = {};
-    char battery_pct_cache_[8] = {}; // 如「100%」；与 397 一致跨页保留
+    char battery_pct_cache_[8] = {}; // 电池标签文字：「57」或充电时「57+」；跨页保留
     int battery_level_cache_ = -1;
     const char* battery_icon_ = nullptr;
     const char* network_icon_ = nullptr;
+    char network_key_[16] = {}; // 网络图标文字 + 走代理时的标记（状态栏画盾牌）
+    bool proxy_shown_ = false;
     bool network_busy_status_ = false;
     char status_before_network_[64] = {};
     bool muted_ = false;

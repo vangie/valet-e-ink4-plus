@@ -9,6 +9,8 @@ public:
     static lv_obj_t* Create();
     /** @brief 创建设置→网络子页入口 */
     static lv_obj_t* CreateNetwork();
+    /** @brief 设置 → 网络 → 代理（下拉栏里长按「代理」） */
+    static lv_obj_t* CreateProxy();
     static lv_obj_t* CreateAssistant();
     /** @brief 创建设置→翻页器子页入口 */
     static lv_obj_t* CreatePager();

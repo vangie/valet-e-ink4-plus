@@ -4,6 +4,8 @@
  */
 
 #include "lv_adapter_epdiy.h"
+#include "status_bar_icons.h"
+#include "valet_net/proxy.h"
 #include "sd_paths.h"
 #include "epd_refresh.h"
 #include "epd_prepare.h"
@@ -1220,17 +1222,12 @@ void LvAdapterEpdiy::ApplyStatusTextLocked(const char* status) {
 void LvAdapterEpdiy::RestoreStatusWidgetsLocked() {
     // 切页只换控件指针；图标/电量%/静音/时钟缓存跨页保留，首帧与页面内容同次画出（对齐 397）
     if (network_label_ != nullptr) {
-        lv_label_set_text(network_label_, network_icon_ != nullptr ? network_icon_ : "");
+        lv_label_set_text(network_label_, network_key_);
     }
     if (battery_label_ != nullptr) {
-        lv_label_set_text(battery_label_, battery_icon_ != nullptr ? battery_icon_ : "");
+        lv_label_set_text(battery_label_, battery_pct_cache_);
     }
-    if (battery_pct_label_ != nullptr) {
-        lv_label_set_text(battery_pct_label_, battery_pct_cache_);
-    }
-    if (mute_label_ != nullptr) {
-        lv_label_set_text(mute_label_, muted_ ? FONT_AWESOME_VOLUME_XMARK : "");
-    }
+    StatusBarSetMuted(mute_label_, muted_);
     if (notification_label_ != nullptr && !lv_obj_has_flag(notification_label_, LV_OBJ_FLAG_HIDDEN)) {
         if (status_label_ != nullptr) {
             lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
@@ -1423,39 +1420,29 @@ void LvAdapterEpdiy::UpdateStatusBar(bool update_all) {
     }
 
     if (network_label_ != nullptr) {
+        // 网络图标后面跟一个标记：走代理时状态栏在网络图标旁画盾牌
         const char* neu = board.GetNetworkStateIcon();
-        if (neu != network_icon_) {
+        const bool proxy = valet::proxy::InForce();
+        if (neu != network_icon_ || proxy != proxy_shown_) {
             network_icon_ = neu;
-            lv_label_set_text(network_label_, neu != nullptr ? neu : "");
+            proxy_shown_ = proxy;
+            const char mark[2] = {proxy ? kStatusProxyMark : '\0', '\0'};
+            std::snprintf(network_key_, sizeof(network_key_), "%s%s", neu != nullptr ? neu : "", mark);
+            lv_label_set_text(network_label_, network_key_);
         }
     }
     int level = 0;
     bool charging = false;
     bool discharging = false;
     if (board.GetBatteryLevel(level, charging, discharging)) {
-        const char* icon = FONT_AWESOME_BATTERY_FULL;
-        if (charging) {
-            icon = FONT_AWESOME_BATTERY_BOLT;
-        } else if (level <= 10) {
-            icon = FONT_AWESOME_BATTERY_EMPTY;
-        } else if (level <= 30) {
-            icon = FONT_AWESOME_BATTERY_QUARTER;
-        } else if (level <= 60) {
-            icon = FONT_AWESOME_BATTERY_HALF;
-        } else if (level <= 85) {
-            icon = FONT_AWESOME_BATTERY_THREE_QUARTERS;
-        }
-        if (icon != battery_icon_) {
-            battery_icon_ = icon;
+        // 电池里写数字（不带 %），充电时后面跟闪电：标签文字是「57」或「57+」
+        char key[sizeof(battery_pct_cache_)];
+        StatusBarBatteryText(key, sizeof(key), level, charging);
+        battery_level_cache_ = level;
+        if (std::strcmp(key, battery_pct_cache_) != 0) {
+            std::snprintf(battery_pct_cache_, sizeof(battery_pct_cache_), "%s", key);
             if (battery_label_ != nullptr) {
-                lv_label_set_text(battery_label_, icon);
-            }
-        }
-        if (level != battery_level_cache_) {
-            battery_level_cache_ = level;
-            std::snprintf(battery_pct_cache_, sizeof(battery_pct_cache_), "%d%%", level);
-            if (battery_pct_label_ != nullptr) {
-                lv_label_set_text(battery_pct_label_, battery_pct_cache_);
+                lv_label_set_text(battery_label_, battery_pct_cache_);
             }
         }
     } else {
@@ -1474,7 +1461,7 @@ void LvAdapterEpdiy::UpdateStatusBar(bool update_all) {
         const bool muted = (codec != nullptr && codec->output_volume() == 0);
         if (muted != muted_) {
             muted_ = muted;
-            lv_label_set_text(mute_label_, muted_ ? FONT_AWESOME_VOLUME_XMARK : "");
+            StatusBarSetMuted(mute_label_, muted_);
         }
     }
 }
