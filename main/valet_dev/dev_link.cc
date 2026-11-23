@@ -525,6 +525,18 @@ void ValetDevLinkHandle(const char* json) {
                          if (item.id == profiles.active_id) { item.connection.url = u; done = valet::ValidProfile(item); }
                      ESP_LOGW(TAG, "assistant_url: %s", done && valet::SaveAssistantProfiles(profiles) ? "saved" : "FAILED");
                  }, Application::TaskDomain::Storage)) error = "BUSY";
+    } else if (!strcmp(cmd, "assistant_name")) {
+        // 仅测试版：给一个助理改显示名（按旧名字找），保留地址和长期凭据。
+        const auto* from = cJSON_GetObjectItemCaseSensitive(root, "from");
+        const auto* to = cJSON_GetObjectItemCaseSensitive(root, "to");
+        if (!cJSON_IsString(from) || !cJSON_IsString(to) || !*to->valuestring) error = "BAD_NAME";
+        else if (!Application::GetInstance().Schedule([f = std::string(from->valuestring), t = std::string(to->valuestring)] {
+                     auto profiles = valet::LoadAssistantProfiles();
+                     bool done = false;
+                     for (auto& item : profiles.items)
+                         if (item.name == f) { item.name = t; done = valet::ValidProfile(item); }
+                     ESP_LOGW(TAG, "assistant_name: %s", done && valet::SaveAssistantProfiles(profiles) ? "saved" : "FAILED");
+                 }, Application::TaskDomain::Storage)) error = "BUSY";
     } else if (!strcmp(cmd, "udisk")) {
         // 不碰屏幕测一次 U 盘往返：0.5 s 后（先让这条回复发出去）打开 U 盘，`s` 秒后关掉。
         // U 盘开着时调试口不在线，关掉后看调试口能否自己回来。

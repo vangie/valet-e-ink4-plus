@@ -306,6 +306,8 @@ def main():
     p = sub.add_parser("log"); p.add_argument("-n", type=int, default=60); p.add_argument("--grep")
     p = sub.add_parser("sdlog"); p.add_argument("path")
     p = sub.add_parser("assistant-url"); p.add_argument("url")
+    p = sub.add_parser("assistant-name", help="rename an assistant (by its current name); keeps address and credentials")
+    p.add_argument("old"); p.add_argument("new")
     p = sub.add_parser("livebars"); p.add_argument("state", choices=["on", "off"])
     p = sub.add_parser("micgate"); p.add_argument("state", choices=["on", "off"])
     p = sub.add_parser("voiceprobe", help="play <url>/play.raw, record, upload mic/ref to <url>/upload"); p.add_argument("url")
@@ -400,6 +402,8 @@ def main():
         dev({"cmd": "livebars", "on": args.state == "on"})
     elif args.command == "assistant-url":
         dev({"cmd": "assistant_url", "url": args.url})
+    elif args.command == "assistant-name":
+        dev({"cmd": "assistant_name", "from": args.old, "to": args.new})
     elif args.command == "sdlog":
         reply = dev({"cmd": "sdlog"})
         data = zlib.decompress(base64.b64decode(reply["data"]))
