@@ -168,6 +168,15 @@ esp_err_t Mutate(httpd_req_t* req) {
         uint32_t random[2]; esp_fill_random(random, sizeof(random));
         char generated[32]; std::snprintf(generated, sizeof(generated), "agent-%08lx%08lx", static_cast<unsigned long>(random[0]), static_cast<unsigned long>(random[1]));
         profile.id = generated;
+    } else if (action == "rename") {
+        profile.name = String(root.get(), "name");
+        // 前后空白去掉；不能空、不能太长（和添加时一样最多 32 个字）、不能有控制字符
+        while (!profile.name.empty() && (profile.name.back() == ' ' || profile.name.back() == '\t')) profile.name.pop_back();
+        while (!profile.name.empty() && (profile.name.front() == ' ' || profile.name.front() == '\t')) profile.name.erase(0, 1);
+        size_t chars = 0;
+        bool bad = false;
+        for (unsigned char c : profile.name) { if ((c & 0xC0) != 0x80) ++chars; if (c < 0x20 || c == 0x7F) bad = true; }
+        if (profile.name.empty() || chars > 32 || bad) return Reply(req, "400 Bad Request", "{\"error\":\"名字不能空，最多 32 个字\"}");
     } else if (action != "select" && action != "remove") return Reply(req, "400 Bad Request", "{\"error\":\"未知操作\"}");
     {
         std::lock_guard<std::mutex> lock(s_mutex);
@@ -188,6 +197,9 @@ esp_err_t Mutate(httpd_req_t* req) {
             bool exists = false;
             for (const auto& item : profiles.items) if (item.connection.url == profile.connection.url) exists = true;
             if (!exists) changed = profiles.Upsert(profile) && profiles.Select(profile.id);
+        } else if (action == "rename") {
+            for (auto& item : profiles.items)
+                if (item.id == id && item.name != profile.name) { item.name = profile.name; changed = ValidProfile(item); }
         } else if (action == "select") changed = profiles.Select(id);
         else changed = profiles.Remove(id);
         const bool saved = changed && SaveAssistantProfiles(profiles);

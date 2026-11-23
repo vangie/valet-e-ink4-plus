@@ -30,7 +30,7 @@
       const cur = a.id === state.activeAssistant;
       const c = capsOf(a);
       const caps = `<span>${T("提问", "Ask")} ✓</span><span class="${c.live ? "" : "is-warn"}">${T("通话", "Call")} ${c.live ? "✓" : T("未配置", "not set up")}</span><span>${T("阅读上下文", "Reading context")} ✓</span>`;
-      return `<article class="sw-item ${cur ? "is-cur" : ""}"><div><h3>${h(a.name)}${cur ? `<em class="sw-tag">${T("当前", "In use")}</em>` : ""}</h3><p>${h(a.backend)} · ${h(hostOf(a.url))}</p><p class="sw-caps">${caps}</p></div><div class="sw-act">${cur ? "" : `<button data-sw-use="${h(a.id)}">${T("使用", "Use")}</button>`}<button class="sw-quiet" data-sw-remove="${h(a.id)}">${S.removing === a.id ? T("确认移除", "Confirm") : T("移除", "Remove")}</button></div></article>`;
+      return `<article class="sw-item ${cur ? "is-cur" : ""}"><div><h3>${h(a.name)}${cur ? `<em class="sw-tag">${T("当前", "In use")}</em>` : ""}</h3><p>${h(a.backend)} · ${h(hostOf(a.url))}</p><p class="sw-caps">${caps}</p></div><div class="sw-act">${cur ? "" : `<button data-sw-use="${h(a.id)}">${T("使用", "Use")}</button>`}<button data-sw-rename="${h(a.id)}">${T("改名", "Rename")}</button><button class="sw-quiet" data-sw-remove="${h(a.id)}">${S.removing === a.id ? T("确认移除", "Confirm") : T("移除", "Remove")}</button></div></article>`;
     }).join("");
     return `<div class="sw-card-head"><h2>${T("我的助理", "My assistants")}</h2><span>${state.assistants.length}</span></div>${items || `<p class="sw-empty">${T("设备上还没有助理。从下面添加第一个。", "No assistant on the device yet. Add the first one below.")}</p>`}`;
   }
@@ -253,6 +253,13 @@
     if ((n = t("[data-sw-view]"))) { S.view = n.dataset.swView; return paintAll(); }
     if ((n = t("[data-sw-lang]"))) { S.lang = n.dataset.swLang; el.querySelector(".sw-lang")?.setAttribute("data-selected", S.lang); return paintAll(); }
     if ((n = t("[data-sw-use]"))) { useAssistant(n.dataset.swUse); render(); return paintList(); }
+    if ((n = t("[data-sw-rename]"))) {
+      // 和真实页面一样：浏览器自带的输入框，可以打中文；最多 32 个字
+      const item = state.assistants.find((x) => x.id === n.dataset.swRename);
+      const name = item ? (window.prompt(T("新的名字（最多 32 个字）", "New name (up to 32 characters)"), item.name) || "").trim().slice(0, 32) : "";
+      if (item && name && name !== item.name) { item.name = name; log(`配置页：助理改名为「${name}」，设备上马上就是新名字。`); render(); }
+      return paintList();
+    }
     if ((n = t("[data-sw-remove]"))) {
       const id = n.dataset.swRemove;
       if (S.removing !== id) {

@@ -71,6 +71,7 @@ static void BuildAssistants(lv_obj_t* page);
 static lv_timer_t* s_setup_poll = nullptr;
 static std::atomic<bool> s_setup_starting{false};
 static bool s_setup_visible = false;
+static bool s_setup_rename = false;   // 配置页是为了改名打开的（设备键盘打不了中文，名字在手机或电脑上改）
 static std::string s_remove_id;
 static void RefreshAssistantList() {
     if (!s_ui.alive || !s_assistants) return;
@@ -94,8 +95,12 @@ static void StopSetupClicked(lv_event_t*) {
     // The button being tapped is inside the page; rebuild after this event returns.
     lv_async_call([](void*) { RebuildPage(); }, nullptr);
 }
-static void StartSetupClicked(lv_event_t*) {
+static void StartSetup(bool rename);
+static void StartSetupClicked(lv_event_t*) { StartSetup(false); }
+static void StartRenameClicked(lv_event_t*) { StartSetup(true); }
+static void StartSetup(bool rename) {
     if (s_setup_starting) return;
+    s_setup_rename = rename;
     s_setup_visible = true;
     s_setup_starting = true;
     // 进入「添加助理」会整页重建，页面代数随之变化，所以这里不能用代数判断页面还在不在：
@@ -160,7 +165,8 @@ static void BuildAssistants(lv_obj_t* page) {
     if (s_setup_visible) {
         const auto setup = valet::GetSetupStatus();
         auto* title = lv_label_create(page);
-        lv_label_set_text(title, CloudText("在手机或电脑上添加助理", "Add on a phone or computer"));
+        lv_label_set_text(title, s_setup_rename ? CloudText("在手机或电脑上改名", "Rename on a phone or computer")
+                                                : CloudText("在手机或电脑上添加助理", "Add on a phone or computer"));
         auto* hint = lv_label_create(page);
         lv_obj_set_width(hint, lv_pct(100));
         lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
@@ -185,7 +191,9 @@ static void BuildAssistants(lv_obj_t* page) {
             auto* steps = lv_label_create(page);
             lv_obj_set_width(steps, lv_pct(100));
             lv_label_set_long_mode(steps, LV_LABEL_LONG_WRAP);
-            lv_label_set_text(steps, CloudText("同一 Wi-Fi → 复制提示给助理 → 粘贴回复保存。二维码十分钟有效。", "Same Wi-Fi → send prompt → paste reply and save. QR expires in 10 minutes."));
+            lv_label_set_text(steps, s_setup_rename
+                ? CloudText("同一 Wi-Fi 扫码打开 → 在「已保存的助理」里点「改名」。二维码十分钟有效。", "Same Wi-Fi, scan → in Saved assistants choose Rename. QR expires in 10 minutes.")
+                : CloudText("同一 Wi-Fi → 复制提示给助理 → 粘贴回复保存。二维码十分钟有效。", "Same Wi-Fi → send prompt → paste reply and save. QR expires in 10 minutes."));
         } else if (!opening) {
             SettingsCreateSelectableOption(page, CloudText("去网络设置", "Network settings"), OpenWifi, 0);
             SettingsCreateSelectableOption(page, CloudText("再试一次", "Try again"), StartSetupClicked, 0);
@@ -259,7 +267,7 @@ static void BuildAssistants(lv_obj_t* page) {
                     : profile.live ? "" : CloudText(" · 通话未验证", " · call not verified"));
         lv_obj_set_style_text_font(state, small, 0);
         lv_obj_set_pos(state, left, 86);
-        const int inner = 617 - 6 - left - 27, half = (inner - 16) / 2, by = 152;
+        const int inner = 617 - 6 - left - 27, half = (inner - 16) / 2, third = (inner - 2 * 16) / 3, by = 152;
         if (removing) {
             auto* yes = SettingsValetButton(card, CloudText("确认移除", "Remove"), ApplyProfileChange, -static_cast<intptr_t>(i) - 1, true);
             lv_obj_set_width(yes, half);
@@ -269,6 +277,7 @@ static void BuildAssistants(lv_obj_t* page) {
             lv_obj_set_pos(no, left + half + 16, by);
             continue;
         }
+        // 一排三格：使用（在用的写「正在使用」）/ 改名 / 移除
         if (current) {
             auto* using_now = lv_label_create(card);
             lv_label_set_text(using_now, CloudText("正在使用", "In use"));
@@ -276,13 +285,15 @@ static void BuildAssistants(lv_obj_t* page) {
             lv_obj_set_pos(using_now, left, by + 24);
         } else {
             auto* use = SettingsValetButton(card, CloudText("使用", "Use"), ApplyProfileChange, static_cast<intptr_t>(i));
-            lv_obj_set_width(use, half);
+            lv_obj_set_width(use, third);
             lv_obj_set_pos(use, left, by);
         }
-        // The only thing to manage on the device is removal.
+        auto* rename = SettingsValetButton(card, CloudText("改名", "Rename"), StartRenameClicked);
+        lv_obj_set_width(rename, third);
+        lv_obj_set_pos(rename, left + third + 16, by);
         auto* remove = SettingsValetButton(card, CloudText("移除", "Remove"), AskRemove, static_cast<intptr_t>(i));
-        lv_obj_set_width(remove, half);
-        lv_obj_set_pos(remove, left + half + 16, by);
+        lv_obj_set_width(remove, third);
+        lv_obj_set_pos(remove, left + 2 * (third + 16), by);
     }
     if (!profiles.items.empty()) {
         auto* note = lv_label_create(page);

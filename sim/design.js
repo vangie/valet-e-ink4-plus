@@ -747,7 +747,7 @@ function assistantConnection() {
   const detail = state.assistants.find((item) => item.id === state.assistantDetail);
   if (detail) {
     if (state.assistantUnpair) return `<div class="v-pairing"><h2>${L("移除助理？", "Remove assistant?")}</h2><p class="v-tip">${esc(detail.name)} · ${esc(detail.backend)}</p><p class="v-tip">${L("仅移除此设备保存的连接。其他助理和书籍保留；服务端授权需在原助理中撤销。", "Remove this saved connection. Other assistants and books remain; revoke server access separately.")}</p><button class="v-line" data-remove-assistant="${esc(detail.id)}">${L("确认移除", "Remove")}</button><button class="v-line" data-assistant-action="cancel-remove">${L("取消", "Cancel")}</button></div>`;
-    return `<div class="v-pairing"><button class="v-line" data-assistant-action="list">${L("返回助理列表", "Back to assistants")}</button><h2>${esc(detail.name)}</h2><p class="v-tip">${esc(detail.backend)} · ${detail.id === state.activeAssistant ? L("当前使用", "In use") : L("已保存", "Saved")}</p><p class="v-tip">${detail.caps?.live === false ? L("支持提问和阅读上下文。通话还没配置：要助理那边先配好实时语音，再在配置页重新测试。", "Ask and reading context work. Call is not set up: the assistant needs a realtime voice service, then test again from the setup page.") : L("支持语音提问、Live 通话和阅读上下文。", "Voice questions, Live calls and reading context.")}</p><code class="v-assistant-url">${esc(detail.url)}</code>${detail.id === state.activeAssistant ? `<button class="v-line" data-pair-check>${L("检查连接（模拟）", "Check connection (demo)")}</button><p class="v-tip">${esc(state.pairStatus)}</p>` : `<button class="v-solid" data-use-assistant="${esc(detail.id)}">${L("使用这个助理", "Use this assistant")}</button>`}<button class="v-line" data-assistant-action="confirm-unpair">${L("移除此助理", "Remove assistant")}</button></div>`;
+    return `<div class="v-pairing"><button class="v-line" data-assistant-action="list">${L("返回助理列表", "Back to assistants")}</button><h2>${esc(detail.name)}</h2><p class="v-tip">${esc(detail.backend)} · ${detail.id === state.activeAssistant ? L("当前使用", "In use") : L("已保存", "Saved")}</p><p class="v-tip">${detail.caps?.live === false ? L("支持提问和阅读上下文。通话还没配置：要助理那边先配好实时语音，再在配置页重新测试。", "Ask and reading context work. Call is not set up: the assistant needs a realtime voice service, then test again from the setup page.") : L("支持语音提问、Live 通话和阅读上下文。", "Voice questions, Live calls and reading context.")}</p><code class="v-assistant-url">${esc(detail.url)}</code>${detail.id === state.activeAssistant ? `<button class="v-line" data-pair-check>${L("检查连接（模拟）", "Check connection (demo)")}</button><p class="v-tip">${esc(state.pairStatus)}</p>` : `<button class="v-solid" data-use-assistant="${esc(detail.id)}">${L("使用这个助理", "Use this assistant")}</button>`}<button class="v-line" data-assistant-action="rename">${L("改名", "Rename")}</button><button class="v-line" data-assistant-action="confirm-unpair">${L("移除此助理", "Remove assistant")}</button></div>`;
   }
   if (state.assistantUnpair) return `<div class="v-setup"><h2>${L("解除配对？", "Unpair assistant?")}</h2><p>${L("此设备将不再连接当前助理，书籍和阅读进度会保留。", "Disconnect this device. Books and reading progress are kept.")}</p><button class="v-line" data-assistant-action="unpair">${L("解除配对", "Unpair")}</button><button class="v-line" data-assistant-action="cancel">${L("取消", "Cancel")}</button></div>`;
   if (state.assistantSetup) return assistantSetupScreen();
@@ -777,6 +777,12 @@ function assistantSetupScreen() {
       : phase === "opened" ? L("配置页已打开。在页面里粘贴助理的回复。", "The page is open. Paste the assistant's reply there.")
         : L("还没人打开配置页。这个界面开着时，配置页才可用。", "Nobody has opened the page yet. It only works while this screen is open.");
   const access = hotspot ? L(`先连热点 ${state.localServiceSsid}`, `Join hotspot ${state.localServiceSsid}`) : L("手机或电脑连同一个 Wi-Fi", "Phone or computer on the same Wi-Fi");
+  // 改名：设备键盘打不了中文，名字在手机或电脑的配置页里改
+  if (state.assistantRename) return `<div class="v-pairing"><h2>${L("在手机或电脑上改名", "Rename on a phone or computer")}</h2>
+    <div class="v-pair-top">${SetupPage.qr(SetupPage.deviceUrl(), 76)}<div class="v-pair-address"><small>${L("扫码，或在浏览器打开", "Scan, or open in a browser")}</small><code>${esc(SetupPage.deviceUrl())}</code><small>${L("手机或电脑连同一个 Wi-Fi", "Phone or computer on the same Wi-Fi")}</small></div></div>
+    <p class="v-tip">${L("打开后在「我的助理」里点「改名」。二维码十分钟有效。", "Open it and choose Rename under My assistants. The QR code works for ten minutes.")}</p>
+    <button class="v-line" data-assistant-action="preview">${SetupPage.isOpen() ? L("配置页已打开（模拟）", "Page is open (simulated)") : L("在电脑上打开配置页（模拟）", "Open the page on a computer (simulated)")}</button>
+    <button class="v-line" data-assistant-action="cancel">${L("返回", "Back")}</button></div>`;
   return `<div class="v-pairing"><h2>${L("在手机或电脑上连接", "Connect on a phone or computer")}</h2>
     <div class="v-pair-top">${SetupPage.qr(SetupPage.deviceUrl(), 76)}<div class="v-pair-address"><small>${L("扫码，或在浏览器打开", "Scan, or open in a browser")}</small><code>${esc(SetupPage.deviceUrl())}</code><small>${access}</small></div></div>
     <ol class="v-flow">${flow}</ol><p class="v-tip">${tip}</p>
@@ -1096,6 +1102,16 @@ panel.addEventListener("click", (e) => {
   }
   if ((el = hit("[data-assistant-action]"))) {
     const action = el.dataset.assistantAction;
+    if (action === "rename") {
+      SetupPage.reset();
+      state.assistantDetail = null;
+      state.assistantSetup = true;
+      state.assistantRename = true;
+      state.localService = state.link === "wifi";
+      state.localServiceMode = "wifi";
+      state.localServiceUrl = "http://192.168.1.86";
+    }
+    if (action === "start") state.assistantRename = false;
     if (action === "start") {
       SetupPage.reset();
       state.assistantDetail = null;
@@ -1112,6 +1128,7 @@ panel.addEventListener("click", (e) => {
     }
     if (action === "cancel" || action === "finish") {
       SetupPage.reset();
+      state.assistantRename = false;
       state.assistantSetup = false;
       state.assistantUnpair = false;
       state.localService = false;
