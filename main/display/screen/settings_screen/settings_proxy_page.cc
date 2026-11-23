@@ -20,10 +20,9 @@
 namespace {
 using valet::proxy::Prefs;
 
-enum Field : intptr_t { kFieldAddress = 0, kFieldLogin = 1 };
+enum Field : intptr_t { kFieldAddress = 0, kFieldLogin = 1, kFieldMethod = 2 };
 // Segment values: which control, and which choice.
-enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindSs = 22,
-                       kMethod0 = 30 };   // kMethod0 + index into kMethodChoices
+enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindSs = 22 };
 
 struct Ui {
     lv_obj_t* page = nullptr;
@@ -33,10 +32,8 @@ struct Ui {
     lv_obj_t* address_detail = nullptr;
     lv_obj_t* login_detail = nullptr;
     lv_obj_t* login_title = nullptr;   // 「账号和密码」，Shadowsocks 时是「密码」
-    lv_obj_t* method_gap = nullptr;    // SS only: the cipher
-    lv_obj_t* method_label = nullptr;
-    lv_obj_t* method_seg = nullptr;
-    lv_obj_t* method_note = nullptr;
+    lv_obj_t* method_detail = nullptr; // SS only: the cipher row (its detail label)
+    lv_obj_t* picker = nullptr;        // the cipher list, an overlay on the screen
     lv_obj_t* test_label = nullptr;
     lv_obj_t* result = nullptr;
     // Text editor (an overlay on the screen)
@@ -78,15 +75,7 @@ const char* KindName(net_proxy::Kind kind) {
     return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : kind == net_proxy::Kind::kShadowsocks ? "SS" : "HTTP";
 }
 bool IsSs(const Prefs& prefs) { return prefs.kind == net_proxy::Kind::kShadowsocks; }
-// The ciphers offered as buttons; the others (aes-*-ctr, aes-128/192-cfb, xchacha…, chacha20-ietf)
-// come in with an ss:// link.
-constexpr const char* kMethodChoices[] = {"aes-256-gcm", "aes-128-gcm", "chacha20-ietf-poly1305", "aes-256-cfb"};
 std::string MethodOf(const Prefs& prefs) { return prefs.method.empty() ? valet::ss::kDefaultMethod : prefs.method; }
-int MethodIndex(const Prefs& prefs) {
-    const std::string method = MethodOf(prefs);
-    for (int i = 0; i < 4; ++i) if (method == kMethodChoices[i]) return i;
-    return -1;
-}
 void SetShown(lv_obj_t* obj, bool shown) {
     if (!obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN) != shown) return;
     if (shown) lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
@@ -115,16 +104,9 @@ void Refresh() {
     SettingsValetSelect(s_ui.cell_seg, prefs.on_cell ? 1 : 0);
     SettingsValetSelect(s_ui.kind_seg, KindIndex(prefs.kind));
     SetText(s_ui.login_title, IsSs(prefs) ? Text("密码", "Password") : Text("账号和密码", "Login"));
-    SetShown(s_ui.method_gap, IsSs(prefs));
-    SetShown(s_ui.method_label, IsSs(prefs));
-    SetShown(s_ui.method_seg, IsSs(prefs));
-    SetShown(s_ui.method_note, IsSs(prefs));
-    if (IsSs(prefs)) {
-        SettingsValetSelect(s_ui.method_seg, MethodIndex(prefs));
-        const std::string note = MethodIndex(prefs) >= 0
-            ? Text("要和服务器的设置一样。其他方式可以在地址里输整条 ss:// 链接。", "Must match the server. Other ciphers: enter a whole ss:// link as the address.")
-            : std::string(Text("现在用的是 ", "In use: ")) + MethodOf(prefs) + Text("（来自 ss:// 链接）", " (from an ss:// link)");
-        SetText(s_ui.method_note, note.c_str());
+    if (s_ui.method_detail) {
+        SetShown(lv_obj_get_parent(s_ui.method_detail), IsSs(prefs));
+        SetText(s_ui.method_detail, MethodOf(prefs).c_str());
     }
     SetText(s_ui.address_detail, AddressText(prefs).c_str());
     SetText(s_ui.login_detail, LoginText(prefs).c_str());
@@ -398,6 +380,144 @@ void OpenEditor(Field field) {
     RefreshEdit();
 }
 
+// ── Cipher picker ──────────────────────────────────────────────────────────
+// All ciphers in one list that scrolls (there are too many to lay out as buttons), with no judgement
+// on them: the server decides which one is used. Tapping one picks it and closes the list.
+constexpr int32_t kPickerRowH = 92;
+
+void ClosePicker() {
+    if (s_ui.picker) lv_obj_delete(s_ui.picker);   // its delete handler clears the pointer
+}
+
+void AddPickerRow(lv_obj_t* list, const char* name, bool selected) {
+    auto* row = lv_obj_create(list);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, lv_pct(100), kPickerRowH);
+    lv_obj_set_style_border_width(row, 2, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(row, lv_color_black(), 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS));
+    HapticAttachClick(row);
+    auto* label = lv_label_create(row);
+    lv_label_set_text(label, name);
+    lv_obj_set_style_text_font(label, selected ? Strong() : fontpack_lv_font_ui(), 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 4, 0);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    if (selected) {
+        auto* mark = lv_label_create(row);
+        lv_label_set_text(mark, Text("在用", "In use"));
+        lv_obj_set_style_text_font(mark, Small(), 0);
+        lv_obj_align(mark, LV_ALIGN_RIGHT_MID, -24, 0);
+        lv_obj_clear_flag(mark, LV_OBJ_FLAG_CLICKABLE);
+    }
+    // The name is the value: the row keeps a pointer to the static table entry.
+    lv_obj_add_event_cb(row, [](lv_event_t* e) {
+        Prefs prefs = valet::proxy::Get();
+        prefs.method = static_cast<const char*>(lv_event_get_user_data(e));
+        ClosePicker();
+        Save(prefs);
+    }, LV_EVENT_CLICKED, const_cast<char*>(name));
+}
+
+void OpenMethodPicker() {
+    if (s_ui.picker || s_ui.editor) return;
+    const std::string current = MethodOf(valet::proxy::Get());
+    auto* mask = lv_obj_create(lv_screen_active());
+    s_ui.picker = mask;
+    lv_obj_remove_style_all(mask);
+    lv_obj_set_size(mask, lv_pct(100), lv_pct(100));
+    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
+    // A tap beside the panel closes it, as on the reading card.
+    lv_obj_add_event_cb(mask, [](lv_event_t* e) {
+        if (lv_event_get_target(e) == lv_event_get_current_target(e)) ClosePicker();
+    }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(mask, [](lv_event_t*) { s_ui.picker = nullptr; }, LV_EVENT_DELETE, nullptr);
+
+    auto* panel = lv_obj_create(mask);
+    lv_obj_remove_style_all(panel);
+    lv_obj_set_size(panel, lv_pct(100), lv_pct(76));
+    lv_obj_align(panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(panel, lv_color_black(), 0);
+    lv_obj_set_style_border_width(panel, 3, 0);
+    lv_obj_set_style_border_side(panel, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_pad_hor(panel, 33, 0);
+    lv_obj_set_style_pad_top(panel, 16, 0);
+    lv_obj_set_style_pad_bottom(panel, 16, 0);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+
+    // Title and a way out.
+    auto* head = lv_obj_create(panel);
+    lv_obj_remove_style_all(head);
+    lv_obj_set_size(head, lv_pct(100), 80);
+    lv_obj_clear_flag(head, LV_OBJ_FLAG_SCROLLABLE);
+    auto* title = lv_label_create(head);
+    lv_label_set_text(title, Text("加密方式", "Cipher"));
+    lv_obj_set_style_text_font(title, Strong(), 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    auto* close = lv_obj_create(head);
+    lv_obj_remove_style_all(close);
+    lv_obj_set_size(close, 140, 80);
+    lv_obj_align(close, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
+    HapticAttachClick(close);
+    lv_obj_add_event_cb(close, [](lv_event_t*) { ClosePicker(); }, LV_EVENT_CLICKED, nullptr);
+    auto* close_label = lv_label_create(close);
+    lv_label_set_text(close_label, Text("关闭", "Close"));
+    lv_obj_set_style_text_font(close_label, Small(), 0);
+    lv_obj_set_style_text_decor(close_label, LV_TEXT_DECOR_UNDERLINE, 0);
+    lv_obj_align(close_label, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_clear_flag(close_label, LV_OBJ_FLAG_CLICKABLE);
+    auto* note = lv_label_create(panel);
+    lv_label_set_text(note, Text("要和服务器的设置一样。列表可以上下拖。", "Must match the server. Drag the list up and down."));
+    lv_obj_set_width(note, lv_pct(100));
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(note, Small(), 0);
+
+    // The list: scrolls with a scroll bar always shown; no flinging or bouncing (each frame is a refresh on ink).
+    auto* list = lv_obj_create(panel);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_width(list, lv_pct(100));
+    lv_obj_set_flex_grow(list, 1);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_right(list, 24, 0);   // room for the scroll bar
+    lv_obj_set_style_margin_top(list, 12, 0);
+    // When a drag ends, settle on whole rows (the list is a whole number of rows tall, so none is cut).
+    lv_obj_add_event_cb(list, [](lv_event_t* e) {
+        auto* l = static_cast<lv_obj_t*>(lv_event_get_current_target(e));
+        const int32_t y = lv_obj_get_scroll_y(l);
+        const int32_t end = y + lv_obj_get_scroll_bottom(l);
+        const int32_t whole = LV_CLAMP(0, (y + kPickerRowH / 2) / kPickerRowH * kPickerRowH, end);
+        if (whole != y) lv_obj_scroll_to_y(l, whole, LV_ANIM_OFF);
+    }, LV_EVENT_SCROLL_END, nullptr);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ON);
+    lv_obj_clear_flag(list, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_ELASTIC));
+    lv_obj_set_style_width(list, 8, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(list, lv_color_black(), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(list, 0, LV_PART_SCROLLBAR);
+    int selected = 0;
+    for (int i = 0; const char* name = valet::ss::MethodName(i); ++i) {
+        AddPickerRow(list, name, current == name);
+        if (current == name) selected = i;
+    }
+    // A whole number of rows tall, so no row is ever cut at the top or the bottom.
+    lv_obj_update_layout(list);
+    const int32_t rows = LV_MAX(1, lv_obj_get_content_height(list) / kPickerRowH);
+    lv_obj_set_flex_grow(list, 0);
+    lv_obj_set_height(list, rows * kPickerRowH);
+    lv_obj_update_layout(list);
+    // Open with the current one in the middle where possible.
+    const int32_t end = lv_obj_get_scroll_bottom(list);
+    lv_obj_scroll_to_y(list, LV_CLAMP(0, (selected - rows / 2) * kPickerRowH, end), LV_ANIM_OFF);
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 void OnChoice(lv_event_t* e) {
     const auto choice = static_cast<Choice>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
@@ -419,15 +539,14 @@ void OnChoice(lv_event_t* e) {
         case kKindHttp: prefs.kind = net_proxy::Kind::kHttp; break;
         case kKindSocks: prefs.kind = net_proxy::Kind::kSocks5; break;
         case kKindSs: prefs.kind = net_proxy::Kind::kShadowsocks; break;
-        default:
-            if (choice >= kMethod0 && choice < kMethod0 + 4) prefs.method = kMethodChoices[choice - kMethod0];
-            break;
     }
     Save(prefs);
 }
 
 void OnRow(lv_event_t* e) {
-    OpenEditor(static_cast<Field>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e))));
+    const auto field = static_cast<Field>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+    if (field == kFieldMethod) { OpenMethodPicker(); return; }
+    OpenEditor(field);
 }
 
 struct TestJob { Prefs prefs; uint32_t generation; };
@@ -517,6 +636,7 @@ std::string SettingsProxyPage_Summary() {
 }
 
 bool SettingsProxyPage_CloseEditor() {
+    if (s_ui.picker) { ClosePicker(); return true; }
     if (!s_ui.editor) return false;
     CloseEditor();
     return true;
@@ -524,6 +644,7 @@ bool SettingsProxyPage_CloseEditor() {
 
 void SettingsProxyPage_Reset() {
     CloseEditor();
+    ClosePicker();
     s_ui = {};
     s_alive = false;
     ++s_generation;   // a test still running will not write into the next page
@@ -552,18 +673,10 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
     SettingsValetLabel(page, Text("代理类型", "Proxy type"));
     static const char* const kKinds[] = {"HTTP", "SOCKS5", "SS"};
     s_ui.kind_seg = SettingsValetSegments(page, kKinds, 3, OnChoice, kKindValues);
-    // SS only: which cipher. Shown and hidden by Refresh().
-    s_ui.method_gap = lv_obj_create(page);
-    lv_obj_remove_style_all(s_ui.method_gap);
-    lv_obj_set_size(s_ui.method_gap, lv_pct(100), 30);
-    s_ui.method_label = SettingsValetLabel(page, Text("加密方式", "Cipher"));
-    static const char* const kMethodNames[] = {"AES-256-GCM", "AES-128-GCM", "ChaCha20-Poly1305", "AES-256-CFB"};
-    static const intptr_t kMethodValues[] = {kMethod0, kMethod0 + 1, kMethod0 + 2, kMethod0 + 3};
-    s_ui.method_seg = SettingsValetSegments(page, kMethodNames, 4, OnChoice, kMethodValues, 2);
-    s_ui.method_note = SettingsValetNote(page, "");
     SettingsValetGap(page, 30);
     s_ui.address_detail = AddRow(page, Text("地址", "Address"), kFieldAddress, true);
     s_ui.login_detail = AddRow(page, Text("账号和密码", "Login"), kFieldLogin, false, &s_ui.login_title);
+    s_ui.method_detail = AddRow(page, Text("加密方式", "Cipher"), kFieldMethod, false);   // SS only
     SettingsValetGap(page, 30);
     auto* test = SettingsValetButton(page, "", OnTest);
     s_ui.test_label = lv_obj_get_child(test, 0);

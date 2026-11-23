@@ -89,9 +89,10 @@ const state = {
   netGrace: 30,
   proxyWifi: false,  // 连 Wi-Fi 时走代理
   proxyCell: false,  // 用 4G 时走代理
-  proxyKind: "http", // http | socks5 | ss（Shadowsocks，aes-256-cfb）
+  proxyKind: "http", // http | socks5 | ss（Shadowsocks）
   proxySsPass: false, // Shadowsocks 的密码填了没有
-  proxyMethod: "aes-256-gcm", // SS 的加密方式；其他方式靠 ss:// 链接填
+  proxyMethod: "aes-256-gcm", // SS 的加密方式（设备支持的 12 种之一），在弹出列表里选
+  proxyPicker: false, // SS 加密方式的弹出列表开着没有
   proxyAddr: "",     // 地址:端口，空 = 没设置
   proxyUser: "",     // 账号，空 = 不用
   proxyTest: "",     // 上一次测试的结果

@@ -267,6 +267,7 @@ function v2GoLive() {
   if (!state.live) switchMode("live");
 }
 function openSetting(id) {
+  state.proxyPicker = false; // 弹出列表不跨页留着，和设备一样
   if (state.screen === "settings") {
     state.settingsScreen = id;
     return render();
@@ -683,11 +684,10 @@ function v2SettingsPane(id) {
     return `${v2Fld(L("连 Wi-Fi 时", "On Wi-Fi"), v2Seg(onoff, state.proxyWifi ? "on" : "off", "data-proxy-wifi"))}
       ${v2Fld(L("用 4G 时", "On 4G"), v2Seg(onoff, state.proxyCell ? "on" : "off", "data-proxy-cell"), L("4G 下连不到家里局域网里的代理。", "On 4G a proxy on the home network cannot be reached."))}
       ${v2Fld(L("代理类型", "Proxy type"), v2Seg([["http", "HTTP"], ["socks5", "SOCKS5"], ["ss", "SS"]], state.proxyKind, "data-proxy-kind"))}
-      ${state.proxyKind === "ss" ? v2Fld(L("加密方式", "Cipher"), v2Seg([["aes-256-gcm", "AES-256-GCM"], ["aes-128-gcm", "AES-128-GCM"], ["chacha20-ietf-poly1305", "ChaCha20-Poly1305"], ["aes-256-cfb", "AES-256-CFB"]], state.proxyMethod, "data-proxy-method").replace('class="v-seg"', 'class="v-seg two"'),
-        L("要和服务器的设置一样。其他方式可以在地址里输整条 ss:// 链接。", "Must match the server. Other ciphers: enter a whole ss:// link as the address.")) : ""}
       <nav class="v-rows"><button class="v-row" data-proxy-addr><span><b>${L("地址", "Address")}</b><em>${state.proxyAddr || L("还没填。点这里输入", "Not set. Tap to enter")}</em></span>${ic("go", "chev")}</button>
         ${state.proxyKind === "ss"
-          ? `<button class="v-row" data-proxy-user><span><b>${L("密码", "Password")}</b><em>${state.proxySsPass ? L("已填", "Set") : L("还没填。SS 必须有密码", "Not set. SS needs one")}</em></span>${ic("go", "chev")}</button></nav>`
+          ? `<button class="v-row" data-proxy-user><span><b>${L("密码", "Password")}</b><em>${state.proxySsPass ? L("已填", "Set") : L("还没填。SS 必须有密码", "Not set. SS needs one")}</em></span>${ic("go", "chev")}</button>
+            <button class="v-row" data-proxy-pick><span><b>${L("加密方式", "Cipher")}</b><em>${state.proxyMethod}</em></span>${ic("go", "chev")}</button></nav>`
           : `<button class="v-row" data-proxy-user><span><b>${L("账号和密码", "Login")}</b><em>${state.proxyUser ? state.proxyUser + L("，密码已填", ", password set") : L("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one")}</em></span>${ic("go", "chev")}</button></nav>`}
       <div class="v-fld"><button class="v-line is-full" data-proxy-test>${L("测试这个代理", "Test this proxy")}</button>${state.proxyTest ? `<p>${state.proxyTest}</p>` : ""}
         <p>${L("不走代理的：对时、局域网里的地址、上传日志。", "Not proxied: time sync, local addresses, log upload.")}</p></div>`;
@@ -799,6 +799,22 @@ function proxySummary() {
   if (!state.proxyWifi && !state.proxyCell) return L("没开 · ", "Off · ") + where;
   return (state.proxyWifi ? L("连 Wi-Fi 时才走 · ", "Only on Wi-Fi · ") : L("用 4G 时才走 · ", "Only on 4G · ")) + where;
 }
+// SS 的加密方式：设备支持的全部方式放在一个能上下拖的弹出列表里，不分组、不评价（用哪种由服务器决定）。
+// 列表高度是整行的倍数，拖完停在整行上；打开时正在用的那项尽量在中间。点一项就选上并关掉。
+const SS_METHODS = ["aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305",
+  "aes-128-cfb", "aes-192-cfb", "aes-256-cfb", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr", "chacha20-ietf"];
+const PICK_ROW = 31, PICK_ROWS = 8;
+function cipherPicker() {
+  const at = SS_METHODS.indexOf(state.proxyMethod);
+  const top = Math.max(0, Math.min(at - (PICK_ROWS >> 1), SS_METHODS.length - PICK_ROWS)) * PICK_ROW;
+  const rows = SS_METHODS.map((m) => `<button class="v-pick-row${m === state.proxyMethod ? " on" : ""}" data-proxy-method="${m}"><b>${m}</b>${m === state.proxyMethod ? `<em>${L("在用", "In use")}</em>` : ""}</button>`).join("");
+  setTimeout(() => { const list = panel.querySelector(".v-pick-list"); if (list) list.scrollTop = top; });
+  return `<div class="v-pick" data-pick-mask><div class="v-pick-panel">
+      <div class="v-pick-head"><b>${L("加密方式", "Cipher")}</b><button data-pick-close>${L("关闭", "Close")}</button></div>
+      <p>${L("要和服务器的设置一样。列表可以上下拖。", "Must match the server. Drag the list up and down.")}</p>
+      <div class="v-pick-list" style="height:${PICK_ROW * PICK_ROWS}px">${rows}</div></div></div>`;
+}
+
 function v2Settings() {
   const id = state.settingsScreen;
   const titles = {
@@ -809,7 +825,8 @@ function v2Settings() {
     bt: L("蓝牙", "Bluetooth"), pager: L("翻页器", "Page turner"),
   };
   const body = id === "list" ? v2SettingsHome() : v2SettingsPane(id);
-  return `${bar()}<main class="v-page v-set">${v2Head(titles[id] || titles.list)}<div class="v-pane${id === "net" ? " is-tight" : ""}">${body}</div></main>`;
+  const picker = id === "proxy" && state.proxyPicker && state.proxyKind === "ss" ? cipherPicker() : "";
+  return `${bar()}<main class="v-page v-set">${v2Head(titles[id] || titles.list)}<div class="v-pane${id === "net" ? " is-tight" : ""}">${body}</div></main>${picker}`;
 }
 
 // 待机：官方的斜切大时钟，下面是下一条待办和一句提示。
@@ -942,7 +959,11 @@ panel.addEventListener("click", (e) => {
     state.proxyTest = "";
     return render();
   }
-  if ((el = hit("[data-proxy-method]"))) { state.proxyMethod = el.dataset.proxyMethod; state.proxyTest = ""; return render(); }
+  if ((el = hit("[data-proxy-method]"))) { state.proxyMethod = el.dataset.proxyMethod; state.proxyPicker = false; state.proxyTest = ""; return render(); }
+  if (hit("[data-proxy-pick]")) { state.proxyPicker = true; return render(); }
+  // 点「关闭」或点面板外面（遮罩本身）都关掉列表。
+  if (hit("[data-pick-close]") || e.target.matches("[data-pick-mask]")) { state.proxyPicker = false; return render(); }
+  if (hit(".v-pick")) return;
   if ((el = hit("[data-proxy-kind]"))) { state.proxyKind = el.dataset.proxyKind; state.proxyTest = ""; return render(); }
   if (hit("[data-proxy-addr]")) {
     state.proxyAddr = state.proxyAddr ? "" : "192.168.1.20:7890";

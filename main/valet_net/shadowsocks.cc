@@ -429,6 +429,11 @@ int Open(int remote, const net_proxy::Config& proxy, const std::string& host, in
 
 bool Supported(const std::string& method) { return Find(method) != nullptr; }
 
+const char* MethodName(int index) {
+    constexpr int kCount = sizeof(kMethods) / sizeof(kMethods[0]);
+    return index >= 0 && index < kCount ? kMethods[index].name : nullptr;
+}
+
 void Install() { net_proxy::SetShadowsocksOpener(&Open); }
 
 }  // namespace valet::ss

@@ -12,6 +12,8 @@ namespace valet::ss {
 
 /** @brief True when `method` (lower case) is a cipher this firmware can use. */
 bool Supported(const std::string& method);
+/** @brief Name of the index-th supported cipher, or nullptr past the end (for listing them). */
+const char* MethodName(int index);
 /** @brief The cipher used when none was chosen. */
 constexpr char kDefaultMethod[] = "aes-256-gcm";
 /** @brief Hook the implementation into net_proxy. Call once at start-up. */
