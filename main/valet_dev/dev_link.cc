@@ -30,6 +30,13 @@
 #include "vk_key_handler.h"
 
 #include <cJSON.h>
+#include <lwip/netdb.h>
+#include <lwip/sockets.h>
+#include <memory>
+#include <vector>
+#include "board.h"
+#include "power_policy.h"
+#include "net_proxy.h"
 #include <driver/usb_serial_jtag.h>
 #include <esp_app_desc.h>
 #include <esp_heap_caps.h>
@@ -412,6 +419,54 @@ void ValetDevLinkHandle(const char* json) {
                 ESP_LOGW(TAG, "proxytest: ok=%d status=%d error=%d %d ms", result.ok, result.status, result.error, result.ms);
                 vTaskDelete(nullptr);
             }, "proxy_test", 8192, nullptr, 4, nullptr) != pdPASS) error = "BUSY";
+    } else if (!strcmp(cmd, "reach")) {
+        // 仅测试版：不走代理，直接连几个 host:port，日志里写解析出的地址和能不能连上（查 4G 卡是否只放行部分地址）。
+        // "proxy" 表示代理设置里的那个服务器；日志里只写 "proxy"，不写它的名字。
+        const auto* hosts = cJSON_GetObjectItemCaseSensitive(root, "hosts");
+        if (!cJSON_IsArray(hosts)) error = "MISSING_HOSTS";
+        else {
+            auto* list = new std::vector<std::string>();
+            const cJSON* item = nullptr;
+            cJSON_ArrayForEach(item, hosts) if (cJSON_IsString(item)) list->push_back(item->valuestring);
+            if (xTaskCreate([](void* arg) {
+                    std::unique_ptr<std::vector<std::string>> targets(static_cast<std::vector<std::string>*>(arg));
+                    PowerNeedHold hold(PowerNeed::OtaDownload);
+                    if (!Board::GetInstance().EnsureNetworkReady(20000)) ESP_LOGW(TAG, "reach: no network");
+                    else for (const auto& target : *targets) {
+                        std::string host, label = target;
+                        int port = 443;
+                        if (target == "proxy") {
+                            const auto prefs = valet::proxy::Get();
+                            host = prefs.host;
+                            port = prefs.port;
+                        } else {
+                            const size_t colon = target.rfind(':');
+                            host = target.substr(0, colon);
+                            if (colon != std::string::npos) port = atoi(target.c_str() + colon + 1);
+                        }
+                        char address[48] = "-";
+                        addrinfo hints{};
+                        hints.ai_family = AF_INET;
+                        hints.ai_socktype = SOCK_STREAM;
+                        addrinfo* found = nullptr;
+                        const int64_t t0 = esp_timer_get_time();
+                        if (getaddrinfo(host.c_str(), nullptr, &hints, &found) == 0 && found) {
+                            inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(found->ai_addr)->sin_addr, address, sizeof(address));
+                            freeaddrinfo(found);
+                        }
+                        const int64_t t1 = esp_timer_get_time();
+                        int code = 0;
+                        const int fd = net_proxy::Open(host, port, esp_timer_get_time() + 10000000, &code, true);
+                        const int64_t t2 = esp_timer_get_time();
+                        if (fd >= 0) close(fd);
+                        ESP_LOGW(TAG, "reach: %s port %d -> %s dns %d ms, tcp %s (code %d) %d ms", label.c_str(), port,
+                                 address, int((t1 - t0) / 1000), fd >= 0 ? "ok" : "failed",
+                                 code, int((t2 - t1) / 1000));
+                    }
+                    ESP_LOGW(TAG, "reach: done");
+                    vTaskDelete(nullptr);
+                }, "reach", 8192, list, 4, nullptr) != pdPASS) { delete list; error = "BUSY"; }
+        }
     } else if (!strcmp(cmd, "sd")) {
         // 仅测试版：SD 卡状态（挂上没有、卡在不在、上次初始化的错误）；mount=true 时重试挂载
         auto& sd = SdCardManager::GetInstance();

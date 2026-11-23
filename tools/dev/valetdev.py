@@ -315,6 +315,8 @@ def main():
     p = sub.add_parser("wifi", help="save a Wi-Fi network as preferred and reconnect"); p.add_argument("ssid"); p.add_argument("password")
     p = sub.add_parser("wifitx", help="Wi-Fi max tx power in 0.25 dBm (48 = 12 dBm, 80 = 20 dBm)"); p.add_argument("q", type=int)
     sub.add_parser("proxytest", help="run the proxy settings test with the current proxy")
+    p = sub.add_parser("reach", help="connect directly (no proxy) to host:port ...; 'proxy' = the configured proxy server")
+    p.add_argument("hosts", nargs="+")
     p = sub.add_parser("sd", help="SD card state; --mount retries mounting"); p.add_argument("--mount", action="store_true")
     p = sub.add_parser("ask", help="send TEXT instead of the recording at the next hold-to-talk (no speaking needed)"); p.add_argument("text")
     p = sub.add_parser("proxy", help="set the proxy: proxy http 192.168.0.10 6152 --wifi; proxy off")
@@ -377,6 +379,8 @@ def main():
         dev({"cmd": "wifitx", "q": args.q})
     elif args.command == "proxytest":
         dev({"cmd": "proxytest"})
+    elif args.command == "reach":
+        dev({"cmd": "reach", "hosts": args.hosts})
     elif args.command == "sd":
         dev({"cmd": "sd", "mount": args.mount})
     elif args.command == "ask":
