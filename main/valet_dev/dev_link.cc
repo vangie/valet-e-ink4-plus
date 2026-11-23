@@ -1,3 +1,6 @@
+#include <string>
+#include <esp_wifi.h>
+#include "ssid_manager.h"
 #include "valet_book_tools.h"
 #include "SdCardManager.hpp"
 #include "dev_link.h"
@@ -368,6 +371,20 @@ void ValetDevLinkHandle(const char* json) {
                      cJSON_free(text);
                      cJSON_Delete(result);
                  })) error = "BUSY";
+    } else if (!strcmp(cmd, "wifi")) {
+        // 仅测试版：加一个 Wi-Fi 并设为优先，断开当前连接让它按新列表重连。密码不进日志。
+        const auto* ssid = cJSON_GetObjectItemCaseSensitive(root, "ssid");
+        const auto* password = cJSON_GetObjectItemCaseSensitive(root, "password");
+        if (!cJSON_IsString(ssid) || !ssid->valuestring[0] || !cJSON_IsString(password)) error = "MISSING_SSID";
+        else {
+            // 写 NVS 要在内部内存栈上做（开发链路任务的栈在 PSRAM，写 flash 会断言）：交给主任务
+            Application::GetInstance().Schedule([name = std::string(ssid->valuestring), key = std::string(password->valuestring)] {
+                SsidManager::GetInstance().AddSsid(name, key);
+                SsidManager::GetInstance().SetDefaultSsid(name);
+                ESP_LOGW(TAG, "wifi: saved \"%s\" as preferred, reconnecting", name.c_str());
+                esp_wifi_disconnect();
+            });
+        }
     } else if (!strcmp(cmd, "sd")) {
         // 仅测试版：SD 卡状态（挂上没有、卡在不在、上次初始化的错误）；mount=true 时重试挂载
         auto& sd = SdCardManager::GetInstance();
