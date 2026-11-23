@@ -69,7 +69,7 @@ void SetText(lv_obj_t* label, const char* text) {
     if (label && std::strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
 }
 const char* KindName(net_proxy::Kind kind) {
-    return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : kind == net_proxy::Kind::kShadowsocks ? "Shadowsocks" : "HTTP";
+    return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : kind == net_proxy::Kind::kShadowsocks ? "SS" : "HTTP";
 }
 bool IsSs(const Prefs& prefs) { return prefs.kind == net_proxy::Kind::kShadowsocks; }
 int KindIndex(net_proxy::Kind kind) { return kind == net_proxy::Kind::kSocks5 ? 1 : kind == net_proxy::Kind::kShadowsocks ? 2 : 0; }
@@ -81,7 +81,7 @@ std::string AddressText(const Prefs& prefs) {
     return prefs.host + ":" + std::to_string(prefs.port);
 }
 std::string LoginText(const Prefs& prefs) {
-    if (IsSs(prefs)) return prefs.password.empty() ? Text("还没填。Shadowsocks 必须有密码", "Not set. Shadowsocks needs one")
+    if (IsSs(prefs)) return prefs.password.empty() ? Text("还没填。SS 必须有密码", "Not set. SS needs one")
                                                    : Text("已填 · 加密 aes-256-cfb", "Set · cipher aes-256-cfb");
     if (prefs.user.empty()) return Text("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one");
     // The password is not shown.
@@ -310,8 +310,8 @@ void OpenEditor(Field field) {
     lv_label_set_text(s_ui.edit_hint, field == kFieldAddress
         ? Text("代理的地址和端口，例如 192.168.0.10:7890；也可以输整条 ss:// 链接。清空再确认 = 不要代理。",
                "Proxy address and port, e.g. 192.168.0.10:7890, or a whole ss:// link. Empty = no proxy.")
-        : s_ui.boxes == 1 ? Text("Shadowsocks 服务器的密码（加密 aes-256-cfb）。存着的显示成星号，一输入就换成新的。",
-                                 "The Shadowsocks server's password (cipher aes-256-cfb). A stored one shows as stars; typing replaces it.")
+        : s_ui.boxes == 1 ? Text("SS 服务器的密码（加密 aes-256-cfb）。存着的显示成星号，一输入就换成新的。",
+                                 "The SS server's password (cipher aes-256-cfb). A stored one shows as stars; typing replaces it.")
         : Text("点一个框再输入。存着的密码显示成星号，一输入就换成新的。", "Tap a box, then type. A stored password shows as stars; typing replaces it."));
     lv_obj_set_width(s_ui.edit_hint, lv_pct(100));
     lv_obj_set_height(s_ui.edit_hint, 74);   // two lines, so the boxes below do not move when the text changes
@@ -378,7 +378,7 @@ void OnChoice(lv_event_t* e) {
         return;
     }
     if (turning_on && IsSs(prefs) && prefs.password.empty()) {
-        ScreenShowToast(Text("先填 Shadowsocks 的密码", "Enter the Shadowsocks password first"));
+        ScreenShowToast(Text("先填 SS 的密码", "Enter the SS password first"));
         OpenEditor(kFieldLogin);
         return;
     }
@@ -516,7 +516,7 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
                                  "On 4G only a proxy with a public address can be reached."));
     SettingsValetGap(page, 30);
     SettingsValetLabel(page, Text("代理类型", "Proxy type"));
-    static const char* const kKinds[] = {"HTTP", "SOCKS5", "Shadowsocks"};
+    static const char* const kKinds[] = {"HTTP", "SOCKS5", "SS"};
     s_ui.kind_seg = SettingsValetSegments(page, kKinds, 3, OnChoice, kKindValues);
     SettingsValetGap(page, 30);
     s_ui.address_detail = AddRow(page, Text("地址", "Address"), kFieldAddress, true);

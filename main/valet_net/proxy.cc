@@ -159,7 +159,7 @@ std::string Describe(const TestResult& result) {
             return Text("连不上代理。看看地址和端口对不对，代理有没有允许别的设备来连。",
                         "Cannot reach the proxy. Check the address and port, and that it accepts other devices.");
         case net_proxy::kErrProxyAuth:
-            return result.shadowsocks ? Text("Shadowsocks 要填密码。", "Shadowsocks needs a password.")
+            return result.shadowsocks ? Text("SS 要填密码。", "SS needs a password.")
                                       : Text("代理要账号和密码，或者填的不对。", "The proxy wants a user name and password, or these are wrong.");
         case net_proxy::kErrProxyRefused:
             return Text("代理连上了，但它没能连到 GitHub。", "The proxy answered but could not reach GitHub.");
