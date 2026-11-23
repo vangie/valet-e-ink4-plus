@@ -682,9 +682,11 @@ function v2SettingsPane(id) {
     const onoff = [["off", L("直连", "Direct")], ["on", L("走代理", "Use proxy")]];
     return `${v2Fld(L("连 Wi-Fi 时", "On Wi-Fi"), v2Seg(onoff, state.proxyWifi ? "on" : "off", "data-proxy-wifi"))}
       ${v2Fld(L("用 4G 时", "On 4G"), v2Seg(onoff, state.proxyCell ? "on" : "off", "data-proxy-cell"), L("4G 下连不到家里局域网里的代理。", "On 4G a proxy on the home network cannot be reached."))}
-      ${v2Fld(L("代理类型", "Proxy type"), v2Seg([["http", "HTTP"], ["socks5", "SOCKS5"]], state.proxyKind, "data-proxy-kind"))}
+      ${v2Fld(L("代理类型", "Proxy type"), v2Seg([["http", "HTTP"], ["socks5", "SOCKS5"], ["ss", "Shadowsocks"]], state.proxyKind, "data-proxy-kind"))}
       <nav class="v-rows"><button class="v-row" data-proxy-addr><span><b>${L("地址", "Address")}</b><em>${state.proxyAddr || L("还没填。点这里输入", "Not set. Tap to enter")}</em></span>${ic("go", "chev")}</button>
-        <button class="v-row" data-proxy-user><span><b>${L("账号和密码", "Login")}</b><em>${state.proxyUser ? state.proxyUser + L("，密码已填", ", password set") : L("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one")}</em></span>${ic("go", "chev")}</button></nav>
+        ${state.proxyKind === "ss"
+          ? `<button class="v-row" data-proxy-user><span><b>${L("密码", "Password")}</b><em>${state.proxySsPass ? L("已填 · 加密 aes-256-cfb", "Set · cipher aes-256-cfb") : L("还没填。Shadowsocks 必须有密码", "Not set. Shadowsocks needs one")}</em></span>${ic("go", "chev")}</button></nav>`
+          : `<button class="v-row" data-proxy-user><span><b>${L("账号和密码", "Login")}</b><em>${state.proxyUser ? state.proxyUser + L("，密码已填", ", password set") : L("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one")}</em></span>${ic("go", "chev")}</button></nav>`}
       <div class="v-fld"><button class="v-line is-full" data-proxy-test>${L("测试这个代理", "Test this proxy")}</button>${state.proxyTest ? `<p>${state.proxyTest}</p>` : ""}
         <p>${L("不走代理的：对时、局域网里的地址、上传日志。", "Not proxied: time sync, local addresses, log upload.")}</p></div>`;
   }
@@ -789,7 +791,7 @@ function v2SettingsPane(id) {
 // 网络页「代理」一行的说明：没设置 / 没开 / 在用 / 只在另一种上网方式下才走。
 function proxySummary() {
   if (!state.proxyAddr) return L("没设置。点这里填", "Not set. Tap to set up");
-  const where = `${state.proxyKind === "socks5" ? "SOCKS5" : "HTTP"} ${state.proxyAddr}`;
+  const where = `${state.proxyKind === "socks5" ? "SOCKS5" : state.proxyKind === "ss" ? "Shadowsocks" : "HTTP"} ${state.proxyAddr}`;
   const wifi = state.link === "wifi";
   if (wifi ? state.proxyWifi : state.proxyCell) return L("在用 · ", "In use · ") + where;
   if (!state.proxyWifi && !state.proxyCell) return L("没开 · ", "Off · ") + where;
@@ -933,6 +935,7 @@ panel.addEventListener("click", (e) => {
     const wifi = "proxyWifi" in el.dataset;
     const on = (wifi ? el.dataset.proxyWifi : el.dataset.proxyCell) === "on";
     if (on && !state.proxyAddr) return toast(L("先填代理的地址", "Enter the proxy address first"));
+    if (on && state.proxyKind === "ss" && !state.proxySsPass) return toast(L("先填 Shadowsocks 的密码", "Enter the Shadowsocks password first"));
     state[wifi ? "proxyWifi" : "proxyCell"] = on;
     state.proxyTest = "";
     return render();
@@ -943,6 +946,12 @@ panel.addEventListener("click", (e) => {
     if (!state.proxyAddr) state.proxyWifi = state.proxyCell = false;
     state.proxyTest = "";
     log(state.proxyAddr ? "假的：当作在键盘上输入了代理地址。" : "假的：清空了代理地址，两个开关跟着关掉。");
+    return render();
+  }
+  if (hit("[data-proxy-user]") && state.proxyKind === "ss") {
+    state.proxySsPass = !state.proxySsPass;
+    state.proxyTest = "";
+    log(state.proxySsPass ? "假的：当作在密码框里输入了 Shadowsocks 的密码（只有一个框，没有账号）。" : "假的：清空了 Shadowsocks 的密码。");
     return render();
   }
   if (hit("[data-proxy-user]")) {

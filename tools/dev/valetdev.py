@@ -317,8 +317,9 @@ def main():
     p = sub.add_parser("sd", help="SD card state; --mount retries mounting"); p.add_argument("--mount", action="store_true")
     p = sub.add_parser("ask", help="send TEXT instead of the recording at the next hold-to-talk (no speaking needed)"); p.add_argument("text")
     p = sub.add_parser("proxy", help="set the proxy: proxy http 192.168.0.10 6152 --wifi; proxy off")
-    p.add_argument("kind", choices=["http", "socks5", "off"]); p.add_argument("host", nargs="?"); p.add_argument("port", nargs="?", type=int)
+    p.add_argument("kind", choices=["http", "socks5", "link", "off"]); p.add_argument("host", nargs="?"); p.add_argument("port", nargs="?", type=int)
     p.add_argument("--wifi", action="store_true"); p.add_argument("--cell", action="store_true")
+    p.add_argument("--link-file", help="file holding a whole proxy link (ss://… keeps the password off the command line)")
     p = sub.add_parser("flash"); p.add_argument("--image", default=str(APP))
     args = parser.parse_args()
 
@@ -357,7 +358,9 @@ def main():
             print(SECRET.sub(r"\1\2***", line))
     elif args.command == "proxy":
         req = {"cmd": "proxy", "wifi": args.wifi and args.kind != "off", "cell": args.cell and args.kind != "off"}
-        if args.kind != "off": req.update({"kind": args.kind, "host": args.host or "", "port": args.port or 0})
+        if args.kind == "link":
+            req["link"] = open(args.link_file).read().strip()
+        elif args.kind != "off": req.update({"kind": args.kind, "host": args.host or "", "port": args.port or 0})
         dev(req)
     elif args.command == "voiceprobe":
         dev({"cmd": "voiceprobe", "url": args.url})

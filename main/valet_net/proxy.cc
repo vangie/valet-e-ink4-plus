@@ -44,14 +44,16 @@ net_proxy::Config ToConfig(const Prefs& prefs) {
 }
 
 bool InForceFor(const Prefs& prefs) {
-    return prefs.HasAddress() && prefs.kind != net_proxy::Kind::kNone && (OnWifi() ? prefs.on_wifi : prefs.on_cell);
+    return prefs.HasAddress() && prefs.kind != net_proxy::Kind::kNone && (OnWifi() ? prefs.on_wifi : prefs.on_cell) &&
+           (prefs.kind != net_proxy::Kind::kShadowsocks || !prefs.password.empty());
 }
 
 void Apply(const Prefs& prefs) {
     const bool on = InForceFor(prefs);
     net_proxy::Set(on ? ToConfig(prefs) : net_proxy::Config{});
     // The address and the login stay out of the log.
-    ESP_LOGI(TAG, "%s", !on ? "off" : prefs.kind == net_proxy::Kind::kHttp ? "HTTP proxy in force" : "SOCKS5 proxy in force");
+    ESP_LOGI(TAG, "%s", !on ? "off" : prefs.kind == net_proxy::Kind::kHttp ? "HTTP proxy in force"
+                           : prefs.kind == net_proxy::Kind::kShadowsocks ? "Shadowsocks in force" : "SOCKS5 proxy in force");
 }
 }  // namespace
 
@@ -66,7 +68,8 @@ void Init() {
         Settings store(kStore, false);
         loaded.on_wifi = store.GetInt("wifi", 0) != 0;
         loaded.on_cell = store.GetInt("cell", 0) != 0;
-        loaded.kind = store.GetInt("kind", 1) == 2 ? net_proxy::Kind::kSocks5 : net_proxy::Kind::kHttp;
+        const int kind = store.GetInt("kind", 1);
+        loaded.kind = kind == 2 ? net_proxy::Kind::kSocks5 : kind == 3 ? net_proxy::Kind::kShadowsocks : net_proxy::Kind::kHttp;
         loaded.host = store.GetString("host");
         loaded.port = store.GetInt("port", 0);
         loaded.user = store.GetString("user");
@@ -91,7 +94,7 @@ bool Update(const Prefs& prefs) {
         Settings store(kStore, true);
         store.SetInt("wifi", prefs.on_wifi ? 1 : 0);
         store.SetInt("cell", prefs.on_cell ? 1 : 0);
-        store.SetInt("kind", prefs.kind == net_proxy::Kind::kSocks5 ? 2 : 1);
+        store.SetInt("kind", static_cast<int>(prefs.kind == net_proxy::Kind::kNone ? net_proxy::Kind::kHttp : prefs.kind));
         store.SetString("host", prefs.host);
         store.SetInt("port", prefs.port);
         store.SetString("user", prefs.user);
@@ -110,7 +113,9 @@ bool InForce() { return InForceFor(Get()); }
 
 TestResult Test(const Prefs& prefs) {
     TestResult result;
+    result.shadowsocks = prefs.kind == net_proxy::Kind::kShadowsocks;
     if (!prefs.HasAddress()) { result.error = kErrNoAddress; return result; }
+    if (result.shadowsocks && prefs.password.empty()) { result.error = net_proxy::kErrProxyAuth; return result; }
     // Keep the radio up for the request; it is parked soon after the last use.
     PowerNeedHold hold(PowerNeed::OtaDownload);
     if (!Board::GetInstance().EnsureNetworkReady(20000)) { result.error = kErrNoNetwork; return result; }
@@ -154,7 +159,8 @@ std::string Describe(const TestResult& result) {
             return Text("连不上代理。看看地址和端口对不对，代理有没有允许别的设备来连。",
                         "Cannot reach the proxy. Check the address and port, and that it accepts other devices.");
         case net_proxy::kErrProxyAuth:
-            return Text("代理要账号和密码，或者填的不对。", "The proxy wants a user name and password, or these are wrong.");
+            return result.shadowsocks ? Text("Shadowsocks 要填密码。", "Shadowsocks needs a password.")
+                                      : Text("代理要账号和密码，或者填的不对。", "The proxy wants a user name and password, or these are wrong.");
         case net_proxy::kErrProxyRefused:
             return Text("代理连上了，但它没能连到 GitHub。", "The proxy answered but could not reach GitHub.");
         case net_proxy::kErrProxyNoAnswer:
@@ -167,6 +173,12 @@ std::string Describe(const TestResult& result) {
             std::snprintf(text, sizeof(text), Text("经代理连到了，但 GitHub 回的是 %d。", "Reached through the proxy, but GitHub answered %d."), result.status);
             return text;
         default:
+            // Shadowsocks has no answer of its own: a wrong password or cipher only shows as a connection that breaks.
+            if (result.shadowsocks) {
+                std::snprintf(text, sizeof(text), Text("连上了服务器，但加密连接没建成（代码 %d）。多半是密码不对，或服务器用的不是 aes-256-cfb。",
+                                                       "Reached the server, but the secure connection failed (code %d). Most likely a wrong password, or the server does not use aes-256-cfb."), result.error);
+                return text;
+            }
             std::snprintf(text, sizeof(text), Text("代理接通了，后面的加密连接没建成（代码 %d）。", "The proxy opened the connection, but the secure connection failed (code %d)."), result.error);
             return text;
     }

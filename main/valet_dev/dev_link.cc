@@ -339,11 +339,20 @@ void ValetDevLinkHandle(const char* json) {
         if (cJSON_IsString(host)) prefs.host = host->valuestring;
         if (port > 0) prefs.port = port;
         if (cJSON_IsString(kind)) prefs.kind = !strcmp(kind->valuestring, "socks5") ? net_proxy::Kind::kSocks5 : net_proxy::Kind::kHttp;
+        // 整条链接（ss://… 或 socks5://…）：和设置页地址框一样解析；密码不进日志
+        if (const auto* link = cJSON_GetObjectItemCaseSensitive(root, "link"); cJSON_IsString(link)) {
+            net_proxy::Config parsed;
+            parsed.kind = prefs.kind;
+            if (net_proxy::Parse(link->valuestring, &parsed) != net_proxy::ParseResult::kOk) error = "BAD_LINK";
+            else { prefs.kind = parsed.kind; prefs.host = parsed.host; prefs.port = parsed.port; prefs.user = parsed.user; prefs.password = parsed.password; }
+        }
         prefs.on_wifi = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "wifi"));
         prefs.on_cell = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "cell"));
-        if ((prefs.on_wifi || prefs.on_cell) && !prefs.HasAddress()) error = "NO_ADDRESS";
+        if (error) {}
+        else if ((prefs.on_wifi || prefs.on_cell) && !prefs.HasAddress()) error = "NO_ADDRESS";
         else if (!valet::proxy::Update(prefs)) error = "BUSY";
-        else ESP_LOGW(TAG, "proxy: %s %s:%d wifi=%d cell=%d", prefs.kind == net_proxy::Kind::kSocks5 ? "socks5" : "http",
+        else ESP_LOGW(TAG, "proxy: %s %s:%d wifi=%d cell=%d", prefs.kind == net_proxy::Kind::kSocks5 ? "socks5"
+                      : prefs.kind == net_proxy::Kind::kShadowsocks ? "shadowsocks" : "http",
                       prefs.host.c_str(), prefs.port, prefs.on_wifi, prefs.on_cell);
     } else if (!strcmp(cmd, "voiceprobe")) {
         // 仅测试版：从 url 下载 play.raw 播放并录音，把麦克风和参考传回 url/upload

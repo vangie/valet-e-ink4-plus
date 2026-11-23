@@ -21,7 +21,7 @@ using valet::proxy::Prefs;
 
 enum Field : intptr_t { kFieldAddress = 0, kFieldLogin = 1 };
 // Segment values: which control, and which choice.
-enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21 };
+enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindSs = 22 };
 
 struct Ui {
     lv_obj_t* page = nullptr;
@@ -30,6 +30,7 @@ struct Ui {
     lv_obj_t* kind_seg = nullptr;
     lv_obj_t* address_detail = nullptr;
     lv_obj_t* login_detail = nullptr;
+    lv_obj_t* login_title = nullptr;   // 「账号和密码」，Shadowsocks 时是「密码」
     lv_obj_t* test_label = nullptr;
     lv_obj_t* result = nullptr;
     // Text editor (an overlay on the screen)
@@ -67,13 +68,21 @@ void SetText(lv_obj_t* label, const char* text) {
     // Setting the same text again still redraws, and a redraw is a panel refresh.
     if (label && std::strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
 }
-const char* KindName(net_proxy::Kind kind) { return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : "HTTP"; }
+const char* KindName(net_proxy::Kind kind) {
+    return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : kind == net_proxy::Kind::kShadowsocks ? "Shadowsocks" : "HTTP";
+}
+bool IsSs(const Prefs& prefs) { return prefs.kind == net_proxy::Kind::kShadowsocks; }
+int KindIndex(net_proxy::Kind kind) { return kind == net_proxy::Kind::kSocks5 ? 1 : kind == net_proxy::Kind::kShadowsocks ? 2 : 0; }
+// Shadowsocks: one box, the password. Others: user name and password.
+int PasswordBox() { return s_ui.boxes == 1 ? 0 : 1; }
 
 std::string AddressText(const Prefs& prefs) {
     if (!prefs.HasAddress()) return Text("还没填。点这里输入", "Not set. Tap to enter");
     return prefs.host + ":" + std::to_string(prefs.port);
 }
 std::string LoginText(const Prefs& prefs) {
+    if (IsSs(prefs)) return prefs.password.empty() ? Text("还没填。Shadowsocks 必须有密码", "Not set. Shadowsocks needs one")
+                                                   : Text("已填 · 加密 aes-256-cfb", "Set · cipher aes-256-cfb");
     if (prefs.user.empty()) return Text("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one");
     // The password is not shown.
     return prefs.user + (prefs.password.empty() ? Text("，没有密码", ", no password") : Text("，密码已填", ", password set"));
@@ -84,7 +93,8 @@ void Refresh() {
     const Prefs prefs = valet::proxy::Get();
     SettingsValetSelect(s_ui.wifi_seg, prefs.on_wifi ? 1 : 0);
     SettingsValetSelect(s_ui.cell_seg, prefs.on_cell ? 1 : 0);
-    SettingsValetSelect(s_ui.kind_seg, prefs.kind == net_proxy::Kind::kSocks5 ? 1 : 0);
+    SettingsValetSelect(s_ui.kind_seg, KindIndex(prefs.kind));
+    SetText(s_ui.login_title, IsSs(prefs) ? Text("密码", "Password") : Text("账号和密码", "Login"));
     SetText(s_ui.address_detail, AddressText(prefs).c_str());
     SetText(s_ui.login_detail, LoginText(prefs).c_str());
     SetText(s_ui.test_label, s_testing.load() ? Text("正在测试…", "Testing…") : Text("测试这个代理", "Test this proxy"));
@@ -108,7 +118,7 @@ void RefreshEdit() {
     for (int i = 0; i < s_ui.boxes; ++i) {
         if (!s_ui.edit_text[i]) continue;
         // Show the end of a text that is too long for the box; no scrolling animation on ink.
-        const char* tail = i == 1 && s_password_kept ? "******" : s_edit[i];
+        const char* tail = i == PasswordBox() && s_password_kept ? "******" : s_edit[i];
         int width = lv_obj_get_content_width(s_ui.edit_box[i]) - UiSx(12);
         if (s_ui.edit_name[i]) width -= lv_obj_get_width(s_ui.edit_name[i]) + 14;
         lv_point_t size;
@@ -162,7 +172,10 @@ void ConfirmEdit() {
                     problem = Text("端口写在冒号后面，1 到 65535。例如 192.168.0.10:7890", "Put the port after a colon, 1 to 65535, e.g. 192.168.0.10:7890");
                     break;
                 case net_proxy::ParseResult::kUnsupportedScheme:
-                    problem = Text("开头只认 http:// 和 socks5://，也可以不写", "Only http:// and socks5:// are accepted in front; or leave it out");
+                    problem = Text("开头只认 http://、socks5:// 和 ss://，也可以不写", "Only http://, socks5:// and ss:// are accepted in front; or leave it out");
+                    break;
+                case net_proxy::ParseResult::kUnsupportedCipher:
+                    problem = Text("这条 ss:// 链接的加密不是 aes-256-cfb，设备只支持这一种。", "This ss:// link does not use aes-256-cfb, the only cipher the device supports.");
                     break;
                 default:
                     problem = Text("没看懂地址。例如 192.168.0.10:7890", "That is not an address, e.g. 192.168.0.10:7890");
@@ -176,6 +189,10 @@ void ConfirmEdit() {
                 prefs.password = parsed.password;
             }
         }
+    } else if (s_ui.boxes == 1) {
+        // Shadowsocks: just the password. Empty = no password; the proxy then stays off.
+        prefs.user.clear();
+        prefs.password = s_password_kept ? prefs.password : std::string(s_edit[0]);
     } else {
         // The confirm key in the user-name box goes on to the password box; in the password box it saves.
         if (s_ui.active == 0) {
@@ -247,12 +264,14 @@ void AddEditBox(lv_obj_t* panel, int index, const char* name) {
 void OpenEditor(Field field) {
     if (s_ui.editor) return;
     s_ui.field = field;
-    s_ui.boxes = field == kFieldLogin ? 2 : 1;
+    const Prefs prefs = valet::proxy::Get();
+    s_ui.boxes = field == kFieldLogin && !IsSs(prefs) ? 2 : 1;
     s_ui.active = 0;
     s_edit[0][0] = s_edit[1][0] = '\0';
-    const Prefs prefs = valet::proxy::Get();
     if (field == kFieldAddress) {
         if (prefs.HasAddress()) std::snprintf(s_edit[0], sizeof(s_edit[0]), "%s:%d", prefs.host.c_str(), prefs.port);
+    } else if (IsSs(prefs)) {
+        std::snprintf(s_edit[0], sizeof(s_edit[0]), "%s", prefs.password.c_str());
     } else {
         std::snprintf(s_edit[0], sizeof(s_edit[0]), "%s", prefs.user.c_str());
         std::snprintf(s_edit[1], sizeof(s_edit[1]), "%s", prefs.password.c_str());
@@ -289,7 +308,10 @@ void OpenEditor(Field field) {
 
     s_ui.edit_hint = lv_label_create(panel);
     lv_label_set_text(s_ui.edit_hint, field == kFieldAddress
-        ? Text("代理的地址和端口，例如 192.168.0.10:7890。清空再确认 = 不要代理。", "Proxy address and port, e.g. 192.168.0.10:7890. Empty = no proxy.")
+        ? Text("代理的地址和端口，例如 192.168.0.10:7890；也可以输整条 ss:// 链接。清空再确认 = 不要代理。",
+               "Proxy address and port, e.g. 192.168.0.10:7890, or a whole ss:// link. Empty = no proxy.")
+        : s_ui.boxes == 1 ? Text("Shadowsocks 服务器的密码（加密 aes-256-cfb）。存着的显示成星号，一输入就换成新的。",
+                                 "The Shadowsocks server's password (cipher aes-256-cfb). A stored one shows as stars; typing replaces it.")
         : Text("点一个框再输入。存着的密码显示成星号，一输入就换成新的。", "Tap a box, then type. A stored password shows as stars; typing replaces it."));
     lv_obj_set_width(s_ui.edit_hint, lv_pct(100));
     lv_obj_set_height(s_ui.edit_hint, 74);   // two lines, so the boxes below do not move when the text changes
@@ -312,7 +334,7 @@ void OpenEditor(Field field) {
 
     s_ui.keyboard = ScreenKeyboardCreate(panel, [](ScreenKeyboardEvent event, const char* text, void*) {
         char* edit = s_edit[s_ui.active];
-        if (s_ui.active == 1 && s_password_kept && event != ScreenKeyboardEvent::kConfirm && event != ScreenKeyboardEvent::kLayout) {
+        if (s_ui.active == PasswordBox() && s_password_kept && event != ScreenKeyboardEvent::kConfirm && event != ScreenKeyboardEvent::kLayout) {
             // First key in the password box: the stored password goes, a new one starts.
             s_password_kept = false;
             edit[0] = '\0';
@@ -355,11 +377,17 @@ void OnChoice(lv_event_t* e) {
         OpenEditor(kFieldAddress);
         return;
     }
+    if (turning_on && IsSs(prefs) && prefs.password.empty()) {
+        ScreenShowToast(Text("先填 Shadowsocks 的密码", "Enter the Shadowsocks password first"));
+        OpenEditor(kFieldLogin);
+        return;
+    }
     switch (choice) {
         case kWifiOff: case kWifiOn: prefs.on_wifi = choice == kWifiOn; break;
         case kCellOff: case kCellOn: prefs.on_cell = choice == kCellOn; break;
         case kKindHttp: prefs.kind = net_proxy::Kind::kHttp; break;
         case kKindSocks: prefs.kind = net_proxy::Kind::kSocks5; break;
+        case kKindSs: prefs.kind = net_proxy::Kind::kShadowsocks; break;
     }
     Save(prefs);
 }
@@ -409,7 +437,7 @@ void OnTest(lv_event_t*) {
 }
 
 // A ruled row: name, current value under it, and a mark that it opens something.
-lv_obj_t* AddRow(lv_obj_t* page, const char* title, Field field, bool first) {
+lv_obj_t* AddRow(lv_obj_t* page, const char* title, Field field, bool first, lv_obj_t** title_out = nullptr) {
     auto* row = lv_obj_create(page);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, lv_pct(100), 112);
@@ -425,6 +453,7 @@ lv_obj_t* AddRow(lv_obj_t* page, const char* title, Field field, bool first) {
     lv_obj_set_style_text_font(name, Strong(), 0);
     lv_obj_align(name, LV_ALIGN_LEFT_MID, 4, -20);
     lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
+    if (title_out) *title_out = name;
     auto* detail = lv_label_create(row);
     lv_label_set_text(detail, "");
     lv_obj_set_style_text_font(detail, Small(), 0);
@@ -476,7 +505,7 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
     const char* const choices[] = {Text("直连", "Direct"), Text("走代理", "Use proxy")};
     static const intptr_t kWifiValues[] = {kWifiOff, kWifiOn};
     static const intptr_t kCellValues[] = {kCellOff, kCellOn};
-    static const intptr_t kKindValues[] = {kKindHttp, kKindSocks};
+    static const intptr_t kKindValues[] = {kKindHttp, kKindSocks, kKindSs};
 
     SettingsValetLabel(page, Text("连 Wi-Fi 时", "On Wi-Fi"));
     s_ui.wifi_seg = SettingsValetSegments(page, choices, 2, OnChoice, kWifiValues);
@@ -487,11 +516,11 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
                                  "On 4G only a proxy with a public address can be reached."));
     SettingsValetGap(page, 30);
     SettingsValetLabel(page, Text("代理类型", "Proxy type"));
-    static const char* const kKinds[] = {"HTTP", "SOCKS5"};
-    s_ui.kind_seg = SettingsValetSegments(page, kKinds, 2, OnChoice, kKindValues);
+    static const char* const kKinds[] = {"HTTP", "SOCKS5", "Shadowsocks"};
+    s_ui.kind_seg = SettingsValetSegments(page, kKinds, 3, OnChoice, kKindValues);
     SettingsValetGap(page, 30);
     s_ui.address_detail = AddRow(page, Text("地址", "Address"), kFieldAddress, true);
-    s_ui.login_detail = AddRow(page, Text("账号和密码", "Login"), kFieldLogin, false);
+    s_ui.login_detail = AddRow(page, Text("账号和密码", "Login"), kFieldLogin, false, &s_ui.login_title);
     SettingsValetGap(page, 30);
     auto* test = SettingsValetButton(page, "", OnTest);
     s_ui.test_label = lv_obj_get_child(test, 0);

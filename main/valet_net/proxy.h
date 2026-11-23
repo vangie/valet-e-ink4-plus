@@ -38,6 +38,7 @@ struct TestResult {
     int error = 0;    // net_proxy::Error, or another code from the connection
     int status = 0;   // HTTP status of the test request, when one came back
     int ms = 0;       // time for the whole request
+    bool shadowsocks = false;   // the tested proxy was Shadowsocks (it has no answer of its own to tell errors apart)
 };
 /** @brief Blocking (up to about 40 s): one https request through `prefs`' proxy, whatever the
  *         switches say. Call from a task that may wait on the network. */

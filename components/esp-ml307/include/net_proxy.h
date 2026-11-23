@@ -7,7 +7,11 @@
 // request is sent to the proxy with an absolute URI (HttpClient does that).
 // SOCKS5: every target uses a CONNECT command, optionally with a user name
 // and password (RFC 1928 / 1929).
-// In both cases the target's name goes to the proxy unresolved, so the
+// Shadowsocks (aes-256-cfb, the legacy stream cipher, as on the AI Passport):
+// every byte to the server is encrypted with a key from the password; a relay
+// task between a loopback socket pair and the server does the encryption, so
+// TCP and TLS callers get an ordinary socket.
+// In all cases the target's name goes to the proxy unresolved, so the
 // device does no DNS lookup of its own for a proxied connection.
 //
 // Not covered: UDP (time sync, call media), and code that opens its own
@@ -18,14 +22,17 @@
 
 namespace net_proxy {
 
-enum class Kind : uint8_t { kNone = 0, kHttp = 1, kSocks5 = 2 };
+enum class Kind : uint8_t { kNone = 0, kHttp = 1, kSocks5 = 2, kShadowsocks = 3 };
+
+/** @brief The only Shadowsocks cipher supported. */
+constexpr char kShadowsocksMethod[] = "aes-256-cfb";
 
 struct Config {
     Kind kind = Kind::kNone;
     std::string host;
     int port = 0;
-    std::string user;
-    std::string password;
+    std::string user;       // not used by Shadowsocks
+    std::string password;   // Shadowsocks: the server's password (required)
 };
 
 // What Open() reports through `error`. Other values are errno.
@@ -73,10 +80,13 @@ bool ForwardsPlainHttp(const std::string& host, Config* proxy);
 /** @brief Value for a Proxy-Authorization header, or empty when the proxy has no user name. */
 std::string BasicAuth(const Config& proxy);
 
-enum class ParseResult : uint8_t { kOk, kEmpty, kNoHost, kBadPort, kUnsupportedScheme };
+enum class ParseResult : uint8_t { kOk, kEmpty, kNoHost, kBadPort, kUnsupportedScheme, kUnsupportedCipher };
 /** @brief Read "[scheme://][user[:password]@]host:port". A scheme sets the kind (http, socks5,
  *         socks5h, socks); without one `out->kind` is left as it was. User and password are
- *         replaced only when the text has them. */
+ *         replaced only when the text has them.
+ *         Also reads Shadowsocks links: "ss://BASE64(method:password)@host:port[#name]" (SIP002, the
+ *         user info may also be percent-encoded) and "ss://BASE64(method:password@host:port)[#name]";
+ *         the method must be aes-256-cfb. */
 ParseResult Parse(const std::string& text, Config* out);
 
 }  // namespace net_proxy
