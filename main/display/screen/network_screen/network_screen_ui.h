@@ -42,15 +42,14 @@ lv_coord_t Network_SavedRowHEstimate();
 /** @brief 断开原因文案 */
 const char* Network_DisconnectReasonText(uint8_t reason);
 /** @brief 重启倒计时定时器回调 */
-void Network_RestartTimerCb(lv_timer_t* timer);
 /** @brief 打开重启倒计时遮罩 */
-void Network_OpenRestartCountdown(const std::string& headline);
+/** @brief 连上新 Wi-Fi 后：显示「已连接」，稍后返回上一页，系统 Wi-Fi 接着连（不重启） */
+void Network_FinishConnected(const std::string& headline);
 /** @brief 网络页 UI 正文字库 */
 const lv_font_t* Network_UiFont();
 /** @brief 更新状态遮罩文案（遮罩已打开时） */
 void Network_SetStatusOverlayText(const char* msg);
 /** @brief 重启任务入口 */
-void Network_RebootTask(void* arg);
 /** @brief UI 正文字高 */
 lv_coord_t Network_UiLineH();
 /** @brief 刷新按钮样式（扫描中禁用等） */

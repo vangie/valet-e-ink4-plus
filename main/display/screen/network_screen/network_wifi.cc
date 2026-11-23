@@ -430,7 +430,7 @@ void Network_AsyncOpenSuccess(void* p) {
         } else {
             char headline[96];
             snprintf(headline, sizeof(headline), Lang::Strings::NETWORK_CONNECTED_FMT, msg->ssid.c_str());
-            Network_OpenRestartCountdown(headline);
+            Network_FinishConnected(headline);
         }
     }
     delete msg;
@@ -496,6 +496,8 @@ static void ConnectOnce(void* arg) {
     }
     if (bits & kBitConnected) {
         SsidManager::GetInstance().AddSsid(ctx->ssid, ctx->password);
+        // 刚连上的这个排到最前：回到系统 Wi-Fi 后先连它（内部 RAM 栈上写 NVS）
+        SsidManager::GetInstance().SetDefaultSsid(ctx->ssid);
         snprintf(buf, sizeof(buf), Lang::Strings::NETWORK_CONNECTED_FMT, ctx->ssid.c_str());
         Network_PostStatus(buf);
         Network_PostRebuildList();

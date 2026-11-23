@@ -87,41 +87,20 @@ void Network_SetStatusOverlayText(const char* msg) {
     }
 }
 
-void Network_RebootTask(void* /*arg*/) {
-    vTaskDelay(pdMS_TO_TICKS(200));
-    Application::GetInstance().Reboot();
-    vTaskDelete(nullptr);
-}
-
-void Network_RestartTimerCb(lv_timer_t* /*timer*/) {
-    Network_State().restart_remaining--;
-    if (Network_State().restart_remaining > 0) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), Lang::Strings::SETTINGS_NET_REBOOT_COUNT_FMT, Network_State().restart_headline.c_str(),
-                 Network_State().restart_remaining);
-        Network_SetStatusOverlayText(buf);
-        return;
-    }
-    if (Network_State().restart_timer != nullptr) {
-        lv_timer_delete(Network_State().restart_timer);
+// 连上新的 Wi-Fi：说一声「已连接」，稍后回到上一页。退出网络页时它自己的那套 Wi-Fi 收掉，
+// 系统的 Wi-Fi 重新起来、先连这个新网络（ConnectOnce 已把它设成首选）。不重启。
+void Network_FinishConnected(const std::string& headline) {
+    Network_OpenStatusOverlay(headline.c_str());
+    Network_State().wifi_station_was_active = true;   // 退出时一定把系统的 Wi-Fi 起来，第一次配网也一样
+    if (Network_State().restart_timer != nullptr) lv_timer_delete(Network_State().restart_timer);
+    // 借用 restart_timer：这 1.5 秒里同样不响应返回键，免得和自动返回撞在一起
+    Network_State().restart_timer = lv_timer_create([](lv_timer_t* timer) {
+        lv_timer_delete(timer);
         Network_State().restart_timer = nullptr;
-    }
-    Network_SetStatusOverlayText(Lang::Strings::SETTINGS_NET_REBOOTING);
-    xTaskCreate(Network_RebootTask, "net_reboot", 2048, nullptr, 5, nullptr);
+        if (Network_ScreenAlive()) ScreenNavigateBack();
+    }, 1500, nullptr);
 }
 
-void Network_OpenRestartCountdown(const std::string& headline) {
-    Network_State().restart_headline = headline;
-    Network_State().restart_remaining = kRestartCountdownSec;
-    char buf[128];
-    snprintf(buf, sizeof(buf), Lang::Strings::SETTINGS_NET_REBOOT_COUNT_FMT, Network_State().restart_headline.c_str(),
-             Network_State().restart_remaining);
-    Network_OpenStatusOverlay(buf);
-    if (Network_State().restart_timer != nullptr) {
-        lv_timer_delete(Network_State().restart_timer);
-    }
-    Network_State().restart_timer = lv_timer_create(Network_RestartTimerCb, 1000, nullptr);
-}
 
 void Network_OnScreenUnload(lv_event_t* /*e*/) {
     ESP_LOGI(TAG, "unload");

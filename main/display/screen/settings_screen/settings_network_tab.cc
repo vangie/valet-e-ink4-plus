@@ -195,44 +195,6 @@ void SetOverlayText(const char* msg) {
     }
 }
 
-void RebootTask(void* /*arg*/) {
-    vTaskDelay(pdMS_TO_TICKS(200));
-    Application::GetInstance().Reboot();
-    vTaskDelete(nullptr);
-}
-
-void RebootTimerCb(lv_timer_t* /*timer*/) {
-    s_ui.reboot_remaining--;
-    if (s_ui.reboot_remaining > 0) {
-        if (s_ui.overlay_msg != nullptr) {
-            char buf[128];
-            snprintf(buf, sizeof(buf), Lang::Strings::SETTINGS_NET_REBOOT_COUNT_FMT, s_ui.reboot_headline.c_str(),
-                     s_ui.reboot_remaining);
-            lv_label_set_text(s_ui.overlay_msg, buf);
-        }
-        return;
-    }
-    if (s_ui.reboot_timer != nullptr) {
-        lv_timer_delete(s_ui.reboot_timer);
-        s_ui.reboot_timer = nullptr;
-    }
-    SetOverlayText(Lang::Strings::SETTINGS_NET_REBOOTING);
-    xTaskCreate(RebootTask, "sim_reboot", 2048, nullptr, 5, nullptr);
-}
-
-void OpenRestartCountdown(const char* headline) {
-    s_ui.reboot_headline = headline != nullptr ? headline : "";
-    s_ui.reboot_remaining = 3;
-    char buf[128];
-    snprintf(buf, sizeof(buf), Lang::Strings::SETTINGS_NET_REBOOT_COUNT_FMT, s_ui.reboot_headline.c_str(),
-             s_ui.reboot_remaining);
-    OpenOverlay(buf);
-    if (s_ui.reboot_timer != nullptr) {
-        lv_timer_delete(s_ui.reboot_timer);
-    }
-    s_ui.reboot_timer = lv_timer_create(RebootTimerCb, 1000, nullptr);
-}
-
 void RefreshValet();
 void RefreshSimUi() {
     RefreshValet();
@@ -582,7 +544,8 @@ void AsyncSimSwitchDone(void* user_data) {
         if (msg->success) {
             char buf[64];
             snprintf(buf, sizeof(buf), Lang::Strings::SETTINGS_NET_SWITCHED_FMT, SimSlotName(msg->target_slot));
-            OpenRestartCountdown(buf);
+            CloseOverlay();
+            ScreenShowToast(buf);
             RefreshSimUi();
         } else {
             CloseOverlay();
@@ -622,10 +585,18 @@ void SimSwitchTask(void* arg) {
             response.clear();
             return nt26->SendAtCommand(cmd, response, timeout_ms, true);
         };
+        // 换卡全程占住网络：省电策略在半路给 4G 模块断电，会打断下面的 AT 命令
+        PowerNeedHold keep_net(PowerNeed::OtaDownload);
         do {
             if (nt26 == nullptr) {
                 result->detail = Lang::Strings::SETTINGS_NET_NO_4G;
                 break;
+            }
+            // 模块可能刚被省电策略关掉：先把它起来（卡槽里没卡时连不上网，但 AT 通道在），再等它能应答
+            nt26->EnsureNetworkReady(15000);
+            for (int i = 0; i < 20; ++i) {
+                if (run_at("AT", resp, 500) == ESP_OK && resp.find("OK") != std::string::npos) break;
+                vTaskDelay(pdMS_TO_TICKS(500));
             }
             PostSimProgress(Lang::Strings::SETTINGS_NET_CFUN0);
             if (run_at("AT+CFUN=0", resp, 8000) != ESP_OK || resp.find("OK") == std::string::npos) {
@@ -655,6 +626,12 @@ void SimSwitchTask(void* arg) {
             SetCachedSimSlot(ctx->target_slot);
             PersistSimSlotToNvs(ctx->target_slot);
             result->success = true;
+            // 不重启：把 4G 数据连接拆掉，按新卡重新拨号（与 Wi-Fi / 4G 切换用的同一套收起与恢复）。
+            // 在这里同步连回来：后台恢复可能正被省电策略的另一次恢复占着，会被跳过。
+            nt26->PreparePowerOff();
+            nt26->OnPowerRestored();
+            // 只连一次：卡槽里没卡时模组马上报「没卡」，立刻结束；有卡就等它连上
+            nt26->EnsureNetworkReady(30000);
         } while (false);
         PostSimSwitchDone(result);
     }
@@ -684,7 +661,8 @@ void ScheduleSimSwitch(int target_slot) {
     snprintf(buf, sizeof(buf), Lang::Strings::SETTINGS_NET_SWITCH_SIM_CFUN0_FMT, SimSlotName(target_slot));
     OpenOverlay(buf);
     auto* ctx = new SimSwitchCtx{target_slot};
-    if (xTaskCreate(SimSwitchTask, "sim_switch", 4096, ctx, 5, nullptr) != pdPASS) {
+    // 栈要够建 4G 连接（模组恢复任务用 6 KB）
+    if (xTaskCreate(SimSwitchTask, "sim_switch", 8192, ctx, 5, nullptr) != pdPASS) {
         delete ctx;
         s_sim_switch_pending = false;
         CloseOverlay();
@@ -899,7 +877,6 @@ void BuildValet(lv_obj_t* page) {
         ? ValetText("有存过的 Wi-Fi 就用 Wi-Fi，没有就用 4G。通话中不换，换的时候不用重启。", "Saved Wi-Fi when there is one, otherwise 4G. Not during a call; no restart.")
         : mode == NetworkMode::CELLULAR ? ValetText("一直用 4G。换上网方式马上生效，不用重启。", "Always 4G. Takes effect at once, no restart.")
         : ValetText("只用 Wi-Fi，离开存过的网络就上不了网。", "Wi-Fi only: no connection away from saved networks.");
-    if (IsCellNetwork()) note += ValetText("换卡会重启一次。", " Changing the SIM restarts.");
     SettingsValetNote(page, note.c_str());
     if (IsCellNetwork()) {
         SettingsValetGap(page, kValetGap);

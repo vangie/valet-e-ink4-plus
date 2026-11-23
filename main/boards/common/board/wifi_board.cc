@@ -116,13 +116,7 @@ void WifiBoard::StartNetwork() {
         wifi_config_mode_ = false;
     }
 
-    auto& ssid_manager = SsidManager::GetInstance();
-    auto ssid_list = ssid_manager.GetSsidList();
-    if (ssid_list.empty()) {
-        ESP_LOGW(TAG, "No WiFi SSID; skip SoftAP. Configure in Settings→Network");
-        return;
-    }
-
+    // 状态栏回调先挂上：没存过网络时也要挂，之后在网络页配好网、不重启直接启动 Wi-Fi 时用得上
     auto& wifi_station = WifiStation::GetInstance();
     wifi_station.OnScanBegin([]() {
         auto display = Board::GetInstance().GetDisplay();
@@ -140,6 +134,12 @@ void WifiBoard::StartNetwork() {
         display->ShowNotification(notification.c_str(), 3000);
         display->UpdateStatusBar(true);
     });
+    auto& ssid_manager = SsidManager::GetInstance();
+    auto ssid_list = ssid_manager.GetSsidList();
+    if (ssid_list.empty()) {
+        ESP_LOGW(TAG, "No WiFi SSID; skip SoftAP. Configure in Settings→Network");
+        return;
+    }
     if (!wifi_station.IsUserEnabled()) return;
     wifi_station.Start();
 

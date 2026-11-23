@@ -300,6 +300,8 @@ struct SettingsTtsResultMsg {
     char err[64] = {};
 };
 
+static lv_obj_t* s_page = nullptr;   // 换云服务后整页按新的云服务重画
+
 static const char* CloudText(const char* zh, const char* en) {
     return std::strcmp(Lang::CODE, "zh-CN") == 0 ? zh : en;
 }
@@ -322,8 +324,8 @@ static void RefreshCloudOptions() {
         lv_label_set_text(s_ui.cloud_status, s_cloud_busy.load()
             ? CloudText("正在保存…", "Saving...")
             : saved != chat_cloud::ActiveProvider()
-            ? CloudText("已保存，正在重启…", "Saved. Restarting...")
-            : CloudText("换一个会重启一次，读到哪一页会记住。", "Switching restarts the device; your place is kept."));
+            ? CloudText("正在切换…", "Switching...")
+            : CloudText("换一个马上生效，不用重启。正在进行的对话会结束。", "Takes effect at once, no restart. A conversation in progress ends."));
     }
 }
 
@@ -338,18 +340,21 @@ static void OnCloudClicked(lv_event_t* e) {
     // LVGL runs on a PSRAM stack. Even opening a writable NVS namespace can
     // write Flash and disable caches, so the entire Settings lifetime must
     // run on the application's internal-RAM task, including its commit.
+    // 保存、拆旧通道、换新云服务都在应用的 Voice 任务上做（内部 RAM 栈，写 NVS 安全；与对话会话串行）
     if (!Application::GetInstance().Schedule([provider]() {
         chat_cloud::SaveProvider(static_cast<chat_cloud::Provider>(provider));
-        auto* display = Board::GetInstance().GetDisplay();
-        if (display != nullptr) {
-            DisplayLockGuard lock(display);
-            if (lock && s_ui.alive && s_ui.cloud_status) {
-                lv_label_set_text(s_ui.cloud_status, CloudText("已保存，正在重启…", "Saved. Restarting..."));
+        Application::GetInstance().SwitchChatProviderOnTask();
+        ScreenLvAsync([](void*) {
+            s_cloud_busy.store(false);
+            if (s_ui.alive && s_page && lv_obj_is_valid(s_page)) {
+                // 官方和自建这一页的内容不同：整页重画
+                lv_obj_clean(s_page);
+                SettingsConversationTab_Build(s_page);
+                SettingsConversationTab_OnActivated();
             }
-        }
-        // SaveProvider commits before returning; release the display lock before teardown.
-        Application::GetInstance().Reboot();
-    }, Application::TaskDomain::Storage)) {
+            ScreenShowToast(CloudText("已切换，不用重启", "Switched, no restart"));
+        });
+    }, Application::TaskDomain::Voice)) {
         s_cloud_busy.store(false);
         RefreshCloudOptions();
     }
@@ -673,6 +678,7 @@ void SettingsConversationTab_Build(lv_obj_t* page) {
     ++s_ui_generation;
     s_ui = {};
     s_ui.alive = true;
+    s_page = page;
     lv_obj_set_style_pad_row(page, 0, 0);
     const bool custom = chat_cloud::IsCustom();
     // While an assistant is being added the page does that one thing.

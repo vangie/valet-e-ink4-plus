@@ -174,7 +174,8 @@ void Network_CloseStatusOverlay();
 /** @brief 打开状态遮罩 */
 void Network_OpenStatusOverlay(const char* msg);
 /** @brief 打开重启倒计时 */
-void Network_OpenRestartCountdown(const std::string& headline);
+/** @brief 连上新 Wi-Fi 后：显示「已连接」，稍后返回上一页，系统 Wi-Fi 接着连（不重启） */
+void Network_FinishConnected(const std::string& headline);
 /** @brief 设置 Tab 按钮选中样式 */
 void Network_StyleTabBtn(lv_obj_t* btn, bool selected);
 /** @brief 设置扫描按钮可用样式 */

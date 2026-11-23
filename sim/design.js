@@ -786,8 +786,8 @@ function v2SettingsPane(id) {
       : `<p class="v-tip">${L(`${PROVIDERS[state.pendingProvider]}用的是随机送的订阅。只有按住说话，没有通话，也拿不到正在读的那一页。`, "Official plan: hold to talk only.")}</p>`;
     // 添加助理时整屏只做这一件事，不再同时放「谁来回答」。
     if (agent && state.assistantSetup) return mine;
-    const reboot = state.pendingProvider !== state.provider
-      ? `<button class="v-solid" data-reboot>${L("保存并重启", "Save and restart")}</button><p class="v-tip">${L("换助手要重启一次，读到哪一页会记住。", "Switching restarts the device.")}</p>` : "";
+    // 换了马上生效，不重启；正在进行的对话会结束
+    const reboot = `<p class="v-tip">${L("换一个马上生效，不用重启。正在进行的对话会结束。", "Takes effect at once, no restart. A conversation in progress ends.")}</p>`;
     return `<div class="v-card${agent && !ok ? " bad" : ""}">${ic(agent && !ok ? "x" : "check")}<span><b>${state.provider === "agent" ? v2Who() : PROVIDERS[state.provider]}</b>
         <em>${state.provider !== "agent" ? L("官方订阅，正在用", "Official plan, in use") : state.assistantSetup ? L("正在配置 · 原有配对保留", "Setup in progress") : ok ? L(`已配对 · 走 ${state.link === "4G" ? "4G" : "Wi-Fi"}`, "Paired") : L("尚未连接", "Not connected")}</em></span></div>
       ${v2Fld(L("谁来回答", "Who answers"), v2Seg(providerChoices(), state.pendingProvider, "data-provider"))}${mine}${reboot}`;

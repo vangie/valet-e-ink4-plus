@@ -59,6 +59,9 @@ public:
     };
     /** @brief 投递业务任务，不等待业务执行或队列空位；失败返回 false，捕获数据随回调释放 */
     bool Schedule(std::function<void()> callback, TaskDomain domain = TaskDomain::Voice);
+    /** @brief 换云服务，不重启：结束对话、拆掉旧的对话通道、换成已保存的云服务，再重新检查激活。
+     *         只在 Voice 任务上调（Schedule(..., TaskDomain::Voice)）。 */
+    void SwitchChatProviderOnTask();
     void SetDeviceState(DeviceState state);
     void Alert(const char* status, const char* message, const char* emotion = "");
     void DismissAlert();

@@ -385,6 +385,7 @@ void Application::CheckChatActivation() {
         ~PollGuard() { std::lock_guard<std::mutex> lock(mutex); busy = false; }
     } poll_guard{activation_poll_mutex_, activation_poll_busy_};
     chat_config_loading_ = true;
+    const auto checked_provider = chat_cloud::ActiveProvider();   // 换云服务后，旧的检查结果作废
     struct LoadingGuard {
         std::atomic<bool>& loading;
         ~LoadingGuard() { loading.store(false, std::memory_order_release); }
@@ -452,6 +453,10 @@ void Application::CheckChatActivation() {
                      err, ota.HasWebsocketConfig(), ota.HasMqttConfig());
             return;
         }
+    }
+    if (chat_cloud::ActiveProvider() != checked_provider) {
+        ESP_LOGI(TAG, "Chat activation result dropped: the cloud service was changed meanwhile");
+        return;
     }
     ClearActivationCode();
     chat_activation_pending_ = false;
@@ -719,6 +724,22 @@ void Application::EnsureProtocolReady() {
         display->ShowNotification(message.c_str());
         display->SetChatMessage("system", "");
     }
+}
+
+void Application::SwitchChatProviderOnTask() {
+    const auto from = chat_cloud::ActiveProvider();
+    const auto to = chat_cloud::SavedProvider();
+    if (from == to) return;
+    ESP_LOGI(TAG, "Chat provider %d -> %d without restart", static_cast<int>(from), static_cast<int>(to));
+    StopXiaozhiVoiceOnTask();   // 正在提问 / 通话就先结束
+    TeardownProtocol();         // 旧云服务的通道（用旧的 IsYunxin 收尾）
+    chat_cloud::ActivateSavedProvider();
+    // 激活与配置按新的云服务重新来；旧的激活码不再显示
+    ClearActivationCode();
+    chat_activation_pending_ = false;
+    chat_config_ready_ = chat_cloud::IsCustom() && chat_cloud::Available();
+    activation_kick_.store(true, std::memory_order_release);
+    if (device_state_ == kDeviceStateIdle) ApplyIdleStatusBar();
 }
 
 void Application::TeardownProtocol() {

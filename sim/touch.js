@@ -225,6 +225,13 @@ panel.addEventListener("click", (e) => {
   if (provider) {
     if (!providerChoices().some(([id]) => id === provider.dataset.provider)) return;
     state.pendingProvider = provider.dataset.provider;
+    // 新设计：马上换，不重启（真机：结束正在进行的对话，拆掉旧通道，换新的云服务）
+    if (isV2() && state.pendingProvider !== state.provider) {
+      state.provider = state.pendingProvider;
+      toast(L("已切换，不用重启", "Switched, no restart"));
+      log(`云服务换成「${PROVIDERS[state.provider]}」，马上生效，不重启。`);
+      return render();
+    }
     if (state.pendingProvider !== state.provider) log(`云服务选了「${PROVIDERS[state.pendingProvider]}」，重启后才生效。`);
     return render();
   }

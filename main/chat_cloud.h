@@ -18,7 +18,7 @@ inline constexpr Provider kDefaultProvider = Provider::Baiwen;
 
 namespace detail {
 inline std::atomic<Provider> saved{kDefaultProvider};
-inline Provider active = kDefaultProvider;
+inline std::atomic<Provider> active{kDefaultProvider};   // 正在用的；换云服务不重启，所以可能在运行中变
 inline std::atomic<bool> local_tts{true};
 }  // namespace detail
 
@@ -30,16 +30,25 @@ inline void InitializeFromNvs() {
     const int stored = settings.GetInt("provider", static_cast<int>(kDefaultProvider));
     const auto provider = stored >= 0 && stored < kProviderCount
         ? static_cast<Provider>(stored) : kDefaultProvider;
-    detail::active = provider;
+    detail::active.store(provider, std::memory_order_release);
     detail::saved.store(provider, std::memory_order_release);
     detail::local_tts.store(settings.GetBool(provider == Provider::Custom ? "agent_tts" : provider == Provider::Yunxin ? "yx_tts" : "xz_tts", true), std::memory_order_release);
 }
 
+// 换云服务不重启：把已保存的那个设为正在用的，并读回它自己的「回答出声」开关。
+// 只在应用的内部 RAM 任务上调（读 NVS），且旧的对话通道已经拆掉之后。
+inline void ActivateSavedProvider() {
+    const auto provider = detail::saved.load(std::memory_order_acquire);
+    Settings settings("chat_cloud");
+    detail::local_tts.store(settings.GetBool(provider == Provider::Custom ? "agent_tts" : provider == Provider::Yunxin ? "yx_tts" : "xz_tts", true), std::memory_order_release);
+    detail::active.store(provider, std::memory_order_release);
+}
+
 inline Provider SavedProvider() { return detail::saved.load(std::memory_order_acquire); }
-inline Provider ActiveProvider() { return detail::active; }
+inline Provider ActiveProvider() { return detail::active.load(std::memory_order_acquire); }
 
 // Application's internal-RAM task only. Publish the cached selection after
-// Settings has committed it. The active provider stays fixed until reboot.
+// Settings has committed it. Application::SwitchChatProviderOnTask makes it the active one.
 inline void SaveProvider(Provider provider) {
     if (static_cast<int>(provider) < 0 || static_cast<int>(provider) >= kProviderCount) return;
     {
