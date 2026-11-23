@@ -415,7 +415,7 @@ void OpenWifiPopup() {
     lv_obj_remove_style_all(mask);
     lv_obj_set_size(mask, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(mask, 0, 0);
-    ScreenApplyDotBackdrop(mask);
+    ScreenApplyPopupDots(mask);
     lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
     HapticAttachClick(mask);

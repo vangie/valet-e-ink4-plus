@@ -73,7 +73,7 @@ static bool ShowShelfDeleteDialog(lv_obj_t* screen) {
     lv_obj_remove_style_all(mask);
     lv_obj_set_size(mask, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(mask, 0, 0);
-    lv_obj_set_style_bg_opa(mask, LV_OPA_TRANSP, 0);
+    ScreenApplyPopupDots(mask);   // 和其他弹出层一样：网点盖住书架，卡片浮在上面
     Book_DisableScroll(mask);
     lv_obj_clear_flag(mask, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(

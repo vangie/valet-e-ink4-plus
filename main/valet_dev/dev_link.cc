@@ -346,7 +346,7 @@ void ValetDevLinkHandle(const char* json) {
             parsed.kind = prefs.kind;
             if (net_proxy::Parse(link->valuestring, &parsed) != net_proxy::ParseResult::kOk) error = "BAD_LINK";
             else if (parsed.kind == net_proxy::Kind::kShadowsocks && !valet::ss::Supported(parsed.method)) error = "UNSUPPORTED_CIPHER";
-            else { prefs.kind = parsed.kind; prefs.host = parsed.host; prefs.port = parsed.port; prefs.user = parsed.user; prefs.password = parsed.password; prefs.method = parsed.method; prefs.sni = parsed.sni; prefs.insecure = parsed.insecure; }
+            else { prefs.kind = parsed.kind; prefs.host = parsed.host; prefs.port = parsed.port; prefs.user = parsed.user; prefs.password = parsed.password; prefs.method = parsed.method; prefs.sni = parsed.sni; prefs.insecure = parsed.insecure; if (prefs.PasswordOnly()) prefs.more_kind = prefs.kind; }
         }
         prefs.on_wifi = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "wifi"));
         prefs.on_cell = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "cell"));

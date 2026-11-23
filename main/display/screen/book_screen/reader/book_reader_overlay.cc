@@ -66,11 +66,13 @@ void SetReadSettingsSheetVisible(bool visible) {
     if (st.settings.settings_sheet == nullptr || !lv_obj_is_valid(st.settings.settings_sheet)) {
         return;
     }
+    lv_obj_t* shade = st.settings.settings_shade && lv_obj_is_valid(st.settings.settings_shade) ? st.settings.settings_shade : nullptr;
     if (visible) {
-        ApplyReaderChromeSize();
         lv_obj_clear_flag(st.settings.settings_sheet, LV_OBJ_FLAG_HIDDEN);
+        ApplyReaderChromeSize();   // also shows the dots over the text when the card leaves some text visible
     } else {
         const bool was_visible = lv_obj_is_visible(st.settings.settings_sheet);
+        if (shade) lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(st.settings.settings_sheet, LV_OBJ_FLAG_HIDDEN);
         if (was_visible && !ReaderPageImagesHint()) EpdRequestBlackEqualization();
     }

@@ -619,6 +619,15 @@ lv_obj_t* CreateReaderScreen(const reader::BookInfo& info) {
     st.reader.read_chrome = BookUiState::ReadChrome::kReading;
     st.reader.toc_list_page = 0;
 
+    // 卡片下面的网点层：和其他弹出层一样，表示正文被盖住了；点它和点正文一样收起卡片。
+    lv_obj_t* shade = ScreenPopupMask(scr);
+    st.settings.settings_shade = shade;
+    lv_obj_add_event_cb(shade, [](lv_event_t* ev) {
+        lv_event_stop_bubbling(ev);
+        BookLvAsync(AsyncHideReadChrome);
+    }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN);
+
     // 底部阅读浮层（默认隐藏；菜单打开后显示时长页）
     lv_obj_t* sheet = lv_obj_create(scr);
     st.settings.settings_sheet = sheet;

@@ -470,6 +470,79 @@ void ScreenApplyDotBackdrop(lv_obj_t* obj) {
     lv_obj_set_style_bg_image_tiled(obj, true, 0);
 }
 
+// The same dots as the dialog backdrop, but only the dots (an alpha-only tile drawn in black): the
+// page under a popup stays visible between them, as on the reading page's panel shadow.
+static const lv_image_dsc_t* PopupDotsImg() {
+    static uint8_t alpha[kDotBackdropW * kDotBackdropH];
+    static lv_image_dsc_t img{};
+    if (!img.data) {
+        const lv_image_dsc_t* dots = DotBackdropImg();
+        for (int i = 0; i < kDotBackdropW * kDotBackdropH; ++i) alpha[i] = dots->data[i] == 0x00 ? 0xFF : 0x00;
+        img.header.magic = LV_IMAGE_HEADER_MAGIC;
+        img.header.cf = LV_COLOR_FORMAT_A8;
+        img.header.w = kDotBackdropW;
+        img.header.h = kDotBackdropH;
+        img.header.stride = kDotBackdropW;
+        img.data_size = sizeof(alpha);
+        img.data = alpha;
+    }
+    return &img;
+}
+
+void ScreenApplyPopupDots(lv_obj_t* obj) {
+    if (!obj) return;
+    lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_image_src(obj, PopupDotsImg(), 0);
+    lv_obj_set_style_bg_image_tiled(obj, true, 0);
+    lv_obj_set_style_bg_image_recolor(obj, lv_color_black(), 0);
+    lv_obj_set_style_bg_image_recolor_opa(obj, LV_OPA_COVER, 0);
+}
+
+lv_obj_t* ScreenPopupMask(lv_obj_t* parent) {
+    auto* mask = lv_obj_create(parent);
+    lv_obj_remove_style_all(mask);
+    lv_obj_set_size(mask, lv_pct(100), lv_pct(100));
+    ScreenApplyPopupDots(mask);
+    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
+    return mask;
+}
+
+lv_obj_t* ScreenPopupTitleBar(lv_obj_t* panel, const char* title, const lv_font_t* title_font, const char* close_text,
+                              const lv_font_t* close_font, lv_event_cb_t close_cb, void* user_data) {
+    constexpr lv_coord_t kBarH = 80;
+    auto* bar = lv_obj_create(panel);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, lv_pct(100), kBarH);
+    lv_obj_set_style_bg_color(bar, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(bar, LV_OBJ_FLAG_CLICKABLE);   // a tap on the bar is not a tap beside the panel
+    auto* label = lv_label_create(bar);
+    lv_label_set_text(label, title);
+    lv_obj_set_style_text_font(label, title_font, 0);
+    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 33, 0);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    if (close_text && close_text[0]) {
+        auto* close = lv_obj_create(bar);
+        lv_obj_remove_style_all(close);
+        lv_obj_set_size(close, 160, kBarH);
+        lv_obj_align(close, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(close);
+        if (close_cb) lv_obj_add_event_cb(close, close_cb, LV_EVENT_CLICKED, user_data);
+        auto* text = lv_label_create(close);
+        lv_label_set_text(text, close_text);
+        lv_obj_set_style_text_font(text, close_font, 0);
+        lv_obj_set_style_text_color(text, lv_color_white(), 0);
+        lv_obj_set_style_text_decor(text, LV_TEXT_DECOR_UNDERLINE, 0);
+        lv_obj_align(text, LV_ALIGN_RIGHT_MID, -33, 0);
+        lv_obj_clear_flag(text, LV_OBJ_FLAG_CLICKABLE);
+    }
+    return bar;
+}
+
 void ScreenStyleDialogCard(lv_obj_t* card, lv_coord_t padding) {
     lv_obj_set_style_bg_color(card, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);

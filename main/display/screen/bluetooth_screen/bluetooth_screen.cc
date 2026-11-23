@@ -94,7 +94,7 @@ void ShowNameConfirmation() {
     name_confirm_panel = mask;
     Bluetooth_strip_container(mask);
     lv_obj_set_size(mask, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_opa(mask, LV_OPA_TRANSP, 0);
+    ScreenApplyPopupDots(mask);   // 网点盖住下面的输入面板，确认卡片浮在上面
     lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(mask, [](lv_event_t* e) {
         if (lv_event_get_target(e) == lv_event_get_current_target(e)) CloseNameConfirmation();
@@ -148,7 +148,7 @@ void ShowNameConfirmation() {
     name_keyboard_panel = mask;
     Bluetooth_strip_container(mask);
     lv_obj_set_size(mask, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_opa(mask, LV_OPA_TRANSP, 0);
+    ScreenApplyPopupDots(mask);   // 和其他弹出层一样：网点盖住蓝牙页
     lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(mask, [](lv_event_t* e) {
         if (lv_event_get_target(e) == lv_event_get_current_target(e)) CloseNameKeyboard();

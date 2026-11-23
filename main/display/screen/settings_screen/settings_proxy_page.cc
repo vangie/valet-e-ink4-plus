@@ -20,10 +20,10 @@
 namespace {
 using valet::proxy::Prefs;
 
-enum Field : intptr_t { kFieldAddress = 0, kFieldLogin = 1, kFieldMethod = 2, kFieldSni = 3 };
+enum Field : intptr_t { kFieldAddress = 0, kFieldLogin = 1, kFieldMethod = 2, kFieldSni = 3, kFieldProtocol = 4 };
 // Segment values: which control, and which choice.
-enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindSs = 22,
-                         kKindTrojan = 23, kCertCheck = 30, kCertSkip = 31 };
+enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindMore = 22,
+                         kCertCheck = 30, kCertSkip = 31 };
 
 struct Ui {
     lv_obj_t* page = nullptr;
@@ -34,6 +34,7 @@ struct Ui {
     lv_obj_t* login_detail = nullptr;
     lv_obj_t* login_title = nullptr;   // 「账号和密码」，SS 和 Trojan 时是「密码」
     lv_obj_t* method_detail = nullptr; // SS only: the cipher row (its detail label)
+    lv_obj_t* protocol_detail = nullptr; // 「更多协议」 only: the protocol row (its detail label)
     lv_obj_t* sni_detail = nullptr;    // Trojan only: the server-name row (its detail label)
     lv_obj_t* cert = nullptr;          // Trojan only: the certificate check (label, choice, note)
     lv_obj_t* cert_seg = nullptr;
@@ -79,6 +80,15 @@ const char* KindName(net_proxy::Kind kind) {
     return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : kind == net_proxy::Kind::kShadowsocks ? "SS"
          : kind == net_proxy::Kind::kTrojan ? "Trojan" : "HTTP";
 }
+// The protocols under 「更多协议」, in the order of their list.
+struct Protocol { const char* name; net_proxy::Kind kind; };
+constexpr Protocol kProtocols[] = {{"SS", net_proxy::Kind::kShadowsocks}, {"Trojan", net_proxy::Kind::kTrojan}};
+constexpr int kProtocolCount = sizeof(kProtocols) / sizeof(kProtocols[0]);
+
+const char* ProtocolName(net_proxy::Kind kind) {
+    for (const auto& p : kProtocols) if (p.kind == kind) return p.name;
+    return "";
+}
 bool IsSs(const Prefs& prefs) { return prefs.kind == net_proxy::Kind::kShadowsocks; }
 bool IsTrojan(const Prefs& prefs) { return prefs.kind == net_proxy::Kind::kTrojan; }
 std::string MethodOf(const Prefs& prefs) { return prefs.method.empty() ? valet::ss::kDefaultMethod : prefs.method; }
@@ -88,7 +98,8 @@ void SetShown(lv_obj_t* obj, bool shown) {
     else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
 }
 int KindIndex(net_proxy::Kind kind) {
-    return kind == net_proxy::Kind::kSocks5 ? 1 : kind == net_proxy::Kind::kShadowsocks ? 2 : kind == net_proxy::Kind::kTrojan ? 3 : 0;
+    // HTTP, SOCKS5, then 「更多协议」 for every protocol picked from a list (SS, Trojan).
+    return kind == net_proxy::Kind::kSocks5 ? 1 : kind == net_proxy::Kind::kShadowsocks || kind == net_proxy::Kind::kTrojan ? 2 : 0;
 }
 // SS and Trojan: one box, the password. Others: user name and password. (The server-name editor
 // also has one box, which is not a password.)
@@ -115,6 +126,14 @@ void Refresh() {
     SettingsValetSelect(s_ui.cell_seg, prefs.on_cell ? 1 : 0);
     SettingsValetSelect(s_ui.kind_seg, KindIndex(prefs.kind));
     SetText(s_ui.login_title, prefs.PasswordOnly() ? Text("密码", "Password") : Text("账号和密码", "Login"));
+    if (s_ui.protocol_detail) {
+        lv_obj_t* row = lv_obj_get_parent(s_ui.protocol_detail);
+        SetShown(row, prefs.PasswordOnly());
+        SetText(s_ui.protocol_detail, ProtocolName(prefs.kind));
+        // The first row shown carries the rule on top.
+        lv_obj_set_style_border_side(lv_obj_get_parent(s_ui.address_detail), static_cast<lv_border_side_t>(
+            LV_BORDER_SIDE_BOTTOM | (prefs.PasswordOnly() ? LV_BORDER_SIDE_NONE : LV_BORDER_SIDE_TOP)), 0);
+    }
     if (s_ui.sni_detail) {
         SetShown(lv_obj_get_parent(s_ui.sni_detail), IsTrojan(prefs));
         SetText(s_ui.sni_detail, prefs.sni.empty() ? Text("和地址一样", "Same as the address") : prefs.sni.c_str());
@@ -215,6 +234,7 @@ void ConfirmEdit() {
                 problem = Text("这条 ss:// 链接的加密方式设备不支持（SS2022 也不支持）。", "The device does not support this ss:// link's cipher (nor SS2022).");
             if (!problem) {
                 prefs.kind = parsed.kind;
+                if (prefs.PasswordOnly()) prefs.more_kind = prefs.kind;
                 if (parsed.kind == net_proxy::Kind::kShadowsocks) prefs.method = parsed.method;
                 // A trojan:// link brings its server name and certificate setting; a bare address keeps them.
                 if (parsed.kind == net_proxy::Kind::kTrojan && Trimmed(s_edit[0]).find("://") != std::string::npos) {
@@ -323,33 +343,41 @@ void OpenEditor(Field field) {
     }
     s_password_kept = field == kFieldLogin && !prefs.password.empty();
 
-    auto* mask = lv_obj_create(lv_screen_active());
+    // Dots over the page, a black title bar on the panel: plainly a layer above the page.
+    // A tap beside the panel does nothing (it would lose what was typed); 取消 in the bar closes.
+    auto* mask = ScreenPopupMask(lv_screen_active());
     s_ui.editor = mask;
-    lv_obj_remove_style_all(mask);
-    lv_obj_set_size(mask, lv_pct(100), lv_pct(100));
-    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);   // taps beside the panel do not reach the page
     lv_obj_add_event_cb(mask, [](lv_event_t*) {
         s_ui.editor = s_ui.edit_hint = s_ui.keyboard = nullptr;
         for (int i = 0; i < 2; ++i) s_ui.edit_box[i] = s_ui.edit_name[i] = s_ui.edit_text[i] = s_ui.edit_cursor[i] = nullptr;
     }, LV_EVENT_DELETE, nullptr);
 
-    auto* panel = lv_obj_create(mask);
+    auto* sheet = lv_obj_create(mask);
+    lv_obj_remove_style_all(sheet);
+    lv_obj_set_size(sheet, lv_pct(100), UiSx(260) + 330 + (s_ui.boxes - 1) * 94);
+    lv_obj_align(sheet, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(sheet, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(sheet, LV_OBJ_FLAG_CLICKABLE);
+    const char* title = field == kFieldAddress ? Text("地址", "Address")
+                      : field == kFieldSni ? Text("服务器名（SNI）", "Server name (SNI)")
+                      : s_ui.boxes == 1 ? Text("密码", "Password") : Text("账号和密码", "Login");
+    ScreenPopupTitleBar(sheet, title, Strong(), Text("取消", "Cancel"), Small(), [](lv_event_t*) {
+        // The bar is inside the editor: delete it after this event has returned.
+        lv_async_call([](void*) { CloseEditor(); }, nullptr);
+    });
+    auto* panel = lv_obj_create(sheet);
     lv_obj_remove_style_all(panel);
-    lv_obj_set_size(panel, lv_pct(100), UiSx(260) + 330 + (s_ui.boxes - 1) * 94);
-    lv_obj_align(panel, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(panel, lv_color_black(), 0);
-    lv_obj_set_style_border_width(panel, 3, 0);
-    lv_obj_set_style_border_side(panel, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_width(panel, lv_pct(100));
+    lv_obj_set_flex_grow(panel, 1);
     lv_obj_set_style_pad_hor(panel, 33, 0);
-    lv_obj_set_style_pad_top(panel, 24, 0);
+    lv_obj_set_style_pad_top(panel, 20, 0);
     lv_obj_set_style_pad_bottom(panel, 12, 0);
     lv_obj_set_style_pad_row(panel, 16, 0);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
 
     s_ui.edit_hint = lv_label_create(panel);
     lv_label_set_text(s_ui.edit_hint, field == kFieldAddress
@@ -373,12 +401,6 @@ void OpenEditor(Field field) {
         AddEditBox(panel, 0, Text("账号", "User"));
         AddEditBox(panel, 1, Text("密码", "Password"));
     }
-
-    auto* cancel = SettingsValetButton(panel, Text("取消", "Cancel"), [](lv_event_t*) {
-        // The button is inside the editor: delete it after this event has returned.
-        lv_async_call([](void*) { CloseEditor(); }, nullptr);
-    });
-    lv_obj_set_height(cancel, 66);
 
     s_ui.keyboard = ScreenKeyboardCreate(panel, [](ScreenKeyboardEvent event, const char* text, void*) {
         char* edit = s_edit[s_ui.active];
@@ -411,20 +433,29 @@ void OpenEditor(Field field) {
     // An address is mostly digits, dots and a colon: start on that layout.
     if (field == kFieldAddress) ScreenKeyboardShowSymbols(s_ui.keyboard);
     else ScreenKeyboardReset(s_ui.keyboard);
-    lv_obj_update_layout(panel);
+    lv_obj_update_layout(sheet);
     RefreshEdit();
 }
 
-// ── Cipher picker ──────────────────────────────────────────────────────────
-// All ciphers in one list that scrolls (there are too many to lay out as buttons), with no judgement
-// on them: the server decides which one is used. Tapping one picks it and closes the list.
+// ── Picker ─────────────────────────────────────────────────────────────────
+// One popup list for the protocol under 「更多协议」 and for SS's cipher: every choice in one list,
+// with no judgement on them (the server decides which one is used). Dots over the page and a
+// black title bar mark it as a layer above the page. A list longer than the panel scrolls with a
+// scroll bar always shown and settles on whole rows; a short one gets a panel just big enough.
+// Tapping a row picks it and closes the list; so does 关闭, a tap beside it or the back key.
 constexpr int32_t kPickerRowH = 92;
+enum class PickerKind : uint8_t { kProtocol, kCipher };
+PickerKind s_picker_kind = PickerKind::kCipher;
+const char* PickerItem(int index) {
+    if (s_picker_kind == PickerKind::kCipher) return valet::ss::MethodName(index);
+    return index >= 0 && index < kProtocolCount ? kProtocols[index].name : nullptr;
+}
 
 void ClosePicker() {
     if (s_ui.picker) lv_obj_delete(s_ui.picker);   // its delete handler clears the pointer
 }
 
-void AddPickerRow(lv_obj_t* list, const char* name, bool selected) {
+void AddPickerRow(lv_obj_t* list, int index, bool selected) {
     auto* row = lv_obj_create(list);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, lv_pct(100), kPickerRowH);
@@ -435,7 +466,7 @@ void AddPickerRow(lv_obj_t* list, const char* name, bool selected) {
     lv_obj_add_flag(row, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS));
     HapticAttachClick(row);
     auto* label = lv_label_create(row);
-    lv_label_set_text(label, name);
+    lv_label_set_text(label, PickerItem(index));
     lv_obj_set_style_text_font(label, selected ? Strong() : fontpack_lv_font_ui(), 0);
     lv_obj_align(label, LV_ALIGN_LEFT_MID, 4, 0);
     lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
@@ -446,75 +477,58 @@ void AddPickerRow(lv_obj_t* list, const char* name, bool selected) {
         lv_obj_align(mark, LV_ALIGN_RIGHT_MID, -24, 0);
         lv_obj_clear_flag(mark, LV_OBJ_FLAG_CLICKABLE);
     }
-    // The name is the value: the row keeps a pointer to the static table entry.
     lv_obj_add_event_cb(row, [](lv_event_t* e) {
+        const int index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
         Prefs prefs = valet::proxy::Get();
-        prefs.method = static_cast<const char*>(lv_event_get_user_data(e));
+        if (s_picker_kind == PickerKind::kCipher) prefs.method = valet::ss::MethodName(index);
+        else prefs.kind = prefs.more_kind = kProtocols[index].kind;
         ClosePicker();
         Save(prefs);
-    }, LV_EVENT_CLICKED, const_cast<char*>(name));
+    }, LV_EVENT_CLICKED, reinterpret_cast<void*>(static_cast<intptr_t>(index)));
 }
 
-void OpenMethodPicker() {
+void OpenPicker(PickerKind kind) {
     if (s_ui.picker || s_ui.editor) return;
-    const std::string current = MethodOf(valet::proxy::Get());
-    auto* mask = lv_obj_create(lv_screen_active());
+    s_picker_kind = kind;
+    const Prefs prefs = valet::proxy::Get();
+    const std::string current = kind == PickerKind::kCipher ? MethodOf(prefs) : ProtocolName(prefs.kind);
+    int count = 0;
+    while (PickerItem(count)) ++count;
+
+    auto* mask = ScreenPopupMask(lv_screen_active());
     s_ui.picker = mask;
-    lv_obj_remove_style_all(mask);
-    lv_obj_set_size(mask, lv_pct(100), lv_pct(100));
-    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
-    // A tap beside the panel closes it, as on the reading card.
     lv_obj_add_event_cb(mask, [](lv_event_t* e) {
         if (lv_event_get_target(e) == lv_event_get_current_target(e)) ClosePicker();
     }, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(mask, [](lv_event_t*) { s_ui.picker = nullptr; }, LV_EVENT_DELETE, nullptr);
 
-    auto* panel = lv_obj_create(mask);
+    auto* sheet = lv_obj_create(mask);
+    lv_obj_remove_style_all(sheet);
+    lv_obj_set_size(sheet, lv_pct(100), lv_pct(76));
+    lv_obj_align(sheet, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(sheet, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(sheet, LV_OBJ_FLAG_CLICKABLE);
+    ScreenPopupTitleBar(sheet, kind == PickerKind::kCipher ? Text("加密方式", "Cipher") : Text("协议", "Protocol"), Strong(),
+                        Text("关闭", "Close"), Small(), [](lv_event_t*) { lv_async_call([](void*) { ClosePicker(); }, nullptr); });
+
+    auto* panel = lv_obj_create(sheet);
     lv_obj_remove_style_all(panel);
-    lv_obj_set_size(panel, lv_pct(100), lv_pct(76));
-    lv_obj_align(panel, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(panel, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(panel, lv_color_black(), 0);
-    lv_obj_set_style_border_width(panel, 3, 0);
-    lv_obj_set_style_border_side(panel, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_width(panel, lv_pct(100));
+    lv_obj_set_flex_grow(panel, 1);
     lv_obj_set_style_pad_hor(panel, 33, 0);
     lv_obj_set_style_pad_top(panel, 16, 0);
     lv_obj_set_style_pad_bottom(panel, 16, 0);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
-
-    // Title and a way out.
-    auto* head = lv_obj_create(panel);
-    lv_obj_remove_style_all(head);
-    lv_obj_set_size(head, lv_pct(100), 80);
-    lv_obj_clear_flag(head, LV_OBJ_FLAG_SCROLLABLE);
-    auto* title = lv_label_create(head);
-    lv_label_set_text(title, Text("加密方式", "Cipher"));
-    lv_obj_set_style_text_font(title, Strong(), 0);
-    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
-    auto* close = lv_obj_create(head);
-    lv_obj_remove_style_all(close);
-    lv_obj_set_size(close, 140, 80);
-    lv_obj_align(close, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
-    HapticAttachClick(close);
-    lv_obj_add_event_cb(close, [](lv_event_t*) { ClosePicker(); }, LV_EVENT_CLICKED, nullptr);
-    auto* close_label = lv_label_create(close);
-    lv_label_set_text(close_label, Text("关闭", "Close"));
-    lv_obj_set_style_text_font(close_label, Small(), 0);
-    lv_obj_set_style_text_decor(close_label, LV_TEXT_DECOR_UNDERLINE, 0);
-    lv_obj_align(close_label, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_clear_flag(close_label, LV_OBJ_FLAG_CLICKABLE);
     auto* note = lv_label_create(panel);
-    lv_label_set_text(note, Text("要和服务器的设置一样。列表可以上下拖。", "Must match the server. Drag the list up and down."));
     lv_obj_set_width(note, lv_pct(100));
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(note, Small(), 0);
 
-    // The list: scrolls with a scroll bar always shown; no flinging or bouncing (each frame is a refresh on ink).
+    // The list: no flinging or bouncing (each frame is a refresh on ink).
     auto* list = lv_obj_create(panel);
     lv_obj_remove_style_all(list);
     lv_obj_set_width(list, lv_pct(100));
@@ -522,7 +536,39 @@ void OpenMethodPicker() {
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_right(list, 24, 0);   // room for the scroll bar
     lv_obj_set_style_margin_top(list, 12, 0);
-    // When a drag ends, settle on whole rows (the list is a whole number of rows tall, so none is cut).
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_clear_flag(list, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_ELASTIC));
+    lv_obj_set_style_width(list, 8, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(list, lv_color_black(), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(list, 0, LV_PART_SCROLLBAR);
+    int selected = 0;
+    for (int i = 0; i < count; ++i) {
+        const bool on = current == PickerItem(i);
+        AddPickerRow(list, i, on);
+        if (on) selected = i;
+    }
+    lv_obj_update_layout(sheet);
+    const int32_t fits = LV_MAX(1, lv_obj_get_content_height(list) / kPickerRowH);
+    const bool scrolls = count > fits;
+    lv_label_set_text(note, scrolls ? Text("要和服务器的设置一样。列表可以上下拖。", "Must match the server. Drag the list up and down.")
+                                    : Text("要和服务器的设置一样。", "Must match the server."));
+    lv_obj_set_flex_grow(list, 0);
+    if (!scrolls) {
+        // Few choices: a panel just big enough, no scroll bar.
+        lv_obj_set_height(list, count * kPickerRowH);
+        lv_obj_clear_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_set_flex_grow(panel, 0);
+        lv_obj_set_height(panel, LV_SIZE_CONTENT);
+        lv_obj_set_height(sheet, LV_SIZE_CONTENT);
+        lv_obj_update_layout(sheet);
+        return;
+    }
+    // A whole number of rows tall, so no row is ever cut at the top or the bottom.
+    lv_obj_set_height(list, fits * kPickerRowH);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ON);
+    // When a drag ends, settle on whole rows.
     lv_obj_add_event_cb(list, [](lv_event_t* e) {
         auto* l = static_cast<lv_obj_t*>(lv_event_get_current_target(e));
         const int32_t y = lv_obj_get_scroll_y(l);
@@ -530,27 +576,10 @@ void OpenMethodPicker() {
         const int32_t whole = LV_CLAMP(0, (y + kPickerRowH / 2) / kPickerRowH * kPickerRowH, end);
         if (whole != y) lv_obj_scroll_to_y(l, whole, LV_ANIM_OFF);
     }, LV_EVENT_SCROLL_END, nullptr);
-    lv_obj_set_scroll_dir(list, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ON);
-    lv_obj_clear_flag(list, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_ELASTIC));
-    lv_obj_set_style_width(list, 8, LV_PART_SCROLLBAR);
-    lv_obj_set_style_bg_color(list, lv_color_black(), LV_PART_SCROLLBAR);
-    lv_obj_set_style_bg_opa(list, LV_OPA_COVER, LV_PART_SCROLLBAR);
-    lv_obj_set_style_radius(list, 0, LV_PART_SCROLLBAR);
-    int selected = 0;
-    for (int i = 0; const char* name = valet::ss::MethodName(i); ++i) {
-        AddPickerRow(list, name, current == name);
-        if (current == name) selected = i;
-    }
-    // A whole number of rows tall, so no row is ever cut at the top or the bottom.
-    lv_obj_update_layout(list);
-    const int32_t rows = LV_MAX(1, lv_obj_get_content_height(list) / kPickerRowH);
-    lv_obj_set_flex_grow(list, 0);
-    lv_obj_set_height(list, rows * kPickerRowH);
     lv_obj_update_layout(list);
     // Open with the current one in the middle where possible.
     const int32_t end = lv_obj_get_scroll_bottom(list);
-    lv_obj_scroll_to_y(list, LV_CLAMP(0, (selected - rows / 2) * kPickerRowH, end), LV_ANIM_OFF);
+    lv_obj_scroll_to_y(list, LV_CLAMP(0, (selected - fits / 2) * kPickerRowH, end), LV_ANIM_OFF);
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────
@@ -573,8 +602,8 @@ void OnChoice(lv_event_t* e) {
         case kCellOff: case kCellOn: prefs.on_cell = choice == kCellOn; break;
         case kKindHttp: prefs.kind = net_proxy::Kind::kHttp; break;
         case kKindSocks: prefs.kind = net_proxy::Kind::kSocks5; break;
-        case kKindSs: prefs.kind = net_proxy::Kind::kShadowsocks; break;
-        case kKindTrojan: prefs.kind = net_proxy::Kind::kTrojan; break;
+        // Back to the protocol used last; which one is changed in the 「协议」 row.
+        case kKindMore: if (!prefs.PasswordOnly()) prefs.kind = prefs.more_kind; break;
         case kCertCheck: case kCertSkip: prefs.insecure = choice == kCertSkip; break;
     }
     Save(prefs);
@@ -582,7 +611,8 @@ void OnChoice(lv_event_t* e) {
 
 void OnRow(lv_event_t* e) {
     const auto field = static_cast<Field>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
-    if (field == kFieldMethod) { OpenMethodPicker(); return; }
+    if (field == kFieldMethod) { OpenPicker(PickerKind::kCipher); return; }
+    if (field == kFieldProtocol) { OpenPicker(PickerKind::kProtocol); return; }
     OpenEditor(field);
 }
 
@@ -697,7 +727,7 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
     const char* const choices[] = {Text("直连", "Direct"), Text("走代理", "Use proxy")};
     static const intptr_t kWifiValues[] = {kWifiOff, kWifiOn};
     static const intptr_t kCellValues[] = {kCellOff, kCellOn};
-    static const intptr_t kKindValues[] = {kKindHttp, kKindSocks, kKindSs, kKindTrojan};
+    static const intptr_t kKindValues[] = {kKindHttp, kKindSocks, kKindMore};
     static const intptr_t kCertValues[] = {kCertCheck, kCertSkip};
 
     SettingsValetLabel(page, Text("连 Wi-Fi 时", "On Wi-Fi"));
@@ -709,9 +739,10 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
                                  "On 4G only a proxy with a public address can be reached."));
     SettingsValetGap(page, 30);
     SettingsValetLabel(page, Text("代理类型", "Proxy type"));
-    static const char* const kKinds[] = {"HTTP", "SOCKS5", "SS", "Trojan"};
-    s_ui.kind_seg = SettingsValetSegments(page, kKinds, 4, OnChoice, kKindValues);
+    const char* const kinds[] = {"HTTP", "SOCKS5", Text("更多协议", "More")};
+    s_ui.kind_seg = SettingsValetSegments(page, kinds, 3, OnChoice, kKindValues);
     SettingsValetGap(page, 30);
+    s_ui.protocol_detail = AddRow(page, Text("协议", "Protocol"), kFieldProtocol, true);   // 「更多协议」 only
     s_ui.address_detail = AddRow(page, Text("地址", "Address"), kFieldAddress, true);
     s_ui.login_detail = AddRow(page, Text("账号和密码", "Login"), kFieldLogin, false, &s_ui.login_title);
     s_ui.method_detail = AddRow(page, Text("加密方式", "Cipher"), kFieldMethod, false);   // SS only

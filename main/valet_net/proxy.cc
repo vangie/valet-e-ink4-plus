@@ -86,8 +86,10 @@ void Init() {
         loaded.method = store.GetString("method");
         loaded.sni = store.GetString("sni");
         loaded.insecure = store.GetInt("insecure", 0) != 0;
+        loaded.more_kind = store.GetInt("more", 3) == 4 ? net_proxy::Kind::kTrojan : net_proxy::Kind::kShadowsocks;
     }
     if (loaded.port < 1 || loaded.port > 65535) loaded.port = 0;
+    if (loaded.PasswordOnly()) loaded.more_kind = loaded.kind;
     {
         std::lock_guard<std::mutex> lock(s_mutex);
         s_prefs = loaded;
@@ -114,6 +116,7 @@ bool Update(const Prefs& prefs) {
         store.SetString("method", prefs.method);
         store.SetString("sni", prefs.sni);
         store.SetInt("insecure", prefs.insecure ? 1 : 0);
+        store.SetInt("more", static_cast<int>(prefs.more_kind));
         if (!store.Commit()) ESP_LOGE(TAG, "the proxy choice was not saved");
     }, Application::TaskDomain::Storage)) return false;
     {

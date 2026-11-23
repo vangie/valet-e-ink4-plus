@@ -293,7 +293,7 @@ function v2Back() {
     return true;
   }
   if (state.screen !== "settings") return false;
-  // 和设备一样：加密方式的弹出列表开着时，返回键先关掉列表，还留在代理页。
+  // 和设备一样：协议或加密方式的弹出列表开着时，返回键先关掉列表，还留在代理页。
   if (state.settingsScreen === "proxy" && state.proxyPicker) {
     state.proxyPicker = false;
     render();
@@ -546,7 +546,7 @@ function v2Reader() {
     <div class="read-head"><span>三国演义 · 第一回</span>${marked ? `<button class="v-mark" data-ask>${L("注", "Note")}</button>` : ""}</div>
     <div class="read-body">${body}</div>
     <div class="read-foot"><span>10:48</span>${miss ? `<button class="v-miss" data-fontfix>${L(`缺 ${miss} 个字`, `${miss} missing`)}</button>` : `<span>${state.battery}%</span>`}<span>${state.page + 1} / ${pages.length}</span></div>
-    ${sheet}${state.float ? v2Float() : ""}</div>`;
+    ${state.sheet ? `<div class="v-shade" data-sheet-shade></div>` : ""}${sheet}${state.float ? v2Float() : ""}</div>`;
 }
 
 // ── 设置：按「我想做什么」分六项，每项直接写着现在的值。不滚动。
@@ -689,12 +689,12 @@ function v2SettingsPane(id) {
     const onoff = [["off", L("直连", "Direct")], ["on", L("走代理", "Use proxy")]];
     return `${v2Fld(L("连 Wi-Fi 时", "On Wi-Fi"), v2Seg(onoff, state.proxyWifi ? "on" : "off", "data-proxy-wifi"))}
       ${v2Fld(L("用 4G 时", "On 4G"), v2Seg(onoff, state.proxyCell ? "on" : "off", "data-proxy-cell"), L("4G 下连不到家里局域网里的代理。", "On 4G a proxy on the home network cannot be reached."))}
-      ${v2Fld(L("代理类型", "Proxy type"), v2Seg([["http", "HTTP"], ["socks5", "SOCKS5"], ["ss", "SS"], ["trojan", "Trojan"]], state.proxyKind, "data-proxy-kind"))}
-      <nav class="v-rows"><button class="v-row" data-proxy-addr><span><b>${L("地址", "Address")}</b><em>${state.proxyAddr || L("还没填。点这里输入", "Not set. Tap to enter")}</em></span>${ic("go", "chev")}</button>
+      ${v2Fld(L("代理类型", "Proxy type"), v2Seg([["http", "HTTP"], ["socks5", "SOCKS5"], ["more", L("更多协议", "More")]], proxyPasswordOnly() ? "more" : state.proxyKind, "data-proxy-kind"))}
+      <nav class="v-rows">${proxyPasswordOnly() ? `<button class="v-row" data-proxy-pick="proto"><span><b>${L("协议", "Protocol")}</b><em>${PROXY_PROTOCOLS[state.proxyKind]}</em></span>${ic("go", "chev")}</button>` : ""}<button class="v-row" data-proxy-addr><span><b>${L("地址", "Address")}</b><em>${state.proxyAddr || L("还没填。点这里输入", "Not set. Tap to enter")}</em></span>${ic("go", "chev")}</button>
         ${proxyPasswordOnly()
           ? `<button class="v-row" data-proxy-user><span><b>${L("密码", "Password")}</b><em>${state.proxySsPass ? L("已填", "Set") : state.proxyKind === "ss" ? L("还没填。SS 必须有密码", "Not set. SS needs one") : L("还没填。Trojan 必须有密码", "Not set. Trojan needs one")}</em></span>${ic("go", "chev")}</button>
             ${state.proxyKind === "ss"
-              ? `<button class="v-row" data-proxy-pick><span><b>${L("加密方式", "Cipher")}</b><em>${state.proxyMethod}</em></span>${ic("go", "chev")}</button>`
+              ? `<button class="v-row" data-proxy-pick="cipher"><span><b>${L("加密方式", "Cipher")}</b><em>${state.proxyMethod}</em></span>${ic("go", "chev")}</button>`
               : `<button class="v-row" data-proxy-sni><span><b>${L("服务器名（SNI）", "Server name (SNI)")}</b><em>${state.proxySni || L("和地址一样", "Same as the address")}</em></span>${ic("go", "chev")}</button>`}</nav>
             ${state.proxyKind === "trojan" ? v2Fld(L("检查证书", "Check the certificate"), v2Seg([["check", L("检查", "Check")], ["skip", L("不检查", "Skip")]], state.proxyInsecure ? "skip" : "check", "data-proxy-cert"),
               L("要和节点的设置一样：Surge 里写着 skip-cert-verify=true 的选「不检查」。", "Match the node: choose Skip where Surge says skip-cert-verify=true.")) : ""}`
@@ -811,20 +811,26 @@ function proxySummary() {
   if (!state.proxyWifi && !state.proxyCell) return L("没开 · ", "Off · ") + where;
   return (state.proxyWifi ? L("连 Wi-Fi 时才走 · ", "Only on Wi-Fi · ") : L("用 4G 时才走 · ", "Only on 4G · ")) + where;
 }
-// SS 的加密方式：设备支持的全部方式放在一个能上下拖的弹出列表里，不分组、不评价（用哪种由服务器决定）。
-// 列表高度是整行的倍数，拖完停在整行上；打开时正在用的那项尽量在中间。点一项就选上并关掉。
+// 「更多协议」里的协议，和 SS 的加密方式：都放在弹出列表里选，不分组、不评价（用哪种由服务器决定）。
+// 列表高度是整行的倍数，拖完停在整行上；项少时面板缩到刚好放下。打开时正在用的那项尽量在中间。点一项就选上并关掉。
+const PROXY_PROTOCOLS = { ss: "SS", trojan: "Trojan" };
 const SS_METHODS = ["aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305",
   "aes-128-cfb", "aes-192-cfb", "aes-256-cfb", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr", "chacha20-ietf"];
 const PICK_ROW = 31, PICK_ROWS = 8;
-function cipherPicker() {
-  const at = SS_METHODS.indexOf(state.proxyMethod);
-  const top = Math.max(0, Math.min(at - (PICK_ROWS >> 1), SS_METHODS.length - PICK_ROWS)) * PICK_ROW;
-  const rows = SS_METHODS.map((m) => `<button class="v-pick-row${m === state.proxyMethod ? " on" : ""}" data-proxy-method="${m}"><b>${m}</b>${m === state.proxyMethod ? `<em>${L("在用", "In use")}</em>` : ""}</button>`).join("");
+function proxyPicker() {
+  const proto = state.proxyPicker === "proto";
+  const items = proto ? Object.entries(PROXY_PROTOCOLS) : SS_METHODS.map((m) => [m, m]);
+  const current = proto ? state.proxyKind : state.proxyMethod;
+  const shown = Math.min(PICK_ROWS, items.length), scrolls = items.length > shown;
+  const at = items.findIndex(([v]) => v === current);
+  const top = Math.max(0, Math.min(at - (shown >> 1), items.length - shown)) * PICK_ROW;
+  const rows = items.map(([v, name]) => `<button class="v-pick-row${v === current ? " on" : ""}" data-proxy-choose="${v}"><b>${name}</b>${v === current ? `<em>${L("在用", "In use")}</em>` : ""}</button>`).join("");
   setTimeout(() => { const list = panel.querySelector(".v-pick-list"); if (list) list.scrollTop = top; });
-  return `<div class="v-pick" data-pick-mask><div class="v-pick-panel">
-      <div class="v-pick-head"><b>${L("加密方式", "Cipher")}</b><button data-pick-close>${L("关闭", "Close")}</button></div>
-      <p>${L("要和服务器的设置一样。列表可以上下拖。", "Must match the server. Drag the list up and down.")}</p>
-      <div class="v-pick-list" style="height:${PICK_ROW * PICK_ROWS}px">${rows}</div></div></div>`;
+  const note = scrolls ? L("要和服务器的设置一样。列表可以上下拖。", "Must match the server. Drag the list up and down.") : L("要和服务器的设置一样。", "Must match the server.");
+  return `<div class="v-pick" data-pick-mask><div class="v-pick-panel${scrolls ? "" : " fit"}">
+      <div class="v-pick-head"><b>${proto ? L("协议", "Protocol") : L("加密方式", "Cipher")}</b><button data-pick-close>${L("关闭", "Close")}</button></div>
+      <p>${note}</p>
+      <div class="v-pick-list${scrolls ? "" : " fit"}" style="height:${PICK_ROW * shown}px">${rows}</div></div></div>`;
 }
 
 function v2Settings() {
@@ -837,7 +843,7 @@ function v2Settings() {
     bt: L("蓝牙", "Bluetooth"), pager: L("翻页器", "Page turner"),
   };
   const body = id === "list" ? v2SettingsHome() : v2SettingsPane(id);
-  const picker = id === "proxy" && state.proxyPicker && state.proxyKind === "ss" ? cipherPicker() : "";
+  const picker = id === "proxy" && proxyPasswordOnly() && (state.proxyPicker === "proto" || (state.proxyPicker === "cipher" && state.proxyKind === "ss")) ? proxyPicker() : "";
   return `${bar()}<main class="v-page v-set">${v2Head(titles[id] || titles.list)}<div class="v-pane${id === "net" ? " is-tight" : ""}">${body}</div></main>${picker}`;
 }
 
@@ -971,12 +977,17 @@ panel.addEventListener("click", (e) => {
     state.proxyTest = "";
     return render();
   }
-  if ((el = hit("[data-proxy-method]"))) { state.proxyMethod = el.dataset.proxyMethod; state.proxyPicker = false; state.proxyTest = ""; return render(); }
-  if (hit("[data-proxy-pick]")) { state.proxyPicker = true; return render(); }
+  if ((el = hit("[data-proxy-choose]"))) {
+    const v = el.dataset.proxyChoose;
+    if (state.proxyPicker === "proto") state.proxyKind = state.proxyMore = v; else state.proxyMethod = v;
+    state.proxyPicker = false; state.proxyTest = ""; return render();
+  }
+  if ((el = hit("[data-proxy-pick]"))) { state.proxyPicker = el.dataset.proxyPick; return render(); }
   // 点「关闭」或点面板外面（遮罩本身）都关掉列表。
   if (hit("[data-pick-close]") || e.target.matches("[data-pick-mask]")) { state.proxyPicker = false; return render(); }
   if (hit(".v-pick")) return;
-  if ((el = hit("[data-proxy-kind]"))) { state.proxyKind = el.dataset.proxyKind; state.proxyTest = ""; return render(); }
+  // 「更多协议」回到上次用的那种（没用过时是 SS）；具体哪种在「协议」那一行里换。
+  if ((el = hit("[data-proxy-kind]"))) { const k = el.dataset.proxyKind; state.proxyKind = k === "more" ? state.proxyMore : k; state.proxyTest = ""; return render(); }
   if ((el = hit("[data-proxy-cert]"))) { state.proxyInsecure = el.dataset.proxyCert === "skip"; state.proxyTest = ""; return render(); }
   if (hit("[data-proxy-sni]")) {
     state.proxySni = state.proxySni ? "" : "cdn.example.com";

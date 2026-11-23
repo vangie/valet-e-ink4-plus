@@ -536,6 +536,7 @@ void ReleaseReaderSessionForLeave() {
     st.reader.status_label = nullptr;
     st.reader.status_h = 0;
     st.settings.settings_sheet = nullptr;
+    st.settings.settings_shade = nullptr;
     ClearSettingsSheetWidgetRefs();
     StopTtfPollTimer();
     st.ttf.ttf_mode = BookUiState::TtfMode::kNone;

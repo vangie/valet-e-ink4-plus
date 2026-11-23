@@ -77,3 +77,13 @@ void ScreenApplyDotBackdrop(lv_obj_t* obj);
 
 /** @brief 应用公共弹窗卡片样式；尺寸与布局由调用方设置，padding 为卡片内边距 */
 void ScreenStyleDialogCard(lv_obj_t* card, lv_coord_t padding);
+
+/** @brief 弹出层的遮罩：铺满父对象，盖一层网点（墨水屏上看着发灰，表示下面的页面被盖住了）。
+ *         可点（点在遮罩上不会落到下面的页面）；点遮罩本身要不要关闭由调用方决定。 */
+lv_obj_t* ScreenPopupMask(lv_obj_t* parent);
+/** @brief 把已有的遮罩画成同样的网点（只画点，点之间透出下面的页面）。所有弹出层的遮罩都用它。 */
+void ScreenApplyPopupDots(lv_obj_t* obj);
+/** @brief 弹出面板顶上的黑底白字标题栏（和阅读页悬窗的标题栏同一种画法）。
+ *         `close_text` 为空就不放右边的关闭文字；`close_cb` 在点关闭时调用。返回标题栏，其第 0 个子对象是标题。 */
+lv_obj_t* ScreenPopupTitleBar(lv_obj_t* panel, const char* title, const lv_font_t* title_font, const char* close_text,
+                              const lv_font_t* close_font, lv_event_cb_t close_cb, void* user_data = nullptr);

@@ -38,7 +38,7 @@ void EnsureDlProgressPageBuilt() {
     lv_obj_remove_style_all(page);
     lv_obj_set_size(page, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(page, 0, 0);
-    ScreenApplyDotBackdrop(page);
+    ScreenApplyPopupDots(page);
     lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(page, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(page, LV_OBJ_FLAG_HIDDEN);
@@ -359,7 +359,7 @@ static void ShowResourceDialog(int cloud_index, bool conflict) {
     lv_obj_remove_style_all(mask);
     lv_obj_set_size(mask, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(mask, 0, 0);
-    ScreenApplyDotBackdrop(mask);
+    ScreenApplyPopupDots(mask);
     lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
     HapticAttachClick(mask);
@@ -468,7 +468,7 @@ void ShowStorageErrorDialog() {
     st.dialogs.storage_error_mask = mask;
     lv_obj_remove_style_all(mask);
     lv_obj_set_size(mask, LV_HOR_RES, LV_VER_RES);
-    ScreenApplyDotBackdrop(mask);
+    ScreenApplyPopupDots(mask);
     lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_move_foreground(mask);

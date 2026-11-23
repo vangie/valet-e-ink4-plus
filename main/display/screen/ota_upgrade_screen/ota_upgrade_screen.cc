@@ -156,7 +156,7 @@ static void BuildUi(const char* current_ver, const char* new_ver) {
     lv_obj_remove_style_all(root);
     lv_obj_set_size(root, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(root, 0, 0);
-    ScreenApplyDotBackdrop(root);
+    ScreenApplyPopupDots(root);
     lv_obj_add_flag(root, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_move_foreground(root);

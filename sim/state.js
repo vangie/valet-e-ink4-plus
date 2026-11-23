@@ -94,7 +94,8 @@ const state = {
   proxySni: "",      // Trojan 的服务器名（SNI），空 = 用地址
   proxyInsecure: false, // Trojan 不检查服务器证书（节点写着 skip-cert-verify=true 时）
   proxyMethod: "aes-256-gcm", // SS 的加密方式（设备支持的 12 种之一），在弹出列表里选
-  proxyPicker: false, // SS 加密方式的弹出列表开着没有
+  proxyPicker: false, // 开着的弹出列表：false | "proto"（更多协议里的协议）| "cipher"（SS 的加密方式）
+  proxyMore: "ss",   // 「更多协议」上次用的协议：ss | trojan
   proxyAddr: "",     // 地址:端口，空 = 没设置
   proxyUser: "",     // 账号，空 = 不用
   proxyTest: "",     // 上一次测试的结果

@@ -460,11 +460,16 @@ div.v-row { box-sizing: border-box; }
 .v-float .v-talk { margin: 2px 12px 10px; }
 
 /* SS 加密方式的弹出列表：遮罩盖住整屏，面板占下方 76%，列表带常显的滚动条，拖完停在整行上。 */
-.v-pick { position: absolute; inset: 0; z-index: 15; }
-.v-pick-panel { position: absolute; left: 0; right: 0; bottom: 0; height: 76%; box-sizing: border-box; padding: 5px 11px; background: var(--paper); border-top: 1.2px solid var(--ink); display: flex; flex-direction: column; }
-.v-pick-head { height: 27px; flex: none; display: flex; align-items: center; justify-content: space-between; }
-.v-pick-head b { font-size: 12.6px; font-weight: 600; }
-.v-pick-head button { border: 0; background: none; padding: 6px 0 6px 12px; font-size: 9px; text-decoration: underline; }
+/* 阅读卡片开着时盖在正文上的网点层（和弹出列表同一种网点）；卡片在它上面。 */
+.v-shade { position: absolute; inset: 0; z-index: 1; background-image: radial-gradient(var(--ink) 0.5px, transparent 0.7px); background-size: 3px 3px; }
+.panel.v2 .v-read .sheet { z-index: 2; }
+/* 墨水屏没有灰色蒙层：下面的页面盖一层稀疏的网点（看上去发灰，说明被盖住了、点它会关），
+   面板标题用黑底白字，和阅读页悬窗的标题栏一样，一眼看出是浮在页面上的一层。 */
+.v-pick { position: absolute; inset: 0; z-index: 15; background-image: radial-gradient(var(--ink) 0.5px, transparent 0.7px); background-size: 3px 3px; }
+.v-pick-panel { position: absolute; left: 0; right: 0; bottom: 0; height: 76%; box-sizing: border-box; padding: 0 11px 5px; background: var(--paper); display: flex; flex-direction: column; }
+.v-pick-head { height: 32px; flex: none; margin: 0 -11px 6px; padding: 0 6px 0 14px; background: var(--ink); color: var(--paper); display: flex; align-items: center; justify-content: space-between; }
+.v-pick-head b { font-size: 11.5px; font-weight: 600; letter-spacing: 1px; }
+.v-pick-head button { border: 0; background: none; color: var(--paper); padding: 6px 8px 6px 12px; font-size: 9px; text-decoration: underline; }
 .v-pick > .v-pick-panel > p { flex: none; margin: 0 0 4px; font-size: 9px; color: var(--ink); }
 .v-pick-list { flex: none; overflow-y: scroll; padding-right: 8px; scroll-snap-type: y mandatory; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ink) transparent; }
 .v-pick-list::-webkit-scrollbar { width: 3px; }
@@ -473,3 +478,6 @@ div.v-row { box-sizing: border-box; }
 .v-pick-row b { font-size: 10.8px; font-weight: 400; }
 .v-pick-row.on b { font-weight: 700; }
 .v-pick-row em { font-style: normal; font-size: 9px; margin-right: 6px; }
+/* 项少（不用滚）时面板缩到刚好放下，列表不显示滚动条。 */
+.v-pick-panel.fit { height: auto; padding-bottom: 12px; }
+.v-pick-list.fit { overflow-y: hidden; }

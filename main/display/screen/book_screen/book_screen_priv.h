@@ -202,6 +202,7 @@ struct BookUiState {
         lv_coord_t reader_scroll[5] = {};
         lv_coord_t reader_scroll_last = 0;
         lv_obj_t* settings_sheet = nullptr;  // 悬浮设置卡片（盖正文）
+        lv_obj_t* settings_shade = nullptr;  // 卡片开着时盖在正文上的网点层（点它收起卡片）
         // 设置卡控件缓存：字体翻页 / 边距行距 ± 原地刷，避免整卡 clean
         struct SheetFontRow {
             lv_obj_t* row = nullptr;

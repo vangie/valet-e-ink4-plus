@@ -21,6 +21,8 @@ struct Prefs {
     std::string method;     // Shadowsocks cipher; empty = valet::ss::kDefaultMethod
     std::string sni;        // Trojan: server name for TLS; empty = the address
     bool insecure = false;  // Trojan: do not check the server's certificate
+    /** @brief The protocol last used under 「更多协议」 (kShadowsocks or kTrojan): where that choice goes back to. */
+    net_proxy::Kind more_kind = net_proxy::Kind::kShadowsocks;
     /** @brief Shadowsocks and Trojan need a password and have no user name. */
     bool PasswordOnly() const { return kind == net_proxy::Kind::kShadowsocks || kind == net_proxy::Kind::kTrojan; }
     bool HasAddress() const { return !host.empty() && port > 0; }

@@ -295,7 +295,7 @@ bool ShowPage(const LogUploadSessionPtr& session) {
     s_ui.page = lv_obj_create(parent);
     lv_obj_remove_style_all(s_ui.page);
     lv_obj_set_size(s_ui.page, LV_HOR_RES, LV_VER_RES);
-    ScreenApplyDotBackdrop(s_ui.page);
+    ScreenApplyPopupDots(s_ui.page);
     lv_obj_add_flag(s_ui.page, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(s_ui.page, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_ui.page, PageDeleted, LV_EVENT_DELETE, nullptr);

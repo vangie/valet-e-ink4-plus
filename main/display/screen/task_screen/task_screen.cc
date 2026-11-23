@@ -1369,7 +1369,7 @@ void EnsureActionDialog() {
     lv_obj_remove_style_all(s_ui.dialog);
     lv_obj_set_size(s_ui.dialog, LV_HOR_RES, LV_VER_RES);
     // 弹框外：网点灰底，点此区域关闭
-    ScreenApplyDotBackdrop(s_ui.dialog);
+    ScreenApplyPopupDots(s_ui.dialog);
     lv_obj_set_style_layout(s_ui.dialog, LV_LAYOUT_NONE, 0);
     DisableScroll(s_ui.dialog);
     lv_obj_add_flag(s_ui.dialog, LV_OBJ_FLAG_CLICKABLE);

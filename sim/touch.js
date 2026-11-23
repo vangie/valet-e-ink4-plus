@@ -15,6 +15,12 @@ panel.addEventListener("click", (e) => {
   const goEl = t.closest("[data-go]");
   if (goEl) return go(goEl.dataset.go);
 
+  // 阅读卡片开着时，正文盖着网点；点网点收起卡片（和设备上点正文一样）。
+  if (t.closest("[data-sheet-shade]")) {
+    state.sheet = false;
+    log("点卡片外面的网点：收起阅读卡片。");
+    return render();
+  }
   // 正文默认点按分区：左边上一页，中间开关卡片，右边下一页（book_tap_zones.cc）。
   const body = t.closest(".read-body");
   if (body && !state.sheet) {

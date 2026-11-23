@@ -1554,6 +1554,7 @@ static void BookmarkMessage(const std::string& text) {
     CloseBookmarkMessage();
     auto* box=lv_msgbox_create(nullptr);
     s_bookmark_message = box;
+    ScreenApplyPopupDots(lv_obj_get_parent(box));   // 模态背景层：和其他弹出层一样盖网点
     lv_obj_add_event_cb(box, [](lv_event_t* event) {
         if (lv_event_get_target(event) == s_bookmark_message) s_bookmark_message = nullptr;
     }, LV_EVENT_DELETE, nullptr);
@@ -2021,6 +2022,15 @@ void ResizeReadingBottomSheet() {
     lv_obj_set_size(sheet, std::max<int>(1, LV_HOR_RES - 2 * kReadingCardSideInset), height);
     lv_obj_set_style_border_side(sheet, height == available ? LV_BORDER_SIDE_NONE : LV_BORDER_SIDE_TOP, 0);
     lv_obj_align(sheet, LV_ALIGN_BOTTOM_MID, 0, 0);
+    // The dots over the text only where text still shows above the card; a card that fills the
+    // screen has nothing under it to mark (and the dots would only fringe its sides).
+    if (auto* shade = st.settings.settings_shade; shade && lv_obj_is_valid(shade)) {
+        const bool cover = height < available && lv_obj_is_visible(sheet);
+        if (lv_obj_has_flag(shade, LV_OBJ_FLAG_HIDDEN) == cover) {
+            if (cover) lv_obj_clear_flag(shade, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(shade, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 }
 int ReadingSheetHeaderHeight() {
     return std::min<lv_coord_t>(UiSy(56), LV_VER_RES / 8);

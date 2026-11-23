@@ -52,7 +52,7 @@ void Network_OpenStatusOverlay(const char* msg) {
                     Network_State().transfer_mode ? LV_PCT(100) : LV_VER_RES);
     lv_obj_add_flag(mask, LV_OBJ_FLAG_FLOATING);
     lv_obj_set_pos(mask, 0, 0);
-    ScreenApplyDotBackdrop(mask);
+    ScreenApplyPopupDots(mask);
     lv_obj_add_flag(mask, LV_OBJ_FLAG_CLICKABLE);
     Network_State().ui.status_overlay = mask;
 
