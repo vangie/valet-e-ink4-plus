@@ -8,6 +8,7 @@
 #include "power_policy.h"
 #include "shadowsocks.h"
 #include "trojan.h"
+#include "auto_link.h"
 #include "settings.h"
 
 #include <cstdio>
@@ -73,6 +74,7 @@ void Init() {
     DualNetworkBoard::SetSwitchedHook([](NetworkType) { Apply(Get()); });
     ss::Install();
     trojan::Install();
+    autolink::Init();
     Prefs loaded;
     {
         Settings store(kStore, false);

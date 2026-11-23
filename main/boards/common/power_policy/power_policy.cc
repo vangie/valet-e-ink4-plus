@@ -932,6 +932,11 @@ int PowerPolicy::GetIdleCpuMhz() const
     return pwr::idle_cpu_mhz;
 }
 
+bool PowerPolicy::IsHeld(PowerNeed need) const
+{
+    return NeedHeld(need);
+}
+
 int PowerPolicy::GetNetGraceSec() const
 {
     if (pwr::mu == nullptr) {

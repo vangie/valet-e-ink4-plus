@@ -36,6 +36,8 @@
 #include <vector>
 #include "board.h"
 #include "dual_network_board.h"
+#include "valet_net/auto_link.h"
+#include <wifi_station.h>
 #include "power_policy.h"
 #include "net_proxy.h"
 #include <driver/usb_serial_jtag.h>
@@ -420,6 +422,13 @@ void ValetDevLinkHandle(const char* json) {
                 ESP_LOGW(TAG, "proxytest: ok=%d status=%d error=%d %d ms", result.ok, result.status, result.error, result.ms);
                 vTaskDelete(nullptr);
             }, "proxy_test", 8192, nullptr, 4, nullptr) != pdPASS) error = "BUSY";
+    } else if (!strcmp(cmd, "wifiblind")) {
+        // 仅测试版：扫 Wi-Fi 时假装看不到存过的网络（在家试「出门」）
+        WifiStation::SetTestBlind(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "on")));
+        ESP_LOGW(TAG, "wifiblind: %s", WifiStation::TestBlind() ? "on" : "off");
+    } else if (!strcmp(cmd, "autoprobe")) {
+        // 仅测试版：在 4G 上马上扫一次 Wi-Fi（自动模式）
+        valet::autolink::ProbeNow();
     } else if (!strcmp(cmd, "net")) {
         // 仅测试版：不重启切换 Wi-Fi / 4G（和设置页「怎么上网」同一条路），结果打到日志
         const auto* to = cJSON_GetObjectItemCaseSensitive(root, "to");

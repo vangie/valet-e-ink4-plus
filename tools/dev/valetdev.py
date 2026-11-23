@@ -316,6 +316,8 @@ def main():
     p = sub.add_parser("wifitx", help="Wi-Fi max tx power in 0.25 dBm (48 = 12 dBm, 80 = 20 dBm)"); p.add_argument("q", type=int)
     sub.add_parser("proxytest", help="run the proxy settings test with the current proxy")
     p = sub.add_parser("net", help="switch Wi-Fi / 4G without restarting"); p.add_argument("to", choices=["wifi", "4g"])
+    p = sub.add_parser("wifiblind", help="Wi-Fi scans pretend no saved network is near (try leaving home)"); p.add_argument("state", choices=["on", "off"])
+    sub.add_parser("autoprobe", help="on 4G in auto mode: scan for saved Wi-Fi now")
     p = sub.add_parser("reach", help="connect directly (no proxy) to host:port ...; 'proxy' = the configured proxy server")
     p.add_argument("hosts", nargs="+")
     p = sub.add_parser("sd", help="SD card state; --mount retries mounting"); p.add_argument("--mount", action="store_true")
@@ -380,6 +382,10 @@ def main():
         dev({"cmd": "wifitx", "q": args.q})
     elif args.command == "proxytest":
         dev({"cmd": "proxytest"})
+    elif args.command == "wifiblind":
+        dev({"cmd": "wifiblind", "on": args.state == "on"})
+    elif args.command == "autoprobe":
+        dev({"cmd": "autoprobe"})
     elif args.command == "net":
         dev({"cmd": "net", "to": args.to})
     elif args.command == "reach":

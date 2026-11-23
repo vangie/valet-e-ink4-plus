@@ -49,6 +49,9 @@ public:
     bool IsLpPaused() const { return lp_paused_; }
     /** @brief True once Start() has created the STA (driver initialised); Stop() undoes it. */
     bool IsStarted() const { return station_netif_ != nullptr; }
+    /** @brief Test builds only: scans pretend no saved network is in range (to try leaving home at home). */
+    static void SetTestBlind(bool blind);
+    static bool TestBlind();
     bool IsConnected();
     /**
      * @brief STA 已起且未连上（扫描/关联/重连中）；浅睡暂停时为 false
@@ -73,6 +76,9 @@ public:
     void OnConnect(std::function<void(const std::string& ssid)> on_connect);
     void OnConnected(std::function<void(const std::string& ssid)> on_connected);
     void OnScanBegin(std::function<void()> on_scan_begin);
+    /** @brief Called (on the event task: keep it short) when a scan finds no saved network, or every
+     *         saved network seen failed to connect. Not called while connected. */
+    void OnNoSavedNetwork(std::function<void()> on_no_saved_network);
 
 private:
     WifiStation();
@@ -98,6 +104,7 @@ private:
     std::function<void(const std::string& ssid)> on_connect_;
     std::function<void(const std::string& ssid)> on_connected_;
     std::function<void()> on_scan_begin_;
+    std::function<void()> on_no_saved_network_;
     std::vector<WifiApRecord> connect_queue_;
 
     void HandleScanResult();

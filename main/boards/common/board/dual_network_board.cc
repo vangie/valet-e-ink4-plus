@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "sdkconfig.h"
 #include "power_policy.h"
+#include <algorithm>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <esp_wifi.h>
@@ -19,6 +20,8 @@ static const char *TAG = "DualNetworkBoard";
 
 namespace {
 std::atomic<DualNetworkBoard::SwitchedHook> s_switched_hook{nullptr};
+std::atomic<DualNetworkBoard::WakeHook> s_wake_hook{nullptr};
+constexpr int kEnsureSliceMs = 1500;   // 自动模式等网的一小段：中途换了网，下一段就等新网
 constexpr uint32_t kStartStack = 6144;
 }  // namespace
 
@@ -35,6 +38,15 @@ cellular_ri_pin_(cellular_ri_pin) {
     // 开机只建当前网络的板卡对象；另一个在第一次切过去时才建
     const NetworkType type = LoadNetworkTypeFromSettings(default_net_type);
     network_type_.store(type);
+    {
+        #if CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+        network_mode_.store(NetworkMode::WIFI);
+        #else
+        Settings settings("network", false);
+        const int mode = settings.GetInt("mode", static_cast<int>(NetworkMode::AUTO));
+        network_mode_.store(mode == 0 ? NetworkMode::WIFI : mode == 1 ? NetworkMode::CELLULAR : NetworkMode::AUTO);
+        #endif
+    }
     ESP_LOGI(TAG, "Initialize %s board", type == NetworkType::CELLULAR ? "cellular" : "WiFi");
     active_.store(&BoardFor(type));
 }
@@ -78,6 +90,26 @@ void DualNetworkBoard::SetNetworkEventCallback(NetworkEventCallback callback) {
 }
 
 void DualNetworkBoard::SetSwitchedHook(SwitchedHook hook) { s_switched_hook.store(hook); }
+void DualNetworkBoard::SetWakeHook(WakeHook hook) { s_wake_hook.store(hook); }
+
+bool DualNetworkBoard::SetNetworkMode(NetworkMode mode) {
+    #if CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
+    if (mode != NetworkMode::WIFI) return false;
+    #endif
+    {
+        Settings settings("network", true);
+        settings.SetInt("mode", static_cast<int>(mode));
+    }
+    network_mode_.store(mode, std::memory_order_release);
+    ESP_LOGI(TAG, "connection mode: %s", mode == NetworkMode::AUTO ? "auto" : mode == NetworkMode::CELLULAR ? "4G" : "WiFi");
+    if (mode == NetworkMode::WIFI) return SwitchToNetworkType(NetworkType::WIFI);
+    if (mode == NetworkMode::CELLULAR) return SwitchToNetworkType(NetworkType::CELLULAR);
+    // 自动：在 4G 上就去看看有没有存过的 Wi-Fi；在 Wi-Fi 上，连不上时 WifiStation 会报告
+    if (GetNetworkType() == NetworkType::CELLULAR) {
+        if (const auto hook = s_wake_hook.load()) hook();
+    }
+    return true;
+}
 
 bool DualNetworkBoard::SwitchToNetworkType(NetworkType type) {
     #if CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
@@ -136,7 +168,19 @@ void DualNetworkBoard::StartNetwork() {
 }
 
 bool DualNetworkBoard::EnsureNetworkReady(int timeout_ms) {
-    return Active().EnsureNetworkReady(timeout_ms);
+    if (GetNetworkMode() != NetworkMode::AUTO) return Active().EnsureNetworkReady(timeout_ms);
+    // 自动：等网途中可能换网（Wi-Fi 找不到 → 4G；4G 刚醒发现家里 Wi-Fi → Wi-Fi），
+    // 所以分小段等，每段等的是当时在用的那个。
+    if (GetNetworkType() == NetworkType::CELLULAR && !Active().IsNetworkReady()) {
+        if (const auto hook = s_wake_hook.load()) hook();
+    }
+    const int64_t deadline_us = esp_timer_get_time() + int64_t(std::max(timeout_ms, 0)) * 1000;
+    while (true) {
+        const int64_t left_ms = (deadline_us - esp_timer_get_time()) / 1000;
+        const int slice = static_cast<int>(std::max<int64_t>(0, std::min<int64_t>(left_ms, kEnsureSliceMs)));
+        if (Active().EnsureNetworkReady(slice)) return true;
+        if (esp_timer_get_time() >= deadline_us) return false;
+    }
 }
 
 void DualNetworkBoard::RefreshNetworkWaitDeadline(int timeout_ms) {

@@ -83,6 +83,8 @@ public:
      * @brief 请求立即重算电源档位
      */
     void RequestReevaluate();
+    /** @brief True while someone holds `need` (read without the lock: a hint, not a guarantee). */
+    bool IsHeld(PowerNeed need) const;
 
     /**
      * @brief 待机 Overlay 已关闭：清待机请求并重算

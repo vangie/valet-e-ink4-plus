@@ -1,4 +1,5 @@
 #include "wifi_station.h"
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -20,6 +21,7 @@
 #define MAX_RECONNECT_COUNT 5
 // esp_timer 单位为微秒；扫不到已存 AP 时隔多久再扫（勿写成 10*1000=10ms）
 constexpr uint64_t kScanRetryUs = 10ULL * 1000 * 1000;
+std::atomic<bool> s_test_blind{false};   // test builds: scans pretend no saved network is near
 // Boot Start and policy Pause run on different tasks. Never stop the driver
 // halfway through netif/driver/event/timer initialization.
 static std::recursive_mutex s_lifecycle_mu;
@@ -197,7 +199,7 @@ esp_err_t WifiStation::ResumeFromLp() {
     reconnect_count_ = 0;
     // 须先清 pause：esp_wifi_start 可能同步抛 STA_START，否则扫网被丢掉
     lp_paused_ = false;
-    fast_reconnect_on_start_ = !ssid_.empty();
+    fast_reconnect_on_start_ = !ssid_.empty() && !s_test_blind.load();   // test "leaving home": scan instead
     ApplyWifiProfile();
     esp_err_t err = esp_wifi_start();
     if (err != ESP_OK) {
@@ -212,6 +214,13 @@ esp_err_t WifiStation::ResumeFromLp() {
 
 void WifiStation::OnScanBegin(std::function<void()> on_scan_begin) {
     on_scan_begin_ = on_scan_begin;
+}
+
+void WifiStation::SetTestBlind(bool blind) { s_test_blind.store(blind); }
+bool WifiStation::TestBlind() { return s_test_blind.load(); }
+
+void WifiStation::OnNoSavedNetwork(std::function<void()> on_no_saved_network) {
+    on_no_saved_network_ = on_no_saved_network;
 }
 
 void WifiStation::OnConnect(std::function<void(const std::string& ssid)> on_connect) {
@@ -300,6 +309,7 @@ void WifiStation::HandleScanResult() {
 
     auto& ssid_manager = SsidManager::GetInstance();
     auto ssid_list = ssid_manager.GetSsidList();
+    if (s_test_blind.load()) ssid_list.clear();
     for (int i = 0; i < ap_num; i++) {
         auto ap_record = ap_records[i];
         auto it = std::find_if(ssid_list.begin(), ssid_list.end(), [ap_record](const SsidItem& item) {
@@ -327,6 +337,7 @@ void WifiStation::HandleScanResult() {
         if (timer_handle_ != nullptr && !lp_paused_) {
             esp_timer_start_once(timer_handle_, kScanRetryUs);
         }
+        if (on_no_saved_network_ && !lp_paused_) on_no_saved_network_();
         return;
     }
 
@@ -487,6 +498,7 @@ void WifiStation::WifiEventHandler(void* arg, esp_event_base_t /*event_base*/, i
         if (this_->timer_handle_ != nullptr && !this_->lp_paused_) {
             esp_timer_start_once(this_->timer_handle_, kScanRetryUs);
         }
+        if (this_->on_no_saved_network_ && !this_->lp_paused_) this_->on_no_saved_network_();
     }
 }
 

@@ -13,6 +13,13 @@ enum class NetworkType {
     CELLULAR = 1
 };
 
+// 「怎么上网」选的：只用 Wi-Fi、只用 4G，或自动（有存过的 Wi-Fi 就用，没有就 4G）
+enum class NetworkMode {
+    WIFI = 0,
+    CELLULAR = 1,
+    AUTO = 2
+};
+
 // 双网络板卡：Wi-Fi 和 4G 两个板卡对象都常驻（用到时才创建，之后不销毁），
 // 同一时间只有一个在用。切换时停掉一个的射频、拉起另一个，不重启。
 // 两个对象都不销毁：别的任务手里的 GetCurrentBoard() 引用即使过期也不会悬空。
@@ -22,6 +29,7 @@ private:
     std::unique_ptr<Board> cell_board_;
     std::atomic<Board*> active_{nullptr};
     std::atomic<NetworkType> network_type_{NetworkType::CELLULAR};
+    std::atomic<NetworkMode> network_mode_{NetworkMode::AUTO};
     NetworkEventCallback network_event_callback_;
     std::mutex switch_mu_;
 
@@ -57,6 +65,14 @@ public:
     /** @brief 切换完成后调用（例如按新网络重新套用代理）。只设一次。 */
     using SwitchedHook = void (*)(NetworkType type);
     static void SetSwitchedHook(SwitchedHook hook);
+    /** @brief 自动模式下用 4G 却还没连上（多半刚醒）时调用：可以先看看有没有存过的 Wi-Fi。不得阻塞。 */
+    using WakeHook = void (*)();
+    static void SetWakeHook(WakeHook hook);
+
+    NetworkMode GetNetworkMode() const { return network_mode_.load(std::memory_order_acquire); }
+    /** @brief 改「怎么上网」并保存。选 Wi-Fi / 4G 时马上切过去（不重启）；选自动时不动当前网络。
+     *         会写 NVS、可能停 Wi-Fi 驱动：须在内部内存栈的任务里调用。 */
+    bool SetNetworkMode(NetworkMode mode);
 
     // 获取当前网络类型
     NetworkType GetNetworkType() const { return network_type_.load(std::memory_order_acquire); }

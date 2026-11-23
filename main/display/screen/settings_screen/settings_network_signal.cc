@@ -212,13 +212,21 @@ bool CardIsFine(const CardSample& sample) {
            (sample.cell && sample.state == LinkState::kConnecting);
 }
 
+// 自动时卡片上说明为什么用的是它
+bool AutoMode() {
+    auto* dual = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
+    return dual && dual->GetNetworkMode() == NetworkMode::AUTO;
+}
+
 void CardTexts(const CardSample& sample, char* title, size_t title_len, char* detail, size_t detail_len) {
     const char* link = sample.cell ? "4G" : "Wi-Fi";
+    const char* why = !AutoMode() ? "" : sample.cell ? ValetText(" · 附近没有存过的 Wi-Fi", " · no saved Wi-Fi nearby")
+                                                     : ValetText(" · 自动选的", " · picked automatically");
     switch (sample.state) {
         case LinkState::kOnline:
             std::snprintf(title, title_len, "%s · %s", link, StrengthWord(sample));
-            if (sample.cell) std::snprintf(detail, detail_len, ValetText("已连上 · 强度 %d / 31", "Connected · strength %d / 31"), sample.value);
-            else std::snprintf(detail, detail_len, "%s · %d dBm", sample.name, sample.value);
+            if (sample.cell) std::snprintf(detail, detail_len, ValetText("已连上 · 强度 %d / 31%s", "Connected · strength %d / 31%s"), sample.value, why);
+            else std::snprintf(detail, detail_len, "%s · %d dBm%s", sample.name, sample.value, why);
             break;
         case LinkState::kOnlineBlind:
             std::snprintf(title, title_len, "%s · %s", link, ValetText("已连上", "connected"));

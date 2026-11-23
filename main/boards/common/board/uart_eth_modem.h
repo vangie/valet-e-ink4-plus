@@ -341,6 +341,9 @@ private:
 
     // Network initialization flag (atomic for thread safety)
     std::atomic<bool> initialized_{false};
+    // The netif has an address (IP_EVENT_ETH_GOT_IP). Registration alone is not "connected": a
+    // request made between the two fails with EHOSTUNREACH.
+    std::atomic<bool> has_ip_{false};
 
     // Network event (atomic for thread safety)
     std::atomic<UartEthModemEvent> network_event_{UartEthModemEvent::Disconnected};

@@ -1509,7 +1509,8 @@ void UartEthModem::ParseAtResponse(const std::string& response) {
         } else if (cell_info_.stat == 3) {
             SetNetworkEvent(UartEthModemEvent::ErrorRegistrationDenied);
         } else if (new_network_ready) {
-            if (initialized_.load()) {
+            // Registered again after a drop: connected only once the netif has its address.
+            if (initialized_.load() && has_ip_.load()) {
                 SetNetworkEvent(UartEthModemEvent::Connected);
             }
         }
@@ -1832,11 +1833,13 @@ void UartEthModem::IpEventHandler(void* arg, esp_event_base_t event_base,
 
     if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP) {
         // Network is ready now
+        self->has_ip_.store(true);
         self->SetNetworkEvent(UartEthModemEvent::Connected);
     }
 }
 
 void UartEthModem::CleanupResources(bool cleanup_iot_eth) {
+    has_ip_.store(false);
     // 先断开握手中断，事件队列须保留到所有中断生产者停止之后。
     DeinitGpio();
     // Cleanup iot_eth if requested

@@ -68,6 +68,8 @@ struct NetworkUi {
     lv_obj_t* wifi_row_detail = nullptr;
     lv_obj_t* proxy_row_detail = nullptr;
     lv_obj_t* page = nullptr;   // rebuilt after a network switch (the SIM part is 4G only)
+    lv_timer_t* watch_timer = nullptr;   // Valet: rebuild when 自动 switched the network in the background
+    bool built_cell = false;             // the network the page was built for
 };
 
 NetworkUi s_ui;
@@ -104,6 +106,11 @@ NetworkType CurrentNetworkType() {
 }
 
 bool IsCellNetwork() { return CurrentNetworkType() == NetworkType::CELLULAR; }
+
+NetworkMode CurrentNetworkMode() {
+    auto* dual = GetDualBoard();
+    return dual ? dual->GetNetworkMode() : NetworkMode::WIFI;
+}
 
 int GetCachedSimSlot() {
     return (s_cached_sim_slot == kSimSlotInternal) ? kSimSlotInternal : kSimSlotExternal;
@@ -250,7 +257,9 @@ constexpr int kGraceSeconds[] = {30, 60, 120, 0};
 void RefreshValet() {
     if (!s_ui.link_seg) return;
     const bool cell = IsCellNetwork();
-    SettingsValetSelect(s_ui.link_seg, cell ? 0 : 1);
+    const auto mode = CurrentNetworkMode();
+    // Segment order: 自动, 4G, Wi-Fi.
+    SettingsValetSelect(s_ui.link_seg, mode == NetworkMode::AUTO ? 0 : mode == NetworkMode::CELLULAR ? 1 : 2);
     // Segment order is built-in, external.
     SettingsValetSelect(s_ui.sim_seg, GetCachedSimSlot() == kSimSlotInternal ? 0 : 1);
     const int grace = PowerPolicy::GetInstance().GetNetGraceSec();
@@ -348,14 +357,23 @@ struct SwitchNetworkJob {
     NetworkType target;
 };
 
+// arg: nullptr = refused, 1 = switched, 2 = the mode changed (the toast says what is used now), 3 = rebuild only
 void RebuildAfterSwitch(void* arg) {
-    const bool done = arg != nullptr;
+    const intptr_t result = reinterpret_cast<intptr_t>(arg);
+    const bool done = result != 0;
     if (s_tab_alive && s_ui.page && lv_obj_is_valid(s_ui.page)) {
         lv_obj_t* page = s_ui.page;
         CloseOverlay();
         if (s_ui.wifi_timer) lv_timer_delete(s_ui.wifi_timer);
+        if (s_ui.watch_timer) lv_timer_delete(s_ui.watch_timer);
         lv_obj_clean(page);
         SettingsNetworkTab_Build(page);
+    }
+    if (result == 3) return;
+    if (result == 2 && CurrentNetworkMode() == NetworkMode::AUTO) {
+        ScreenShowToast(IsCellNetwork() ? ValetText("已改成自动 · 现在用 4G", "Auto · using 4G now")
+                                        : ValetText("已改成自动 · 现在用 Wi-Fi", "Auto · using Wi-Fi now"));
+        return;
     }
     if (done) {
         char text[64];
@@ -380,6 +398,34 @@ void SwitchNetworkTask(void* arg) {
     delete job;
     ScreenLvAsync(RebuildAfterSwitch, done ? reinterpret_cast<void*>(1) : nullptr);
     vTaskDelete(nullptr);
+}
+
+struct ModeJob { NetworkMode mode; };
+void SetModeTask(void* arg) {
+    auto* job = static_cast<ModeJob*>(arg);
+    auto* dual = GetDualBoard();
+    const bool done = dual && dual->SetNetworkMode(job->mode);
+    delete job;
+    ScreenLvAsync(RebuildAfterSwitch, reinterpret_cast<void*>(done ? 2 : 0));
+    vTaskDelete(nullptr);
+}
+
+// Valet layout: 自动 / 4G / Wi-Fi. No restart either way.
+void OnValetLinkMode(lv_event_t* e) {
+    const auto mode = static_cast<NetworkMode>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+    if (mode == CurrentNetworkMode()) return;
+    SettingsValetSelect(s_ui.link_seg, mode == NetworkMode::AUTO ? 0 : mode == NetworkMode::CELLULAR ? 1 : 2);
+    auto* job = new ModeJob{mode};
+    // Internal stack: a switch stops the Wi-Fi driver and writes NVS.
+    if (xTaskCreate(SetModeTask, "net_mode", 6144, job, 5, nullptr) != pdPASS) {
+        delete job;
+        RefreshValet();
+    }
+}
+
+// 自动 may switch the network while the page is open: rebuild it for the network in use.
+void WatchNetwork(lv_timer_t*) {
+    if (s_tab_alive && IsCellNetwork() != s_ui.built_cell) RebuildAfterSwitch(reinterpret_cast<void*>(3));
 }
 
 [[maybe_unused]] void OnNetworkOptionClicked(lv_event_t* e) {
@@ -844,10 +890,17 @@ void BuildValet(lv_obj_t* page) {
     SettingsNetworkSignal_BuildCard(page);
     SettingsValetGap(page, 26);
     SettingsValetLabel(page, ValetText("怎么上网", "Connection"));
-    static const char* const kLinkZh[] = {"4G", "Wi-Fi"};
-    static const intptr_t kLinkValues[] = {static_cast<intptr_t>(NetworkType::CELLULAR), static_cast<intptr_t>(NetworkType::WIFI)};
-    s_ui.link_seg = SettingsValetSegments(page, kLinkZh, 2, OnNetworkOptionClicked, kLinkValues);
-    SettingsValetNote(page, ValetText("换上网方式马上生效，不用重启；换卡会重启一次。", "Switching takes effect at once; changing the SIM restarts the device."));
+    const char* const links[] = {ValetText("自动", "Auto"), "4G", "Wi-Fi"};
+    static const intptr_t kLinkValues[] = {static_cast<intptr_t>(NetworkMode::AUTO), static_cast<intptr_t>(NetworkMode::CELLULAR),
+                                           static_cast<intptr_t>(NetworkMode::WIFI)};
+    s_ui.link_seg = SettingsValetSegments(page, links, 3, OnValetLinkMode, kLinkValues);
+    const auto mode = CurrentNetworkMode();
+    std::string note = mode == NetworkMode::AUTO
+        ? ValetText("有存过的 Wi-Fi 就用 Wi-Fi，没有就用 4G。通话中不换，换的时候不用重启。", "Saved Wi-Fi when there is one, otherwise 4G. Not during a call; no restart.")
+        : mode == NetworkMode::CELLULAR ? ValetText("一直用 4G。换上网方式马上生效，不用重启。", "Always 4G. Takes effect at once, no restart.")
+        : ValetText("只用 Wi-Fi，离开存过的网络就上不了网。", "Wi-Fi only: no connection away from saved networks.");
+    if (IsCellNetwork()) note += ValetText("换卡会重启一次。", " Changing the SIM restarts.");
+    SettingsValetNote(page, note.c_str());
     if (IsCellNetwork()) {
         SettingsValetGap(page, kValetGap);
         SettingsValetLabel(page, ValetText("用哪张卡", "SIM"));
@@ -872,12 +925,14 @@ void BuildValet(lv_obj_t* page) {
 void SettingsNetworkTab_Reset() {
     CloseOverlay();
     if (s_ui.wifi_timer) lv_timer_delete(s_ui.wifi_timer);
+    if (s_ui.watch_timer) lv_timer_delete(s_ui.watch_timer);
     s_tab_alive = false;
     s_sim_switch_pending = false;
     s_ui = {};
 }
 
 const char* SettingsNetworkTab_CurrentName() {
+    if (CurrentNetworkMode() == NetworkMode::AUTO) return IsCellNetwork() ? ValetText("自动 · 4G", "Auto · 4G") : ValetText("自动 · Wi-Fi", "Auto · Wi-Fi");
     return IsCellNetwork() ? "4G" : "WiFi";
 }
 
@@ -895,6 +950,8 @@ void SettingsNetworkTab_Build(lv_obj_t* page) {
     // Domestic board: the Valet layout. The global board keeps the official page below.
     BuildValet(page);
     RefreshValet();
+    s_ui.built_cell = IsCellNetwork();
+    s_ui.watch_timer = lv_timer_create(WatchNetwork, 1000, nullptr);
     ScheduleLoadSimSlotFromNvs();
     if (IsCellNetwork()) ScheduleSimSlotQuery();
     return;

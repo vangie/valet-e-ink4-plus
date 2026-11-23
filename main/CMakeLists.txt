@@ -160,6 +160,7 @@ idf_component_register(
         "valet_net/proxy.cc"
         "valet_net/shadowsocks.cc"
         "valet_net/trojan.cc"
+        "valet_net/auto_link.cc"
         "protocols/valet_wire.cc"
         "haptic_feedback.cc"
         "assets/lang_home.cc"
