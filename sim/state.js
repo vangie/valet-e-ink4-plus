@@ -74,6 +74,7 @@ const state = {
   toast: "",
   link: "4G",        // 现在实际在用的网络：4G | wifi
   linkMode: "auto",  // 「怎么上网」选的：auto（有存过的 Wi-Fi 就用，没有就 4G）| 4G | wifi
+  wifiAsleep: false, // 假的：Wi-Fi 省电睡下了（一用网就会连上）
   wifiNearby: false, // 假的：附近有没有存过的 Wi-Fi（演示自动切换用）
   linkPending: "",   // 自动模式下该换了，但正在通话，挂断后换到这里
   quick: false,      // 新设计：从状态栏下拉的面板开着没有

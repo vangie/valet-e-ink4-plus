@@ -34,7 +34,7 @@ FONT_BOLD = os.path.join(ROOT, "tools", "ttf-fonts", "MiSans", "MiSans-Bold.ttf"
 
 # Order = enum order in status_icons.h. Keep the two in step.
 NAMES = [
-    "SB_WIFI_1", "SB_WIFI_2", "SB_WIFI_3",
+    "SB_WIFI_0", "SB_WIFI_1", "SB_WIFI_2", "SB_WIFI_3",
     "SB_CELL_0", "SB_CELL_1", "SB_CELL_2", "SB_CELL_3", "SB_CELL_4",
     "SB_PLANE", "SB_PROXY", "SB_MUTE", "SB_BOLT",
     "DIGIT_0", "DIGIT_1", "DIGIT_2", "DIGIT_3", "DIGIT_4",
@@ -135,7 +135,7 @@ def own_icons():
     cell = re.findall(r"<rect[^>]*/>", icon["cell"])        # shortest first
     cell = [f'<g fill="#000">{r}</g>' for r in cell]
     out = {}
-    for i, a in enumerate(levels(wifi, (0, 0, 21.31, 15.07), SB_H / 15.07, 3)[1:]): out[f"SB_WIFI_{i + 1}"] = a
+    for i, a in enumerate(levels(wifi, (0, 0, 21.31, 15.07), SB_H / 15.07, 3)): out[f"SB_WIFI_{i}"] = a
     for i, a in enumerate(levels(cell, (0, 0, 19.59, 12), SB_H / 12, 4)): out[f"SB_CELL_{i}"] = a
     out["SB_PLANE"] = line_icon("plane", (5, 3.5, 16.5, 17.4), SB_H - 3, 3)
     out["SB_PROXY"] = line_icon("proxy", (3, 1.6, 18, 20.7), SB_H, 2.8)
@@ -169,7 +169,7 @@ def local_icons():
 
     out = {}
     wifi = layers_of(data["wifi"])[::-1]          # exported outer first; want wedge first
-    for i, a in enumerate(levels(wifi, box(data["wifi"]), k_sb, 3)[1:]): out[f"SB_WIFI_{i + 1}"] = a
+    for i, a in enumerate(levels(wifi, box(data["wifi"]), k_sb, 3)): out[f"SB_WIFI_{i}"] = a
     cell = layers_of(data["cell"])[::-1]          # exported tallest first; want shortest first
     for i, a in enumerate(levels(cell, box(data["cell"]), k_sb, 4)): out[f"SB_CELL_{i}"] = a
     pb = box(data["plane"]); k = SB_H / pb[3]

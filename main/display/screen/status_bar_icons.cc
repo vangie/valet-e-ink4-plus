@@ -42,6 +42,7 @@ bool StartsWith(const char* text, const char* prefix) {
 const lv_image_dsc_t* NetworkIcon(const char* text) {
     struct { const char* glyph; ValetIcon icon; } const kMap[] = {
         {FONT_AWESOME_WIFI_FAIR, VALET_ICON_SB_WIFI_2}, {FONT_AWESOME_WIFI_WEAK, VALET_ICON_SB_WIFI_1},
+        {FONT_AWESOME_WIFI_STANDBY, VALET_ICON_SB_WIFI_0},
         {FONT_AWESOME_WIFI, VALET_ICON_SB_WIFI_3}, {FONT_AWESOME_PLANE, VALET_ICON_SB_PLANE},
         {FONT_AWESOME_SIGNAL_STRONG, VALET_ICON_SB_CELL_4}, {FONT_AWESOME_SIGNAL_GOOD, VALET_ICON_SB_CELL_3},
         {FONT_AWESOME_SIGNAL_FAIR, VALET_ICON_SB_CELL_2}, {FONT_AWESOME_SIGNAL_WEAK, VALET_ICON_SB_CELL_1},

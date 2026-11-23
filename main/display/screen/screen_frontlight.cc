@@ -34,6 +34,7 @@
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <ssid_manager.h>
 #include <wifi_station.h>
 
 #define TAG "QuickPanel"
@@ -197,8 +198,11 @@ void RefreshTiles(lv_timer_t* = nullptr) {
         wifi_ap_record_t ap{};
         if (wifi.IsUserEnabled() && esp_wifi_sta_get_ap_info(&ap) == ESP_OK) sub = reinterpret_cast<const char*>(ap.ssid);
         else if (wifi.IsUserEnabled() && wifi.IsLinkInProgress()) sub = T("正在连", "Connecting");
-        // 空闲省电时网络会先睡下，要用时再连：这时写记着的那个网，不写「没连上」
-        else if (wifi.IsUserEnabled() && !wifi.GetSsid().empty()) sub = wifi.GetSsid();
+        // 省电睡下了：一用网就会连上。写记着的那个网，后面跟「休眠中」；和状态栏的灰扇形一致
+        else if (wifi.IsUserEnabled() && !wifi.NoSavedNetworkNearby() && !SsidManager::GetInstance().GetSsidList().empty()) {
+            const std::string ssid = !wifi.GetSsid().empty() ? wifi.GetSsid() : SsidManager::GetInstance().GetSsidList().front().ssid;
+            sub = T("休眠中 · ", "Asleep · ") + ssid;   // 状态放前面：网络名太长时截掉的是名字
+        }
         else sub = T("没连上", "Offline");
     }
     PaintTile(s_ui.link, cell ? VALET_ICON_Q_CELL : VALET_ICON_Q_WIFI, cell ? "4G" : "Wi-Fi", sub.c_str(),
@@ -281,7 +285,7 @@ void BuildTile(Tile& tile, lv_obj_t* panel, int x, int y, int w, lv_event_cb_t o
     lv_obj_set_pos(tile.title, kTextX, 12);
     tile.sub = Label(tile.box, small);
     lv_label_set_long_mode(tile.sub, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(tile.sub, w - kTextX - 12);
+    lv_obj_set_size(tile.sub, w - kTextX - 12, small->line_height);   // 只占一行，放不下用省略号
     lv_obj_set_pos(tile.sub, kTextX, 52);
     tile.corner = Label(tile.box, small);
     lv_obj_align(tile.corner, LV_ALIGN_TOP_RIGHT, -14, 8);

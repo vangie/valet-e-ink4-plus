@@ -47,6 +47,8 @@ public:
      * @brief 是否处于浅睡暂停态
      */
     bool IsLpPaused() const { return lp_paused_; }
+    /** @brief 最近一次扫描没找到任何存过的网络（连上后清掉）：真的上不了网，不是省电睡下 */
+    bool NoSavedNetworkNearby() const { return no_saved_nearby_.load(); }
     /** @brief True once Start() has created the STA (driver initialised); Stop() undoes it. */
     bool IsStarted() const { return station_netif_ != nullptr; }
     /** @brief Test builds only: scans pretend no saved network is in range (to try leaving home at home). */
@@ -91,6 +93,7 @@ private:
     esp_event_handler_instance_t instance_any_id_ = nullptr;
     esp_event_handler_instance_t instance_got_ip_ = nullptr;
     esp_netif_t* station_netif_ = nullptr;
+    std::atomic<bool> no_saved_nearby_{false};
     std::atomic<bool> lp_paused_{false}; // 跨任务阻止暂停或停止后的后台连接
     std::atomic<bool> user_enabled_{true}; // 用户手动关闭优先于自动联网及待机恢复
     bool fast_reconnect_on_start_ = false; // LP resume：STA_START 直 connect，跳过扫网

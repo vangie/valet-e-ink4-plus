@@ -337,6 +337,7 @@ void WifiStation::HandleScanResult() {
         if (timer_handle_ != nullptr && !lp_paused_) {
             esp_timer_start_once(timer_handle_, kScanRetryUs);
         }
+        if (!lp_paused_) no_saved_nearby_.store(true);   // 状态栏据此画飞机：附近真的没有存过的网络
         if (on_no_saved_network_ && !lp_paused_) on_no_saved_network_();
         return;
     }
@@ -498,6 +499,7 @@ void WifiStation::WifiEventHandler(void* arg, esp_event_base_t /*event_base*/, i
         if (this_->timer_handle_ != nullptr && !this_->lp_paused_) {
             esp_timer_start_once(this_->timer_handle_, kScanRetryUs);
         }
+        if (!this_->lp_paused_) this_->no_saved_nearby_.store(true);
         if (this_->on_no_saved_network_ && !this_->lp_paused_) this_->on_no_saved_network_();
     }
 }
@@ -512,6 +514,7 @@ void WifiStation::IpEventHandler(void* arg, esp_event_base_t /*event_base*/, int
     this_->ip_address_ = ip_address;
     ESP_LOGI(TAG, "Got IP: %s", this_->ip_address_.c_str());
     
+    this_->no_saved_nearby_.store(false);
     xEventGroupSetBits(this_->event_group_, WIFI_EVENT_CONNECTED);
     this_->scanning_ = false;
     if (this_->on_connected_) {

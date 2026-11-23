@@ -562,3 +562,5 @@ div.v-row { box-sizing: border-box; }
 .q-level .q-rowic { display: block; overflow: visible; }
 .q-level .q-rowic .erase { fill: var(--paper); }
 .sbi .erase, .qi .erase { fill: var(--paper); }
+/* Wi-Fi 省电睡下：扇形变灰（真机上是 50% 格点，黑白屏也能看出灰） */
+.sb .sb-wifi.asleep .sbi { opacity: .35; }

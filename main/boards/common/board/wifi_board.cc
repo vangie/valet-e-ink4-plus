@@ -369,7 +369,12 @@ const char* WifiBoard::GetNetworkStateIcon() {
         }
         return FONT_AWESOME_WIFI_WEAK;
     }
-    // 扫描/连接中：图标固定未连接，进度改由顶栏文案表示
+    // 没连着：Wi-Fi 开着、有存过的网络 → 省电睡下了或正在连，一用网就会连上：全灰的扇形。
+    // 只有真的上不了网（Wi-Fi 关了、一个存过的网络都没有、上次扫描附近没有存过的网络）才画飞机。
+    if (wifi_station.IsUserEnabled() && !wifi_station.NoSavedNetworkNearby() &&
+        !SsidManager::GetInstance().GetSsidList().empty()) {
+        return FONT_AWESOME_WIFI_STANDBY;
+    }
     return FONT_AWESOME_PLANE;
 }
 

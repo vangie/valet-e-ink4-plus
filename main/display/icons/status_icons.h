@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 enum ValetIcon {
+    VALET_ICON_SB_WIFI_0,                                                      // Wi-Fi asleep / connecting: all gray
     VALET_ICON_SB_WIFI_1, VALET_ICON_SB_WIFI_2, VALET_ICON_SB_WIFI_3,          // Wi-Fi, 1..3 arcs lit
     VALET_ICON_SB_CELL_0, VALET_ICON_SB_CELL_1, VALET_ICON_SB_CELL_2,          // 4G, 0..4 bars lit
     VALET_ICON_SB_CELL_3, VALET_ICON_SB_CELL_4,

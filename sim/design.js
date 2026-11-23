@@ -82,6 +82,8 @@ function sbIcon(name, cls = "sbi") {
 function v2NetGlyph() {
   if (state.link === "4G") return `<i class="sb-sig" aria-label="4G">${sbIcon("cell")}</i>`;
   if (!state.wifiNearby && state.linkMode === "wifi") return `<i class="sb-plane" aria-label="${L("Wi-Fi 没连上", "Wi-Fi offline")}">${sbIcon("plane")}</i>`;
+  // 省电睡下了（一用网就会连上）：扇形全灰，不画飞机。飞机只代表真的上不了网
+  if (state.wifiAsleep) return `<i class="sb-wifi asleep" aria-label="${L("Wi-Fi 休眠中", "Wi-Fi asleep")}">${sbIcon("wifi")}</i>`;
   return `<i class="sb-wifi" aria-label="Wi-Fi">${sbIcon("wifi")}</i>`;
 }
 function v2Battery() {
@@ -126,7 +128,9 @@ function v2Bar(center) {
 // ── 快捷面板：从状态栏往下拉。上面四个开关（点一下切换，长按进设置），下面前光和音量。
 function v2QuickPanel() {
   const net = state.link === "4G" ? "4G" : "Wi-Fi";
-  const netSub = state.link === "4G" ? L("已连上", "Connected") : state.wifiNearby || state.linkMode !== "wifi" ? "Metalio-Home" : L("没连上", "Offline");
+  const netSub = state.link === "4G" ? L("已连上", "Connected")
+    : !state.wifiNearby && state.linkMode === "wifi" ? L("没连上", "Offline")
+    : state.wifiAsleep ? L("休眠中 · Metalio-Home", "Asleep · Metalio-Home") : "Metalio-Home";
   const modeName = { auto: L("自动", "Auto"), "4G": "4G", wifi: "Wi-Fi" }[state.linkMode];
   const proxyOk = state.proxyAddr && (!proxyPasswordOnly() || state.proxySsPass);
   const proxyOn = state.link === "wifi" ? state.proxyWifi : state.proxyCell;
@@ -808,12 +812,13 @@ function v2SettingsPane(id) {
     const modeNote = auto ? L("有存过的 Wi-Fi 就用 Wi-Fi，没有就用 4G。通话中不换，换的时候不用重启。", "Saved Wi-Fi when there is one, otherwise 4G. Not during a call; no restart.")
       : state.linkMode === "4G" ? L("一直用 4G。换上网方式马上生效，不用重启。", "Always 4G. Takes effect at once, no restart.")
       : L("只用 Wi-Fi，离开存过的网络就上不了网。", "Wi-Fi only: no connection away from saved networks.");
+    const asleep = state.link === "wifi" && state.wifiNearby ? `<button class="v-line dashed is-full" data-wifi-asleep>${state.wifiAsleep ? L("假的：用一下网（叫醒 Wi-Fi）", "Fake: use the network") : L("假的：30 秒没用网，省电睡下", "Fake: idle, Wi-Fi sleeps")}</button>` : "";
     const near = `<button class="v-line dashed is-full" data-wifi-near>${state.wifiNearby ? L("假的：当作出门了（附近没有存过的 Wi-Fi）", "Fake: leave home") : L("假的：当作回到家（附近有存过的 Wi-Fi）", "Fake: come home")}</button>`;
-    return `${status}${v2Fld(L("怎么上网", "Connection"), v2Seg([["auto", L("自动", "Auto")], ["4G", "4G"], ["wifi", "Wi-Fi"]], state.linkMode, "data-link"), modeNote + (sim ? L("换卡会重启一次。", " Changing the SIM restarts.") : ""))}${sim}
+    return `${status}${v2Fld(L("怎么上网", "Connection"), v2Seg([["auto", L("自动", "Auto")], ["4G", "4G"], ["wifi", "Wi-Fi"]], state.linkMode, "data-link"), modeNote)}${sim}
       <nav class="v-rows">${`<button class="v-row" data-go="wifi"><span><b>Wi-Fi</b><em>${state.link === "wifi" ? L("点这里选网络、换网络", "Tap to choose or change the network") : L("没在用。点这里选网络", "Not in use. Tap to choose")}</em></span>${ic("go", "chev")}</button>`}
         <button class="v-row" data-setting="proxy"><span><b>${L("代理", "Proxy")}</b><em>${proxySummary()}</em></span>${ic("go", "chev")}</button></nav>
       ${v2Fld(L("不用网时，多久断开", "Disconnect when idle after"), v2Seg([["30", L("30 秒", "30 s")], ["60", L("1 分钟", "1 min")], ["120", L("2 分钟", "2 min")], ["0", L("不断", "Never")]], state.netGrace, "data-grace"), L("断得快更省电，下一次提问要多等一两秒连网。", "Sooner saves battery; the next question waits to reconnect."))}
-      <div class="v-fld">${near}</div>`;
+      <div class="v-fld">${near}${asleep}</div>`;
   }
   if (id === "proxy") {
     const onoff = [["off", L("直连", "Direct")], ["on", L("走代理", "Use proxy")]];
@@ -1188,7 +1193,13 @@ panel.addEventListener("click", (e) => {
   if (hit(".v-pick")) return;
   // 「更多协议」回到上次用的那种（没用过时是 SS）；具体哪种在「协议」那一行里换。
   if ((el = hit("[data-proxy-kind]"))) { const k = el.dataset.proxyKind; state.proxyKind = k === "more" ? state.proxyMore : k; state.proxyTest = ""; return render(); }
+  if (hit("[data-wifi-asleep]")) {
+    state.wifiAsleep = !state.wifiAsleep;
+    log(state.wifiAsleep ? "假的：30 秒没用网，Wi-Fi 省电睡下。状态栏扇形变灰，下拉栏写「休眠中」；一用网会自己连上。" : "假的：用了一下网，Wi-Fi 醒来连上。");
+    return render();
+  }
   if (hit("[data-wifi-near]")) {
+    state.wifiAsleep = false;
     state.wifiNearby = !state.wifiNearby;
     if (state.linkMode !== "auto") {
       log(state.wifiNearby ? "假的：回到有存过的 Wi-Fi 的地方。没选「自动」，不换。" : "假的：出门了。没选「自动」，不换。");
