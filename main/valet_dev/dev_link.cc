@@ -1,3 +1,4 @@
+#include "valet_net/shadowsocks.h"
 #include <string>
 #include <esp_wifi.h>
 #include "ssid_manager.h"
@@ -344,7 +345,8 @@ void ValetDevLinkHandle(const char* json) {
             net_proxy::Config parsed;
             parsed.kind = prefs.kind;
             if (net_proxy::Parse(link->valuestring, &parsed) != net_proxy::ParseResult::kOk) error = "BAD_LINK";
-            else { prefs.kind = parsed.kind; prefs.host = parsed.host; prefs.port = parsed.port; prefs.user = parsed.user; prefs.password = parsed.password; }
+            else if (parsed.kind == net_proxy::Kind::kShadowsocks && !valet::ss::Supported(parsed.method)) error = "UNSUPPORTED_CIPHER";
+            else { prefs.kind = parsed.kind; prefs.host = parsed.host; prefs.port = parsed.port; prefs.user = parsed.user; prefs.password = parsed.password; prefs.method = parsed.method; }
         }
         prefs.on_wifi = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "wifi"));
         prefs.on_cell = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "cell"));
@@ -403,6 +405,13 @@ void ValetDevLinkHandle(const char* json) {
             ESP_LOGW(TAG, "wifitx: set %d -> %s, now %d (x0.25 dBm)", q, esp_err_to_name(err), now);
             esp_wifi_disconnect();
         });
+    } else if (!strcmp(cmd, "proxytest")) {
+        // 仅测试版：用现在的代理设置跑一次设置页的「测试这个代理」，结果打到日志
+        if (xTaskCreate([](void*) {
+                const auto result = valet::proxy::Test(valet::proxy::Get());
+                ESP_LOGW(TAG, "proxytest: ok=%d status=%d error=%d %d ms", result.ok, result.status, result.error, result.ms);
+                vTaskDelete(nullptr);
+            }, "proxy_test", 8192, nullptr, 4, nullptr) != pdPASS) error = "BUSY";
     } else if (!strcmp(cmd, "sd")) {
         // 仅测试版：SD 卡状态（挂上没有、卡在不在、上次初始化的错误）；mount=true 时重试挂载
         auto& sd = SdCardManager::GetInstance();

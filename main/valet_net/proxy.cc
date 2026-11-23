@@ -6,6 +6,7 @@
 #include "dual_network_board.h"
 #include "http.h"
 #include "power_policy.h"
+#include "shadowsocks.h"
 #include "settings.h"
 
 #include <cstdio>
@@ -40,6 +41,7 @@ net_proxy::Config ToConfig(const Prefs& prefs) {
     config.port = prefs.port;
     config.user = prefs.user;
     config.password = prefs.password;
+    config.method = prefs.method;
     return config;
 }
 
@@ -63,6 +65,7 @@ bool OnWifi() {
 }
 
 void Init() {
+    ss::Install();
     Prefs loaded;
     {
         Settings store(kStore, false);
@@ -74,6 +77,7 @@ void Init() {
         loaded.port = store.GetInt("port", 0);
         loaded.user = store.GetString("user");
         loaded.password = store.GetString("pass");
+        loaded.method = store.GetString("method");
     }
     if (loaded.port < 1 || loaded.port > 65535) loaded.port = 0;
     {
@@ -99,6 +103,7 @@ bool Update(const Prefs& prefs) {
         store.SetInt("port", prefs.port);
         store.SetString("user", prefs.user);
         store.SetString("pass", prefs.password);
+        store.SetString("method", prefs.method);
         if (!store.Commit()) ESP_LOGE(TAG, "the proxy choice was not saved");
     }, Application::TaskDomain::Storage)) return false;
     {
@@ -116,6 +121,7 @@ TestResult Test(const Prefs& prefs) {
     result.shadowsocks = prefs.kind == net_proxy::Kind::kShadowsocks;
     if (!prefs.HasAddress()) { result.error = kErrNoAddress; return result; }
     if (result.shadowsocks && prefs.password.empty()) { result.error = net_proxy::kErrProxyAuth; return result; }
+    if (result.shadowsocks && !ss::Supported(prefs.method)) { result.error = net_proxy::kErrProxyProtocol; return result; }
     // Keep the radio up for the request; it is parked soon after the last use.
     PowerNeedHold hold(PowerNeed::OtaDownload);
     if (!Board::GetInstance().EnsureNetworkReady(20000)) { result.error = kErrNoNetwork; return result; }
@@ -167,6 +173,7 @@ std::string Describe(const TestResult& result) {
             return Text("代理连上了，但一直不回话。类型（HTTP / SOCKS5）可能选反了。",
                         "Connected to the proxy, but it never answered. The type (HTTP / SOCKS5) may be the other one.");
         case net_proxy::kErrProxyProtocol:
+            if (result.shadowsocks) return Text("设备不支持这种加密方式。", "The device does not support this cipher.");
             return Text("那个端口回的不是这种代理的话。类型（HTTP / SOCKS5）是不是选反了？",
                         "That port does not speak this kind of proxy. Is the type (HTTP / SOCKS5) the other one?");
         case kErrBadAnswer:
@@ -175,8 +182,8 @@ std::string Describe(const TestResult& result) {
         default:
             // Shadowsocks has no answer of its own: a wrong password or cipher only shows as a connection that breaks.
             if (result.shadowsocks) {
-                std::snprintf(text, sizeof(text), Text("连上了服务器，但加密连接没建成（代码 %d）。多半是密码不对，或服务器用的不是 aes-256-cfb。",
-                                                       "Reached the server, but the secure connection failed (code %d). Most likely a wrong password, or the server does not use aes-256-cfb."), result.error);
+                std::snprintf(text, sizeof(text), Text("连上了服务器，但加密连接没建成（代码 %d）。多半是密码或加密方式和服务器不一致。",
+                                                       "Reached the server, but the secure connection failed (code %d). Most likely the password or the cipher differs from the server's."), result.error);
                 return text;
             }
             std::snprintf(text, sizeof(text), Text("代理接通了，后面的加密连接没建成（代码 %d）。", "The proxy opened the connection, but the secure connection failed (code %d)."), result.error);

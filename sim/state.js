@@ -91,6 +91,7 @@ const state = {
   proxyCell: false,  // 用 4G 时走代理
   proxyKind: "http", // http | socks5 | ss（Shadowsocks，aes-256-cfb）
   proxySsPass: false, // Shadowsocks 的密码填了没有
+  proxyMethod: "aes-256-gcm", // SS 的加密方式；其他方式靠 ss:// 链接填
   proxyAddr: "",     // 地址:端口，空 = 没设置
   proxyUser: "",     // 账号，空 = 不用
   proxyTest: "",     // 上一次测试的结果

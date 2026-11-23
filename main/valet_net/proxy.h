@@ -18,6 +18,7 @@ struct Prefs {
     int port = 0;
     std::string user;
     std::string password;
+    std::string method;     // Shadowsocks cipher; empty = valet::ss::kDefaultMethod
     bool HasAddress() const { return !host.empty() && port > 0; }
 };
 

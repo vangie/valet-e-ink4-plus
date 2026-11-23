@@ -7,6 +7,7 @@
 #include "screen_keyboard.h"
 #include "settings_common.h"
 #include "valet_net/proxy.h"
+#include "valet_net/shadowsocks.h"
 
 #include <atomic>
 #include <cstdio>
@@ -21,7 +22,8 @@ using valet::proxy::Prefs;
 
 enum Field : intptr_t { kFieldAddress = 0, kFieldLogin = 1 };
 // Segment values: which control, and which choice.
-enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindSs = 22 };
+enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindSs = 22,
+                       kMethod0 = 30 };   // kMethod0 + index into kMethodChoices
 
 struct Ui {
     lv_obj_t* page = nullptr;
@@ -31,6 +33,10 @@ struct Ui {
     lv_obj_t* address_detail = nullptr;
     lv_obj_t* login_detail = nullptr;
     lv_obj_t* login_title = nullptr;   // 「账号和密码」，Shadowsocks 时是「密码」
+    lv_obj_t* method_gap = nullptr;    // SS only: the cipher
+    lv_obj_t* method_label = nullptr;
+    lv_obj_t* method_seg = nullptr;
+    lv_obj_t* method_note = nullptr;
     lv_obj_t* test_label = nullptr;
     lv_obj_t* result = nullptr;
     // Text editor (an overlay on the screen)
@@ -72,6 +78,20 @@ const char* KindName(net_proxy::Kind kind) {
     return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : kind == net_proxy::Kind::kShadowsocks ? "SS" : "HTTP";
 }
 bool IsSs(const Prefs& prefs) { return prefs.kind == net_proxy::Kind::kShadowsocks; }
+// The ciphers offered as buttons; the others (aes-*-ctr, aes-128/192-cfb, xchacha…, chacha20-ietf)
+// come in with an ss:// link.
+constexpr const char* kMethodChoices[] = {"aes-256-gcm", "aes-128-gcm", "chacha20-ietf-poly1305", "aes-256-cfb"};
+std::string MethodOf(const Prefs& prefs) { return prefs.method.empty() ? valet::ss::kDefaultMethod : prefs.method; }
+int MethodIndex(const Prefs& prefs) {
+    const std::string method = MethodOf(prefs);
+    for (int i = 0; i < 4; ++i) if (method == kMethodChoices[i]) return i;
+    return -1;
+}
+void SetShown(lv_obj_t* obj, bool shown) {
+    if (!obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN) != shown) return;
+    if (shown) lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
 int KindIndex(net_proxy::Kind kind) { return kind == net_proxy::Kind::kSocks5 ? 1 : kind == net_proxy::Kind::kShadowsocks ? 2 : 0; }
 // Shadowsocks: one box, the password. Others: user name and password.
 int PasswordBox() { return s_ui.boxes == 1 ? 0 : 1; }
@@ -82,7 +102,7 @@ std::string AddressText(const Prefs& prefs) {
 }
 std::string LoginText(const Prefs& prefs) {
     if (IsSs(prefs)) return prefs.password.empty() ? Text("还没填。SS 必须有密码", "Not set. SS needs one")
-                                                   : Text("已填 · 加密 aes-256-cfb", "Set · cipher aes-256-cfb");
+                                                   : Text("已填", "Set");
     if (prefs.user.empty()) return Text("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one");
     // The password is not shown.
     return prefs.user + (prefs.password.empty() ? Text("，没有密码", ", no password") : Text("，密码已填", ", password set"));
@@ -95,6 +115,17 @@ void Refresh() {
     SettingsValetSelect(s_ui.cell_seg, prefs.on_cell ? 1 : 0);
     SettingsValetSelect(s_ui.kind_seg, KindIndex(prefs.kind));
     SetText(s_ui.login_title, IsSs(prefs) ? Text("密码", "Password") : Text("账号和密码", "Login"));
+    SetShown(s_ui.method_gap, IsSs(prefs));
+    SetShown(s_ui.method_label, IsSs(prefs));
+    SetShown(s_ui.method_seg, IsSs(prefs));
+    SetShown(s_ui.method_note, IsSs(prefs));
+    if (IsSs(prefs)) {
+        SettingsValetSelect(s_ui.method_seg, MethodIndex(prefs));
+        const std::string note = MethodIndex(prefs) >= 0
+            ? Text("要和服务器的设置一样。其他方式可以在地址里输整条 ss:// 链接。", "Must match the server. Other ciphers: enter a whole ss:// link as the address.")
+            : std::string(Text("现在用的是 ", "In use: ")) + MethodOf(prefs) + Text("（来自 ss:// 链接）", " (from an ss:// link)");
+        SetText(s_ui.method_note, note.c_str());
+    }
     SetText(s_ui.address_detail, AddressText(prefs).c_str());
     SetText(s_ui.login_detail, LoginText(prefs).c_str());
     SetText(s_ui.test_label, s_testing.load() ? Text("正在测试…", "Testing…") : Text("测试这个代理", "Test this proxy"));
@@ -174,15 +205,15 @@ void ConfirmEdit() {
                 case net_proxy::ParseResult::kUnsupportedScheme:
                     problem = Text("开头只认 http://、socks5:// 和 ss://，也可以不写", "Only http://, socks5:// and ss:// are accepted in front; or leave it out");
                     break;
-                case net_proxy::ParseResult::kUnsupportedCipher:
-                    problem = Text("这条 ss:// 链接的加密不是 aes-256-cfb，设备只支持这一种。", "This ss:// link does not use aes-256-cfb, the only cipher the device supports.");
-                    break;
                 default:
                     problem = Text("没看懂地址。例如 192.168.0.10:7890", "That is not an address, e.g. 192.168.0.10:7890");
                     break;
             }
+            if (!problem && parsed.kind == net_proxy::Kind::kShadowsocks && !valet::ss::Supported(parsed.method))
+                problem = Text("这条 ss:// 链接的加密方式设备不支持（SS2022 也不支持）。", "The device does not support this ss:// link's cipher (nor SS2022).");
             if (!problem) {
                 prefs.kind = parsed.kind;
+                if (parsed.kind == net_proxy::Kind::kShadowsocks) prefs.method = parsed.method;
                 prefs.host = parsed.host;
                 prefs.port = parsed.port;
                 prefs.user = parsed.user;
@@ -310,8 +341,8 @@ void OpenEditor(Field field) {
     lv_label_set_text(s_ui.edit_hint, field == kFieldAddress
         ? Text("代理的地址和端口，例如 192.168.0.10:7890；也可以输整条 ss:// 链接。清空再确认 = 不要代理。",
                "Proxy address and port, e.g. 192.168.0.10:7890, or a whole ss:// link. Empty = no proxy.")
-        : s_ui.boxes == 1 ? Text("SS 服务器的密码（加密 aes-256-cfb）。存着的显示成星号，一输入就换成新的。",
-                                 "The SS server's password (cipher aes-256-cfb). A stored one shows as stars; typing replaces it.")
+        : s_ui.boxes == 1 ? Text("SS 服务器的密码。存着的显示成星号，一输入就换成新的。",
+                                 "The SS server's password. A stored one shows as stars; typing replaces it.")
         : Text("点一个框再输入。存着的密码显示成星号，一输入就换成新的。", "Tap a box, then type. A stored password shows as stars; typing replaces it."));
     lv_obj_set_width(s_ui.edit_hint, lv_pct(100));
     lv_obj_set_height(s_ui.edit_hint, 74);   // two lines, so the boxes below do not move when the text changes
@@ -388,6 +419,9 @@ void OnChoice(lv_event_t* e) {
         case kKindHttp: prefs.kind = net_proxy::Kind::kHttp; break;
         case kKindSocks: prefs.kind = net_proxy::Kind::kSocks5; break;
         case kKindSs: prefs.kind = net_proxy::Kind::kShadowsocks; break;
+        default:
+            if (choice >= kMethod0 && choice < kMethod0 + 4) prefs.method = kMethodChoices[choice - kMethod0];
+            break;
     }
     Save(prefs);
 }
@@ -518,6 +552,15 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
     SettingsValetLabel(page, Text("代理类型", "Proxy type"));
     static const char* const kKinds[] = {"HTTP", "SOCKS5", "SS"};
     s_ui.kind_seg = SettingsValetSegments(page, kKinds, 3, OnChoice, kKindValues);
+    // SS only: which cipher. Shown and hidden by Refresh().
+    s_ui.method_gap = lv_obj_create(page);
+    lv_obj_remove_style_all(s_ui.method_gap);
+    lv_obj_set_size(s_ui.method_gap, lv_pct(100), 30);
+    s_ui.method_label = SettingsValetLabel(page, Text("加密方式", "Cipher"));
+    static const char* const kMethodNames[] = {"AES-256-GCM", "AES-128-GCM", "ChaCha20-Poly1305", "AES-256-CFB"};
+    static const intptr_t kMethodValues[] = {kMethod0, kMethod0 + 1, kMethod0 + 2, kMethod0 + 3};
+    s_ui.method_seg = SettingsValetSegments(page, kMethodNames, 4, OnChoice, kMethodValues, 2);
+    s_ui.method_note = SettingsValetNote(page, "");
     SettingsValetGap(page, 30);
     s_ui.address_detail = AddRow(page, Text("地址", "Address"), kFieldAddress, true);
     s_ui.login_detail = AddRow(page, Text("账号和密码", "Login"), kFieldLogin, false, &s_ui.login_title);

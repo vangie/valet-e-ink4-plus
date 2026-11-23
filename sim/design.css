@@ -357,7 +357,7 @@ div.v-row { box-sizing: border-box; }
 .v-call.off b { background: var(--paper); padding: 0 0 0 4px; margin-right: 0; }
 .v-call.off span { padding: 1px 0 1px 4px; }
 .v-seg.two { flex-wrap: wrap; }
-.v-seg.two button { flex: 0 0 50%; }
+.v-seg.two button { flex: 0 0 50%; box-sizing: border-box; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
 .v-seg.two button:nth-child(odd) { border-left: 0; }
 .v-seg.two button:nth-child(n + 3) { border-top: 1px solid var(--ink); }
 .panel.v2 .seg.wrap { flex-wrap: nowrap; }

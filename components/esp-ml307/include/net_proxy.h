@@ -7,10 +7,9 @@
 // request is sent to the proxy with an absolute URI (HttpClient does that).
 // SOCKS5: every target uses a CONNECT command, optionally with a user name
 // and password (RFC 1928 / 1929).
-// Shadowsocks (aes-256-cfb, the legacy stream cipher, as on the AI Passport):
-// every byte to the server is encrypted with a key from the password; a relay
-// task between a loopback socket pair and the server does the encryption, so
-// TCP and TLS callers get an ordinary socket.
+// Shadowsocks: every byte to the server is encrypted. This component only
+// connects to the server; the cipher and the relay that encrypts are installed
+// by the application (SetShadowsocksOpener), which hands back an ordinary socket.
 // In all cases the target's name goes to the proxy unresolved, so the
 // device does no DNS lookup of its own for a proxied connection.
 //
@@ -24,8 +23,7 @@ namespace net_proxy {
 
 enum class Kind : uint8_t { kNone = 0, kHttp = 1, kSocks5 = 2, kShadowsocks = 3 };
 
-/** @brief The only Shadowsocks cipher supported. */
-constexpr char kShadowsocksMethod[] = "aes-256-cfb";
+
 
 struct Config {
     Kind kind = Kind::kNone;
@@ -33,7 +31,14 @@ struct Config {
     int port = 0;
     std::string user;       // not used by Shadowsocks
     std::string password;   // Shadowsocks: the server's password (required)
+    std::string method;     // Shadowsocks: cipher name, lower case (e.g. "aes-256-gcm")
 };
+
+/** @brief Turns a TCP connection to a Shadowsocks server into a socket that reaches host:port.
+ *         Takes ownership of `server_fd`. Returns the socket, or -1 with `error` set. */
+using ShadowsocksOpener = int (*)(int server_fd, const Config& proxy, const std::string& host, int port, int* error);
+/** @brief Install the Shadowsocks implementation; until then a Shadowsocks proxy fails to connect. */
+void SetShadowsocksOpener(ShadowsocksOpener opener);
 
 // What Open() reports through `error`. Other values are errno.
 enum Error : int {
@@ -80,13 +85,13 @@ bool ForwardsPlainHttp(const std::string& host, Config* proxy);
 /** @brief Value for a Proxy-Authorization header, or empty when the proxy has no user name. */
 std::string BasicAuth(const Config& proxy);
 
-enum class ParseResult : uint8_t { kOk, kEmpty, kNoHost, kBadPort, kUnsupportedScheme, kUnsupportedCipher };
+enum class ParseResult : uint8_t { kOk, kEmpty, kNoHost, kBadPort, kUnsupportedScheme };
 /** @brief Read "[scheme://][user[:password]@]host:port". A scheme sets the kind (http, socks5,
  *         socks5h, socks); without one `out->kind` is left as it was. User and password are
  *         replaced only when the text has them.
  *         Also reads Shadowsocks links: "ss://BASE64(method:password)@host:port[#name]" (SIP002, the
  *         user info may also be percent-encoded) and "ss://BASE64(method:password@host:port)[#name]";
- *         the method must be aes-256-cfb. */
+ *         the method is stored as given (lower case); whether it is supported is for the caller. */
 ParseResult Parse(const std::string& text, Config* out);
 
 }  // namespace net_proxy
