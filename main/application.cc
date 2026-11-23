@@ -817,6 +817,13 @@ void Application::StartXiaozhiVoiceOnTask(bool enter_listening, uint32_t generat
     }
     if (!chat_cloud::Available()) {
         ESP_LOGD(TAG, "StartXiaozhiVoice skipped: blank cloud endpoints");
+        if (chat_cloud::IsCustom()) {
+            // 自建还没连助理：按住说话要有回应，提问页上有「去连接」
+            auto notify = [](void*) {
+                if (AssistantScreen::IsActive()) ScreenShowToast(std::strcmp(Lang::Current(), "zh-CN") == 0 ? "还没连上你的助手" : "No assistant connected");
+            };
+            if (!ScreenLvAsyncUrgent(notify)) ScreenLvAsync(notify);
+        }
         ClearActivationCode();
         StopXiaozhiVoiceOnTask();
         return;

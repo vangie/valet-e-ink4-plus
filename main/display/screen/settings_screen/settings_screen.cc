@@ -1,4 +1,5 @@
 #include "settings_screen.h"
+#include "settings.h"
 
 #include "assets/lang_config.h"
 #include "fontpack_lvgl.h"
@@ -429,8 +430,13 @@ static void SetQuick(lv_event_t* event) {
     if (!Application::GetInstance().Schedule([light, block, generation]() {
         if (light) {
             auto& front = Frontlight::GetInstance();
-            const int now = (front.target_brightness() + 5) / 10;
+            const bool on = front.cct() != FrontlightCct::kOff && front.target_brightness() > 0;
+            // 关着时点格子：直接开到那一档（和下拉栏一样）；开着时点当前这一档退一格
+            const int now = on ? (front.target_brightness() + 5) / 10 : -1;
             front.SetBrightness((now == block ? block - 1 : block) * 10, true);
+            if (!on) front.SetWarmth(front.warmth());   // 按记住的冷暖比例把灯打开
+            Settings settings("frontlight", true);
+            settings.SetInt("cct", static_cast<int>(front.cct()));
         } else if (auto* codec = Board::GetInstance().GetAudioCodec()) {
             const int now = (codec->output_volume() + 5) / 10;
             codec->SetOutputVolume((now == block ? block - 1 : block) * 10);
@@ -458,7 +464,7 @@ static void AddLevel(lv_obj_t* box, Glyph glyph, const char* name, int value, bo
     lv_label_set_text(label, name);
     lv_obj_set_style_text_font(label, SmallFont(), 0);
     lv_obj_align(label, LV_ALIGN_LEFT_MID, 52, 0);
-    const int filled = (std::clamp(value, 0, 100) + 5) / 10;
+    const int filled = value < 0 ? 0 : (std::clamp(value, 0, 100) + 5) / 10;   // -1：关着
     // Without a name the blocks take the room the name would have used.
     const bool named = name && *name;
     const int kBlockW = named ? 32 : 43, kBlockGap = named ? 5 : 6, kBlocksX = named ? 130 : 58;
@@ -482,7 +488,8 @@ static void AddLevel(lv_obj_t* box, Glyph glyph, const char* name, int value, bo
         lv_obj_clear_flag(block, LV_OBJ_FLAG_CLICKABLE);
     }
     auto* number = lv_label_create(row);
-    lv_label_set_text_fmt(number, "%d", value);
+    if (value < 0) lv_label_set_text(number, Text("关", "Off"));
+    else lv_label_set_text_fmt(number, "%d", value);
     lv_obj_set_style_text_font(number, SmallFont(), 0);
     lv_obj_align(number, LV_ALIGN_RIGHT_MID, 0, 0);
 }
@@ -746,7 +753,10 @@ static void ShowOverview() {
     s_ui.group = -1;
     lv_label_set_text(s_ui.heading, Text("设置", "Settings"));
     auto* quick = AddQuickBox();
-    AddLevel(quick, kGlyphSun, Text("前光", "Light"), Frontlight::GetInstance().target_brightness(), true);
+    // 灯关着时记住的亮度不算数：格子全空、写「关」，和下拉栏一致
+    auto& front = Frontlight::GetInstance();
+    const bool light_on = front.cct() != FrontlightCct::kOff && front.target_brightness() > 0;
+    AddLevel(quick, kGlyphSun, Text("前光", "Light"), light_on ? front.target_brightness() : -1, true);
     if (auto* codec = Board::GetInstance().GetAudioCodec())
         AddLevel(quick, kGlyphSpeaker, Text("音量", "Volume"), codec->output_volume(), false);
     // A rule over the first row, as in the design.

@@ -1,6 +1,9 @@
 #include "assistant_fonts.h"
 #include "assets/lang_config.h"
 #include "chat_cloud.h"
+#include "haptic_feedback.h"
+#include "screen_common.h"
+#include "settings_screen/settings_screen.h"
 #include "fontpack_lvgl.h"
 #include "home_screen/home_valet_font.h"
 #include "valet_reading_context.h"
@@ -173,6 +176,30 @@ void Assistant_BuildIdleHint(lv_obj_t* host) {
         Label(host, en ? "The page is attached. Hold to talk below, then keep reading."
                        : "正文已经带上。按住下面说话，问完接着读。",
               kSide, top + 30, width - 2 * kSide, regular);
+        return;
+    }
+    // 选了「自建」但一个助理都没连：别让人按住说话碰壁，告诉他去哪连
+    if (custom && !chat_cloud::Available()) {
+        lv_obj_t* head = Label(host, en ? "No assistant connected" : "还没连上你的助手",
+                               kSide, top + 44, width - 2 * kSide, &kValetTitleFont);
+        lv_obj_update_layout(head);
+        lv_obj_t* note = Label(host, en ? "Add one from your phone or computer. Ask and Call then go to your own OpenClaw or Hermes."
+                                        : "用手机或电脑添加一个助理，提问和通话都走你自己的 OpenClaw 或 Hermes。",
+                               kSide, lv_obj_get_y(head) + lv_obj_get_height(head) + 14, width - 2 * kSide, small);
+        lv_obj_update_layout(note);
+        lv_obj_t* go = PlainObject(host, 220, 72);
+        lv_obj_set_pos(go, kSide, lv_obj_get_y(note) + lv_obj_get_height(note) + 34);
+        lv_obj_set_style_bg_color(go, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(go, LV_OPA_COVER, 0);
+        lv_obj_add_flag(go, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t* text = lv_label_create(go);
+        lv_label_set_text(text, en ? "Connect  >" : "去连接  >");
+        lv_obj_set_style_text_font(text, bold, 0);
+        lv_obj_set_style_text_color(text, lv_color_white(), 0);
+        lv_obj_center(text);
+        HapticAttachClick(go);
+        lv_obj_add_event_cb(go, [](lv_event_t*) { ScreenNavigateTo(SettingsScreen::CreateAssistant); }, LV_EVENT_CLICKED, nullptr);
+        (void)regular;
         return;
     }
     lv_obj_t* headline = Label(host, book ? (en ? "Ask about this page" : "问这一页")

@@ -22,6 +22,12 @@ bool Wallpaper_TryResolveReadingWallpaperPath(char* out_path, size_t out_len);
 
 /** @brief 是否配置待机壁纸；SD 尚未挂载时保留选择，挂载后由 hydrate 校验。 */
 bool Wallpaper_HasStandbySelection();
+/** @brief 「待机时屏上放什么」：0 跟着壁纸走，1 时钟和待办，2 壁纸（还没选待机壁纸时仍放时钟和待办）。 */
+int Wallpaper_StandbyStyle();
+/** @brief 待机是否放壁纸：没选「时钟和待办」且选了待机壁纸。 */
+bool Wallpaper_StandbyShowsWallpaper();
+/** @brief 改待机方式并写 NVS；仅在非 LVGL 任务（内部 RAM 栈）中调用。 */
+void Wallpaper_SetStandbyStyle(int style);
 
 /** @brief 查询指定壁纸是否叠加当前界面；true 表示待机，false 表示关机。 */
 bool Wallpaper_IsOverlay(bool for_standby);

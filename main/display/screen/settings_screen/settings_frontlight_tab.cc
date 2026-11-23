@@ -14,6 +14,8 @@
 #include "settings.h"
 #include "settings_common.h"
 #include "home_screen/home_screen.h"
+#include "screen_common.h"
+#include "wallpaper_screen/wallpaper_active.h"
 
 namespace {
 
@@ -37,6 +39,8 @@ struct SettingsFrontlightUi {
     lv_obj_t* depth_seg = nullptr;
     lv_obj_t* depth_gap = nullptr;
     lv_obj_t* theme_seg = nullptr;
+    lv_obj_t* standby_seg = nullptr;   // 待机时屏上放什么
+    lv_obj_t* standby_note = nullptr;
     int level_drawn = -1;
 };
 
@@ -72,14 +76,16 @@ static void RefreshValet() {
     if (!s_ui.light_seg) return;
     auto& light = Frontlight::GetInstance();
     for (int i = 0; i < 4; ++i) if (light.cct() == kLightModes[i]) SettingsValetSelect(s_ui.light_seg, i);
-    const int level = (std::clamp<int>(light.target_brightness(), 0, 100) + 5) / 10;
+    const bool lit = light.cct() != FrontlightCct::kOff && light.target_brightness() > 0;   // 关着：格子全空、写「关」
+    const int level = lit ? (std::clamp<int>(light.target_brightness(), 0, 100) + 5) / 10 : 0;
     if (level != s_ui.level_drawn) {
         for (int i = 0; i < 10; ++i)
             lv_obj_set_style_bg_color(s_ui.blocks[i], i < level ? lv_color_black() : lv_color_white(), 0);
         s_ui.level_drawn = level;
     }
     char value[8];
-    std::snprintf(value, sizeof(value), "%d", static_cast<int>(light.target_brightness()));
+    if (lit) std::snprintf(value, sizeof(value), "%d", static_cast<int>(light.target_brightness()));
+    else std::snprintf(value, sizeof(value), "%s", ValetText("关", "Off"));
     SetIfChanged(s_ui.level_value, value);
     const auto profile = EpdGetRefreshProfile();
     SettingsValetSelect(s_ui.refresh_seg, static_cast<int>(profile));
@@ -88,6 +94,15 @@ static void RefreshValet() {
     SetIfChanged(s_ui.refresh_hint, hints[static_cast<int>(profile)]);
     const int style = HomeScreen::LoadCardStyle();
     for (int i = 0; i < 5; ++i) if (kValetThemes[i] == style) SettingsValetSelect(s_ui.theme_seg, i);
+    if (s_ui.standby_seg) {
+        // 0 跟着壁纸走：选了待机壁纸就算「壁纸」
+        const int standby = Wallpaper_StandbyStyle();
+        const bool wallpaper = standby == 2 || (standby == 0 && Wallpaper_HasStandbySelection());
+        SettingsValetSelect(s_ui.standby_seg, wallpaper ? 1 : 0);
+        SetIfChanged(s_ui.standby_note, !wallpaper ? ValetText("时间、日期、天气和今天的待办。", "Time, date, weather and today's to-dos.")
+            : Wallpaper_HasStandbySelection() ? ValetText("放「壁纸」里选的待机壁纸。", "Shows the standby wallpaper chosen in Wallpaper.")
+            : ValetText("还没选待机壁纸：到「壁纸」里选一张，选好之前还是放时钟和待办。", "No standby wallpaper yet: pick one in Wallpaper. Until then it shows the clock."));
+    }
     // Black depth: the calibrated panel voltage when there is one, three levels when there is not.
     const auto state = PanelVcomGetState();
     const bool calibrated = state.vcom_mv != 0, fallback = !calibrated && state.revision != 0;
@@ -239,11 +254,21 @@ static void OnValetLevel(lv_event_t* event) {
     auto& light = Frontlight::GetInstance();
     if (!light.initialized()) return;
     const int block = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(event)));
-    const int now = (light.target_brightness() + 5) / 10;
+    // 关着时点格子：直接开到那一档，不按记住的亮度去「退一格」
+    const bool lit = light.cct() != FrontlightCct::kOff && light.target_brightness() > 0;
+    const int now = lit ? (light.target_brightness() + 5) / 10 : -1;
     light.SetBrightness(static_cast<uint8_t>((now == block ? block - 1 : block) * 10));
     if (light.cct() == FrontlightCct::kOff) light.SetWarmth(light.warmth());
     RefreshOptions();
     SaveFrontlight();
+}
+static void OnStandbyStyle(lv_event_t* event) {
+    const int style = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(event)));
+    // 写 NVS 要在内部 RAM 栈上：交给应用的存储任务，写完刷新这一页
+    Application::GetInstance().Schedule([style]() {
+        Wallpaper_SetStandbyStyle(style);
+        ScreenLvAsync([](void*) { RefreshOptions(); });
+    }, Application::TaskDomain::Storage);
 }
 static void OnValetTheme(lv_event_t* event) {
     const int style = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(event)));
@@ -300,6 +325,13 @@ static void BuildValet(lv_obj_t* page) {
         Lang::Strings::SETTINGS_SCREEN_REFRESH_BALANCED, Lang::Strings::SETTINGS_SCREEN_REFRESH_FAST};
     s_ui.refresh_seg = SettingsValetSegments(page, profiles, 3, OnProfileClicked);
     s_ui.refresh_hint = SettingsValetNote(page, "");
+
+    SettingsValetGap(page);
+    SettingsValetLabel(page, ValetText("待机时屏上放什么", "Standby shows"));
+    const char* const standby[] = {ValetText("时钟和待办", "Clock & to-dos"), ValetText("壁纸", "Wallpaper")};
+    static const intptr_t kStandbyValues[] = {1, 2};
+    s_ui.standby_seg = SettingsValetSegments(page, standby, 2, OnStandbyStyle, kStandbyValues);
+    s_ui.standby_note = SettingsValetNote(page, "");
 
     SettingsValetGap(page);
     SettingsValetLabel(page, ValetText("应用页样式", "App grid style"));

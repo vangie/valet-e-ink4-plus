@@ -92,7 +92,7 @@ static void ClearStatusBindings() {
 }
 
 static bool PreferWallpaperVariant() {
-    return Wallpaper_HasStandbySelection();
+    return Wallpaper_StandbyShowsWallpaper();   // 设置里选了「时钟和待办」就不放壁纸
 }
 
 static void TeardownVariant() {

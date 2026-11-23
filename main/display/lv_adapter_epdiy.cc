@@ -858,7 +858,7 @@ void LvAdapterEpdiy::BeginStandbyEnterPaint() {
     s_force_full.store(false);
     s_standby_loading_notice_shown = false;
     s_standby_frame_prepared = false;
-    FreezeFlush(Wallpaper_HasStandbySelection());
+    FreezeFlush(Wallpaper_StandbyShowsWallpaper());
     ESP_LOGI(TAG, "standby enter: defer panel commit until Park");
 }
 
@@ -866,7 +866,7 @@ bool LvAdapterEpdiy::ParkEpdForStandby() {
     DisplayLockGuard lock(this);
     if (!lock) return false;
     if (!s_standby_frame_prepared && !StandbyWallpaper_IsOverlay() &&
-        Wallpaper_HasStandbySelection() && StandbyWallpaper_DecodedImage() == nullptr) {
+        Wallpaper_StandbyShowsWallpaper() && StandbyWallpaper_DecodedImage() == nullptr) {
         // 无提示时帧缓冲仍是原页面；有提示时用底图恢复，不访问已关闭的 SD 资源。
         if (WallpaperFrame_HasBase() && !WallpaperFrame_Restore()) return false;
     }

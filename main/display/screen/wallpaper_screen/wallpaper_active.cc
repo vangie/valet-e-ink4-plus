@@ -31,6 +31,9 @@ static char s_names[static_cast<size_t>(WallpaperActiveSlot::Count)][kNameMax + 
 static std::atomic<bool> s_cache_ready{false};
 static std::atomic<bool> s_hydrate_busy{false};
 static std::atomic<bool> s_standby_selected{false};
+// 设置 → 显示 →「待机时屏上放什么」：0 跟着壁纸走（选了待机壁纸就放壁纸），1 时钟和待办，2 壁纸
+static std::atomic<int> s_standby_style{0};
+static constexpr const char* kStandbyStyleKey = "standby_style";
 static std::atomic<bool> s_overlay[static_cast<size_t>(WallpaperActiveSlot::Count)]{}; // 与文件槽一一对应
 
 struct WallpaperActiveHydrateWork {
@@ -135,6 +138,10 @@ static std::string ReadSlotNameFromNvs(Settings& settings, WallpaperActiveSlot s
 static void LoadAllFromNvsIntoCache() {
     // 先灌入所有槽；若 SD 未挂载则延迟标记缓存已就绪。
     bool defer_ready = false;
+    {
+        Settings settings(kNvsNs, false);
+        s_standby_style.store(settings.GetInt(kStandbyStyleKey, 0), std::memory_order_release);
+    }
     for (uint8_t s = 0; s < static_cast<uint8_t>(WallpaperActiveSlot::Count); ++s) {
         const WallpaperActiveSlot slot = static_cast<WallpaperActiveSlot>(s);
         Settings settings(kNvsNs, false);
@@ -380,7 +387,23 @@ bool Wallpaper_SetActiveFromFile(const char* path_or_name, std::string& err_out,
 }
 
 bool Wallpaper_SetStandbyFromFile(const char* path_or_name, std::string& err_out, bool overlay) {
-    return SetSlotFromFile(WallpaperActiveSlot::Standby, path_or_name, err_out, overlay);
+    const bool ok = SetSlotFromFile(WallpaperActiveSlot::Standby, path_or_name, err_out, overlay);
+    // 刚选了待机壁纸：就是想看它，待机方式回到「跟着壁纸走」
+    if (ok && s_standby_style.load() == 1) Wallpaper_SetStandbyStyle(0);
+    return ok;
+}
+
+int Wallpaper_StandbyStyle() { return s_standby_style.load(std::memory_order_acquire); }
+
+bool Wallpaper_StandbyShowsWallpaper() {
+    return s_standby_style.load(std::memory_order_acquire) != 1 && s_standby_selected.load(std::memory_order_acquire);
+}
+
+void Wallpaper_SetStandbyStyle(int style) {
+    if (style < 0 || style > 2) return;
+    s_standby_style.store(style, std::memory_order_release);
+    Settings settings(kNvsNs, true);
+    settings.SetInt(kStandbyStyleKey, style);
 }
 
 void Wallpaper_ClearShutdownWallpaper() {

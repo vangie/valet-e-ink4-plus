@@ -619,7 +619,7 @@ function v2Ai() {
   }
   let body;
   if (!ready) {
-    body = `<div class="v-setup"><h2>${L("还没连上你的助手", "Assistant not connected")}</h2><p>${L("填上网关地址和配对码，提问和通话都走你自己的 OpenClaw 或 Hermes。", "Add the gateway address and pairing code.")}</p>
+    body = `<div class="v-setup"><h2>${L("还没连上你的助手", "Assistant not connected")}</h2><p>${L("用手机或电脑添加一个助理，提问和通话都走你自己的 OpenClaw 或 Hermes。", "Add one from your phone or computer. Ask and Call then go to your own OpenClaw or Hermes.")}</p>
       <button class="v-solid" data-setting="talk">${L("去连接", "Connect")}${ic("go")}</button></div>`;
   } else if (state.live) body = v2LiveBody();
   else if (state.listening) body = `<div class="v-listen">${ic("mic")}<b>${L("在听", "Listening")}</b><span>${L("松开就发出去", "Release to send")}</span></div>`;
@@ -678,9 +678,11 @@ function v2Fld(label, body, note = "") {
   return `<div class="v-fld"><label>${label}</label>${body}${note ? `<p>${note}</p>` : ""}</div>`;
 }
 function v2Level(icon, label, value, key) {
-  const n = Math.round(value / 10);
+  // 前光关着时记住的亮度不算数：格子全空、写「关」，和下拉栏一致
+  const off = key === "bright" && (state.light === "off" || value === 0);
+  const n = off ? 0 : Math.round(value / 10);
   const blocks = Array.from({ length: 10 }, (_, i) => `<button data-level="${key}:${i + 1}" class="${i < n ? "on" : ""}" aria-label="${label} ${(i + 1) * 10}"></button>`).join("");
-  return `<div class="v-level">${ic(icon)}<span>${label}</span><div class="v-blocks">${blocks}</div><b>${value}</b></div>`;
+  return `<div class="v-level">${ic(icon)}<span>${label}</span><div class="v-blocks">${blocks}</div><b>${off ? L("关", "Off") : value}</b></div>`;
 }
 function v2Row(id, icon, name, value) {
   return `<button class="v-row" data-setting="${id}">${icon ? ic(icon) : ""}<span><b>${name}</b><em>${value}</em></span>${ic("go", "chev")}</button>`;
@@ -843,7 +845,7 @@ function v2SettingsPane(id) {
     return `${v2Fld(L("前光", "Front light"), v2Seg(Object.entries(LIGHT).map(([k, v]) => [k, pickL(v)]), state.light, "data-light") + v2Level("sun", L("亮度", "Level"), state.brightness, "bright"))}
       ${calibrationControls()}
       ${v2Fld(L("刷新", "Refresh"), v2Seg(Object.entries(REFRESH).map(([k, v]) => [k, pickL(v)]), state.refresh, "data-refresh"), hint)}
-      ${v2Fld(L("待机时屏上放什么", "Standby shows"), v2Seg([["classic", L("时钟和待办", "Clock & tasks")], ["wallpaper", L("壁纸", "Wallpaper")]], state.standbyStyle, "data-standby"))}
+      ${v2Fld(L("待机时屏上放什么", "Standby shows"), v2Seg([["classic", L("时钟和待办", "Clock & to-dos")], ["wallpaper", L("壁纸", "Wallpaper")]], state.standbyStyle, "data-standby"), state.standbyStyle === "wallpaper" ? L("放「壁纸」里选的待机壁纸。", "Shows the standby wallpaper chosen in Wallpaper.") : L("时间、日期、天气和今天的待办。", "Time, date, weather and today's to-dos."))}
       ${v2Fld(L("应用页样式", "App grid style"), v2Seg(themes, state.theme === "pixel" ? "slash" : state.theme, "data-theme"))}`;
   }
   if (id === "read") {
@@ -1251,7 +1253,9 @@ panel.addEventListener("click", (e) => {
     const [key, n] = el.dataset.level.split(":");
     const value = Number(n) * 10;
     if (key === "bright") {
-      state.brightness = state.brightness === value ? value - 10 : value;
+      // 关着时点格子：直接开到那一档（和下拉栏、真机一致）
+      if (state.light === "off") state.brightness = value;
+      else state.brightness = state.brightness === value ? value - 10 : value;
       if (state.brightness > 0 && state.light === "off") state.light = "both";
     } else {
       state.volume = state.volume === value ? value - 10 : value;
