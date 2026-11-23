@@ -184,6 +184,8 @@ cJSON* Search(Book& book, const BookSource& source, const cJSON* request) {
             return esp_timer_get_time() <= deadline;
         });
         if (!more && joiner.Flush()) check();
+        // 凑满了条数：从这一章再搜一遍能接上（这一章已给出的命中会重复，但不会漏）
+        if (more) { next_chapter = chapter + (count == 0 ? 1 : 0); break; }
         if (esp_timer_get_time() > deadline && !more && chapter < last) { next_chapter = chapter + 1; break; }
     }
     cJSON_AddBoolToObject(root, "ok", true);
