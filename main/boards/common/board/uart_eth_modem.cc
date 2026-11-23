@@ -3,6 +3,9 @@
 
 #include "uart_eth_modem.h"
 
+#include <freertos/semphr.h>
+#include <freertos/timers.h>
+
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -78,11 +81,34 @@ UartEthModem::UartEthModem(const Config& config) : config_(config) {
     };
 }
 
+namespace {
+// SRDY 中断里的 xEventGroupSetBitsFromISR 不是当场置位：它把置位排给定时器任务稍后做。
+// 删事件组前先在同一个队列里排一个记号并等它跑到，保证之前排着的置位都已做完，
+// 否则换卡 / 切网拆 4G 时，定时器任务会去碰已经删掉的事件组（断言失败、重启）。
+void DrainTimerQueue() {
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    if (!done) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        return;
+    }
+    const auto give = [](void* semaphore, uint32_t) { xSemaphoreGive(static_cast<SemaphoreHandle_t>(semaphore)); };
+    if (xTimerPendFunctionCall(give, done, 0, pdMS_TO_TICKS(500)) != pdPASS) {
+        vSemaphoreDelete(done);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        return;
+    }
+    // 记号一定会被执行；等不到就不删信号量（留给那次回调用），只是少一次清理
+    if (xSemaphoreTake(done, pdMS_TO_TICKS(2000)) == pdTRUE) vSemaphoreDelete(done);
+    else ESP_LOGW("UartEthModem", "timer queue slow to drain before deleting the event group");
+}
+}  // namespace
+
 UartEthModem::~UartEthModem() {
-    Stop();
+    Stop();   // 也会摘掉 SRDY 中断，之后不会再有新的置位排进来
 
     // Cleanup resources created in constructor
     if (event_group_) {
+        DrainTimerQueue();
         vEventGroupDelete(event_group_);
         event_group_ = nullptr;
     }
