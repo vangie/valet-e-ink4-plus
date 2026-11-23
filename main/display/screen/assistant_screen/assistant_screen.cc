@@ -1092,6 +1092,8 @@ lv_obj_t* BuildAssistant(lv_obj_t* host, lv_coord_t top) {
     Assistant_DisableScroll(page_hit);
     HapticAttachClick(page_hit);
     lv_obj_add_event_cb(page_hit, OnTouchPageClicked, LV_EVENT_CLICKED, nullptr);
+    // 「自建」还没连助理：没有回答可翻，欢迎页上是「去连接」按钮，别让翻页层把它盖住
+    if (chat_cloud::IsCustom() && !chat_cloud::Available()) lv_obj_add_flag(page_hit, LV_OBJ_FLAG_HIDDEN);
 
     const int bar_w = LV_HOR_RES - 2 * kValetSide;
     auto* bar = lv_obj_create(scr);

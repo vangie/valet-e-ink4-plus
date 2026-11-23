@@ -13,7 +13,8 @@ from PIL import ImageFont
 FONTS = Path(__file__).resolve().parent / "ttf-fonts/MiSans"
 # 40 px 半粗标题用到的字：首页两块、提问页和通话页的大标题。界面字库的中文最大只有 30 px。
 TITLE_CHARS = ("提问通话接着读阅" "想什么？这一页" "日星期一二三四五六"
-               "AskCalRedWhtsonyurmi?bgp' ")
+               "还没连上你的助手"   # 提问页：选了「自建」但没连助理
+               "AskCalRedWhtsonyurmi?bgp' Nc")
 
 
 def font_source(name, weight, size, chars, bpp=2):

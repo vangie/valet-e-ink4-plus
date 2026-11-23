@@ -219,7 +219,7 @@ static void BuildAssistants(lv_obj_t* page) {
     lv_obj_set_style_text_font(tip, small, 0);
     lv_obj_set_style_text_line_space(tip, 6, 0);
     lv_label_set_text(tip, profiles.items.empty()
-        ? CloudText("还没有助理。点「添加助理」，用手机或电脑完成连接。", "No assistants yet. Add one using your phone or computer.")
+        ? CloudText("还没有助理。点「添加助理」，用手机或电脑连。", "No assistants yet. Add one using your phone or computer.")
         : CloudText("点「使用」切换。提问和通话都会用选中的助理，各自的对话记录分开保存。", "Choose Use to switch. Ask and Call both use the selected assistant; histories stay separate."));
     for (size_t i = 0; i < profiles.items.size(); ++i) {
         const auto& profile = profiles.items[i];
