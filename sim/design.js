@@ -293,6 +293,12 @@ function v2Back() {
     return true;
   }
   if (state.screen !== "settings") return false;
+  // 和设备一样：加密方式的弹出列表开着时，返回键先关掉列表，还留在代理页。
+  if (state.settingsScreen === "proxy" && state.proxyPicker) {
+    state.proxyPicker = false;
+    render();
+    return true;
+  }
   if (state.settingsScreen === "talk" && state.assistantDetail) {
     if (state.assistantUnpair) state.assistantUnpair = false;
     else state.assistantDetail = null;
