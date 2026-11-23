@@ -244,8 +244,10 @@ panel.addEventListener("click", (e) => {
   }
   const link = t.closest("[data-link]");
   if (link) {
+    if (link.dataset.link === state.link) return;
     state.link = link.dataset.link;
-    log(`上网方式改成${state.link === "4G" ? " 4G，图标换成信号格" : " Wi-Fi，图标换成扇形"}。真机会重启。`);
+    log(`上网方式改成${state.link === "4G" ? " 4G，图标换成信号格" : " Wi-Fi，图标换成扇形"}。不重启：停掉一个的射频、拉起另一个，正在用的连接会自己重连。`);
+    toast(L(`已切换到${state.link === "4G" ? "4G" : "Wi-Fi"}`, `Switched to ${state.link === "4G" ? "4G" : "Wi-Fi"}`));
     return render();
   }
   const set = (sel, key, msg) => {

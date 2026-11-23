@@ -69,6 +69,8 @@ bool OnWifi() {
 }
 
 void Init() {
+    // The switches are per way of getting online: after a live switch the other one applies.
+    DualNetworkBoard::SetSwitchedHook([](NetworkType) { Apply(Get()); });
     ss::Install();
     trojan::Install();
     Prefs loaded;

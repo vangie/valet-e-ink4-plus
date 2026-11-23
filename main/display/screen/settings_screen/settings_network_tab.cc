@@ -67,6 +67,7 @@ struct NetworkUi {
     lv_obj_t* grace_seg = nullptr;
     lv_obj_t* wifi_row_detail = nullptr;
     lv_obj_t* proxy_row_detail = nullptr;
+    lv_obj_t* page = nullptr;   // rebuilt after a network switch (the SIM part is 4G only)
 };
 
 NetworkUi s_ui;
@@ -347,16 +348,37 @@ struct SwitchNetworkJob {
     NetworkType target;
 };
 
+void RebuildAfterSwitch(void* arg) {
+    const bool done = arg != nullptr;
+    if (s_tab_alive && s_ui.page && lv_obj_is_valid(s_ui.page)) {
+        lv_obj_t* page = s_ui.page;
+        CloseOverlay();
+        if (s_ui.wifi_timer) lv_timer_delete(s_ui.wifi_timer);
+        lv_obj_clean(page);
+        SettingsNetworkTab_Build(page);
+    }
+    if (done) {
+        char text[64];
+        std::snprintf(text, sizeof(text), Lang::Strings::SETTINGS_NET_SWITCHED_FMT, IsCellNetwork() ? "4G" : "Wi-Fi");
+        ScreenShowToast(text);
+    } else {
+        ScreenShowToast(ValetText("传输热点开着，先关掉再换", "The transfer hotspot is on; close it first"));
+    }
+}
+
 void SwitchNetworkTask(void* arg) {
     auto* job = static_cast<SwitchNetworkJob*>(arg);
     auto* dual = GetDualBoard();
+    bool done = false;
     if (dual == nullptr) {
         ESP_LOGW(TAG, "not a DualNetworkBoard, ignore network switch");
     } else {
         ESP_LOGI(TAG, "switch network to %s", job->target == NetworkType::WIFI ? "WiFi" : "4G");
-        dual->SwitchToNetworkType(job->target);
+        // No restart: the radio of one is stopped and the other brought up (dual_network_board.cc).
+        done = dual->SwitchToNetworkType(job->target);
     }
     delete job;
+    ScreenLvAsync(RebuildAfterSwitch, done ? reinterpret_cast<void*>(1) : nullptr);
     vTaskDelete(nullptr);
 }
 
@@ -374,7 +396,7 @@ void SwitchNetworkTask(void* arg) {
         return;
     }
     if (s_ui.link_seg) {
-        // Valet layout: mark the choice and say what is happening; the switch restarts the device.
+        // Valet layout: mark the choice and say what is happening; the page is rebuilt when it is done.
         SettingsValetSelect(s_ui.link_seg, target == NetworkType::CELLULAR ? 0 : 1);
         ScreenShowToast(target == NetworkType::WIFI ? Lang::Strings::SETTINGS_NET_SWITCH_WIFI
                                                     : Lang::Strings::SETTINGS_NET_SWITCH_4G);
@@ -397,7 +419,8 @@ void SwitchNetworkTask(void* arg) {
         }
     }
     auto* job = new SwitchNetworkJob{target};
-    if (xTaskCreate(SwitchNetworkTask, "net_switch", 4096, job, 5, nullptr) != pdPASS) {
+    // Internal stack: the switch stops the Wi-Fi driver and writes NVS.
+    if (xTaskCreate(SwitchNetworkTask, "net_switch", 6144, job, 5, nullptr) != pdPASS) {
         ESP_LOGE(TAG, "xTaskCreate(net_switch) failed");
         delete job;
         RefreshNetworkOptions();
@@ -824,7 +847,7 @@ void BuildValet(lv_obj_t* page) {
     static const char* const kLinkZh[] = {"4G", "Wi-Fi"};
     static const intptr_t kLinkValues[] = {static_cast<intptr_t>(NetworkType::CELLULAR), static_cast<intptr_t>(NetworkType::WIFI)};
     s_ui.link_seg = SettingsValetSegments(page, kLinkZh, 2, OnNetworkOptionClicked, kLinkValues);
-    SettingsValetNote(page, ValetText("换上网方式或换卡，设备会重启一次。", "Switching restarts the device."));
+    SettingsValetNote(page, ValetText("换上网方式马上生效，不用重启；换卡会重启一次。", "Switching takes effect at once; changing the SIM restarts the device."));
     if (IsCellNetwork()) {
         SettingsValetGap(page, kValetGap);
         SettingsValetLabel(page, ValetText("用哪张卡", "SIM"));
@@ -866,6 +889,7 @@ void SettingsNetworkTab_Build(lv_obj_t* page) {
     s_ui = {};
     s_tab_alive = true;
     s_sim_switch_pending = false;
+    s_ui.page = page;
     s_ui.root_scr = lv_obj_get_screen(page);
     #if !CONFIG_BOARD_TYPE_METALIO_E_INK4_PLUS_GLOBAL
     // Domestic board: the Valet layout. The global board keeps the official page below.

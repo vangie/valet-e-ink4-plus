@@ -171,7 +171,10 @@ CardSample SampleCard(bool with_modem) {
     sample.cell = IsCellularMode();
     if (sample.cell) {
         auto* nt26 = CurrentNt26();
-        if (nt26 == nullptr || !nt26->IsNetworkReady()) {
+        if (nt26 != nullptr && !nt26->IsNetworkReady() && nt26->GetNetworkBusyStatusText() != nullptr) {
+            // Registering (just switched over, or woken up): a matter of seconds, not a fault.
+            sample.state = LinkState::kConnecting;
+        } else if (nt26 == nullptr || !nt26->IsNetworkReady()) {
             sample.state = LinkState::kOffline;
         } else if (with_modem) {
             const int csq = nt26->GetSignalStrength();
@@ -205,7 +208,8 @@ const char* StrengthWord(const CardSample& sample) {
 }
 
 bool CardIsFine(const CardSample& sample) {
-    return sample.state == LinkState::kOnline || sample.state == LinkState::kOnlineBlind || sample.state == LinkState::kParked;
+    return sample.state == LinkState::kOnline || sample.state == LinkState::kOnlineBlind || sample.state == LinkState::kParked ||
+           (sample.cell && sample.state == LinkState::kConnecting);
 }
 
 void CardTexts(const CardSample& sample, char* title, size_t title_len, char* detail, size_t detail_len) {
@@ -233,6 +237,11 @@ void CardTexts(const CardSample& sample, char* title, size_t title_len, char* de
             std::snprintf(detail, detail_len, "%s", ValetText("要用网时自动连上", "Reconnects when something goes online"));
             break;
         case LinkState::kConnecting:
+            if (sample.cell) {
+                std::snprintf(title, title_len, "%s · %s", link, ValetText("正在连", "connecting"));
+                std::snprintf(detail, detail_len, "%s", ValetText("正在注册网络，一般十秒左右", "Registering with the network, usually about ten seconds"));
+                break;
+            }
             std::snprintf(title, title_len, "%s · %s", link, ValetText("没连上", "not connected"));
             std::snprintf(detail, detail_len, "%s", ValetText("正在连接。连不上就点下面的 Wi-Fi 换网络", "Connecting. If it fails, pick a network below"));
             break;

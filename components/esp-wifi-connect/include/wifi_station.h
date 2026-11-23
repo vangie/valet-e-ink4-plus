@@ -47,6 +47,8 @@ public:
      * @brief 是否处于浅睡暂停态
      */
     bool IsLpPaused() const { return lp_paused_; }
+    /** @brief True once Start() has created the STA (driver initialised); Stop() undoes it. */
+    bool IsStarted() const { return station_netif_ != nullptr; }
     bool IsConnected();
     /**
      * @brief STA 已起且未连上（扫描/关联/重连中）；浅睡暂停时为 false

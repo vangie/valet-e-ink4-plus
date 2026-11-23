@@ -35,6 +35,7 @@
 #include <memory>
 #include <vector>
 #include "board.h"
+#include "dual_network_board.h"
 #include "power_policy.h"
 #include "net_proxy.h"
 #include <driver/usb_serial_jtag.h>
@@ -419,6 +420,19 @@ void ValetDevLinkHandle(const char* json) {
                 ESP_LOGW(TAG, "proxytest: ok=%d status=%d error=%d %d ms", result.ok, result.status, result.error, result.ms);
                 vTaskDelete(nullptr);
             }, "proxy_test", 8192, nullptr, 4, nullptr) != pdPASS) error = "BUSY";
+    } else if (!strcmp(cmd, "net")) {
+        // 仅测试版：不重启切换 Wi-Fi / 4G（和设置页「怎么上网」同一条路），结果打到日志
+        const auto* to = cJSON_GetObjectItemCaseSensitive(root, "to");
+        if (!cJSON_IsString(to)) error = "MISSING_TO";
+        else if (xTaskCreate([](void* arg) {
+                     auto* dual = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
+                     const auto type = arg ? NetworkType::CELLULAR : NetworkType::WIFI;
+                     const bool ok = dual && dual->SwitchToNetworkType(type);
+                     ESP_LOGW(TAG, "net: switch to %s %s, heap internal %u", arg ? "4G" : "WiFi", ok ? "done" : "refused",
+                              unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+                     vTaskDelete(nullptr);
+                 }, "net_switch", 6144, strcmp(to->valuestring, "4g") == 0 ? reinterpret_cast<void*>(1) : nullptr, 5, nullptr) != pdPASS)
+            error = "BUSY";
     } else if (!strcmp(cmd, "reach")) {
         // 仅测试版：不走代理，直接连几个 host:port，日志里写解析出的地址和能不能连上（查 4G 卡是否只放行部分地址）。
         // "proxy" 表示代理设置里的那个服务器；日志里只写 "proxy"，不写它的名字。
