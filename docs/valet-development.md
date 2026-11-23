@@ -151,11 +151,14 @@ tools/dev/valetdev.py flash          # 只写 ota_0 应用槽，写完重新连�
 
 ## 代理（设置 → 网络 → 代理）
 
-一个代理地址，Wi-Fi 和 4G 各有一个开关（默认都是直连）。类型 HTTP 或 SOCKS5，账号和密码可选，各一个输入框。改完对之后新建的连接马上生效，不用重启；设置存在 NVS 的 `proxy` 命名空间里。
+一个代理地址，Wi-Fi 和 4G 各有一个开关（默认都是直连）。类型 HTTP、SOCKS5、SS（Shadowsocks）或 Trojan。HTTP 和 SOCKS5 的账号和密码可选，各一个输入框；SS 和 Trojan 只有一个密码。地址框里也可以直接输整条 `ss://` 或 `trojan://` 链接。改完对之后新建的连接马上生效，不用重启；设置存在 NVS 的 `proxy` 命名空间里。
 
 - 实现在连接这一层：`components/esp-ml307/src/esp/net_proxy.cc` 负责打开一条“已经通到目标”的 TCP 连接，`EspTcp`、`EspSsl` 都从它拿连接，所以 `HttpClient`、`WebSocket` 以及用它们的功能（百问、自建助理、待办、天气、字库下载、应用商店、OTA）不用各自改。
 - HTTP 代理：https / wss / ws 走 `CONNECT` 隧道；明文 http 请求直接发给代理，请求行写完整地址。SOCKS5：全部走 `CONNECT` 命令。两种都把域名原样交给代理解析，设备自己不查 DNS。
 - TLS 仍然是设备和目标服务器之间端到端的，证书照常校验，代理看不到内容。
+- SS：加密在 `main/valet_net/shadowsocks.cc`，支持 AEAD（aes-128/192/256-gcm、chacha20-ietf-poly1305、xchacha20-ietf-poly1305）和流加密（aes-*-cfb、aes-*-ctr、chacha20-ietf），不支持 SS2022。加密方式在弹出列表里选，要和服务器一样。
+- Trojan：`main/valet_net/trojan.cc`，先和服务器建一层 TLS（mbedtls，缓冲区在 PSRAM），再发 hex(SHA-224(密码))、目标地址和数据。只支持普通 TCP，不支持 ws、grpc 等传输方式。「服务器名（SNI）」默认用地址；「检查证书」要和节点一致，机场节点常写 `skip-cert-verify=true`，选「不检查」。这时代理这一层可能被冒充，但设备到目标网站的 TLS 仍然校验证书。
+- SS 和 Trojan 的转发都走本机回环 socket 加一个转发任务（栈在 PSRAM），对上层就是一个普通 socket。
 - 不走代理的：局域网地址（10/8、172.16/12、192.168/16、169.254/16、127/8、`localhost`、`.local`、不带点的主机名）、对时（UDP）、按来源地址查时区的那一个请求（走代理会得到代理出口所在的时区）、日志上传（它用 IDF 自带的 HTTP 客户端，没经过这一层）、应用商店里的应用自己开的连接。通话的媒体流如果走 UDP 也不经过代理。
 - 「测试这个代理」不管开关开没开，都用页面上的设置经代理向 GitHub 发一个 https 请求，并把失败原因分开说：连不上代理、要账号或账号不对、代理连不到目标、代理不回话、端口上不是这种代理。
 - 密码以明文存在 NVS 里（这台设备没有开 flash 加密），日志里不出现地址和账号。

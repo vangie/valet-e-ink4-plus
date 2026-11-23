@@ -28,7 +28,8 @@ constexpr size_t kMaxAnswer = 4096;          // an HTTP proxy's answer to CONNEC
 
 std::mutex s_mutex;
 Config s_config;
-std::atomic<ShadowsocksOpener> s_ss_opener{nullptr};
+std::atomic<Opener> s_ss_opener{nullptr};
+std::atomic<Opener> s_trojan_opener{nullptr};
 thread_local const Config* t_override = nullptr;
 
 int64_t Remaining(int64_t deadline_us) {
@@ -291,7 +292,10 @@ std::string PercentDecode(const std::string& in) {
 }
 }  // namespace
 
-void SetShadowsocksOpener(ShadowsocksOpener opener) { s_ss_opener = opener; }
+void SetOpener(Kind kind, Opener opener) {
+    if (kind == Kind::kShadowsocks) s_ss_opener = opener;
+    else if (kind == Kind::kTrojan) s_trojan_opener = opener;
+}
 
 void Set(const Config& config) {
     std::lock_guard<std::mutex> lock(s_mutex);
@@ -332,11 +336,12 @@ int Open(const std::string& host, int port, int64_t deadline_us, int* error, boo
         return -1;
     }
     SetIoTimeout(fd, wait_us);
-    if (proxy.kind == Kind::kShadowsocks) {
-        const ShadowsocksOpener opener = s_ss_opener.load();
+    if (proxy.kind == Kind::kShadowsocks || proxy.kind == Kind::kTrojan) {
+        const bool ss = proxy.kind == Kind::kShadowsocks;
+        const Opener opener = ss ? s_ss_opener.load() : s_trojan_opener.load();
         if (!opener) { close(fd); *error = kErrProxyProtocol; return -1; }
         const int relayed = opener(fd, proxy, host, port, error);
-        if (relayed < 0) ESP_LOGW(TAG, "Shadowsocks connection not opened (code %d)", *error);
+        if (relayed < 0) ESP_LOGW(TAG, "%s connection not opened (code %d)", ss ? "Shadowsocks" : "Trojan", *error);
         return relayed;
     }
     const int result = proxy.kind == Kind::kHttp ? HttpConnect(fd, proxy, host, port)
@@ -401,6 +406,46 @@ ParseResult Parse(const std::string& text, Config* out) {
         parsed.user.clear();
         parsed.password = info.substr(colon + 1);
         parsed.method = Lower(info.substr(0, colon));
+        *out = parsed;
+        return ParseResult::kOk;
+    }
+
+    if (Lower(rest.substr(0, 9)) == "trojan://") {
+        std::string body = rest.substr(9);
+        const size_t tag = body.find('#');
+        if (tag != std::string::npos) body.resize(tag);
+        std::string query;
+        const size_t mark = body.find('?');
+        if (mark != std::string::npos) {
+            query = body.substr(mark + 1);
+            body.resize(mark);
+        }
+        while (!body.empty() && body.back() == '/') body.pop_back();
+        const size_t at = body.rfind('@');
+        if (at == std::string::npos || at == 0) return ParseResult::kNoHost;
+        Config parsed = *out;
+        parsed.kind = Kind::kTrojan;
+        const ParseResult address = Parse(body.substr(at + 1), &parsed);
+        if (address != ParseResult::kOk) return address;
+        parsed.kind = Kind::kTrojan;
+        parsed.user.clear();
+        parsed.password = PercentDecode(body.substr(0, at));
+        parsed.sni.clear();
+        parsed.insecure = false;
+        for (size_t start = 0; start < query.size();) {
+            size_t stop = query.find('&', start);
+            if (stop == std::string::npos) stop = query.size();
+            const std::string pair = query.substr(start, stop - start);
+            start = stop + 1;
+            const size_t equals = pair.find('=');
+            const std::string key = Lower(pair.substr(0, equals));
+            const std::string value = equals == std::string::npos ? "" : PercentDecode(pair.substr(equals + 1));
+            if ((key == "sni" || key == "peer") && !value.empty()) parsed.sni = value;
+            else if (key == "allowinsecure" || key == "insecure") parsed.insecure = value == "1" || Lower(value) == "true";
+            else if (key == "type" && !value.empty() && Lower(value) != "tcp") return ParseResult::kUnsupportedTransport;
+            else if (key == "security" && !value.empty() && Lower(value) != "tls") return ParseResult::kUnsupportedTransport;
+        }
+        if (parsed.sni == parsed.host) parsed.sni.clear();
         *out = parsed;
         return ParseResult::kOk;
     }

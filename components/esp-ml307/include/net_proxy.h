@@ -7,9 +7,11 @@
 // request is sent to the proxy with an absolute URI (HttpClient does that).
 // SOCKS5: every target uses a CONNECT command, optionally with a user name
 // and password (RFC 1928 / 1929).
-// Shadowsocks: every byte to the server is encrypted. This component only
-// connects to the server; the cipher and the relay that encrypts are installed
-// by the application (SetShadowsocksOpener), which hands back an ordinary socket.
+// Shadowsocks: every byte to the server is encrypted. Trojan: a TLS connection
+// to the server carries a password hash, the target and then the data.
+// For both, this component only connects to the server; the relay that
+// encrypts is installed by the application (SetOpener), which hands back an
+// ordinary socket.
 // In all cases the target's name goes to the proxy unresolved, so the
 // device does no DNS lookup of its own for a proxied connection.
 //
@@ -21,24 +23,26 @@
 
 namespace net_proxy {
 
-enum class Kind : uint8_t { kNone = 0, kHttp = 1, kSocks5 = 2, kShadowsocks = 3 };
-
+enum class Kind : uint8_t { kNone = 0, kHttp = 1, kSocks5 = 2, kShadowsocks = 3, kTrojan = 4 };
 
 
 struct Config {
     Kind kind = Kind::kNone;
     std::string host;
     int port = 0;
-    std::string user;       // not used by Shadowsocks
-    std::string password;   // Shadowsocks: the server's password (required)
+    std::string user;       // not used by Shadowsocks and Trojan
+    std::string password;   // Shadowsocks, Trojan: the server's password (required)
     std::string method;     // Shadowsocks: cipher name, lower case (e.g. "aes-256-gcm")
+    std::string sni;        // Trojan: server name for TLS (and the certificate); empty = host
+    bool insecure = false;  // Trojan: do not check the server's certificate
 };
 
-/** @brief Turns a TCP connection to a Shadowsocks server into a socket that reaches host:port.
- *         Takes ownership of `server_fd`. Returns the socket, or -1 with `error` set. */
-using ShadowsocksOpener = int (*)(int server_fd, const Config& proxy, const std::string& host, int port, int* error);
-/** @brief Install the Shadowsocks implementation; until then a Shadowsocks proxy fails to connect. */
-void SetShadowsocksOpener(ShadowsocksOpener opener);
+/** @brief Turns a TCP connection to a Shadowsocks or Trojan server into a socket that reaches
+ *         host:port. Takes ownership of `server_fd`. Returns the socket, or -1 with `error` set. */
+using Opener = int (*)(int server_fd, const Config& proxy, const std::string& host, int port, int* error);
+/** @brief Install the implementation for `kind` (kShadowsocks or kTrojan); until then such a
+ *         proxy fails to connect. */
+void SetOpener(Kind kind, Opener opener);
 
 // What Open() reports through `error`. Other values are errno.
 enum Error : int {
@@ -49,6 +53,8 @@ enum Error : int {
     kErrProxyRefused = 1004,     // the proxy would not, or could not, connect to the target
     kErrProxyNoAnswer = 1005,    // the proxy accepted the connection and then said nothing in time
     kErrProxyProtocol = 1006,    // the answer was not that of a proxy of this kind
+    kErrProxyTls = 1007,         // Trojan: no TLS connection with the server
+    kErrProxyCertificate = 1008, // Trojan: the server's certificate is not valid for the server name
 };
 
 /** @brief Set the proxy used by connections opened from now on; Kind::kNone turns it off. */
@@ -85,13 +91,16 @@ bool ForwardsPlainHttp(const std::string& host, Config* proxy);
 /** @brief Value for a Proxy-Authorization header, or empty when the proxy has no user name. */
 std::string BasicAuth(const Config& proxy);
 
-enum class ParseResult : uint8_t { kOk, kEmpty, kNoHost, kBadPort, kUnsupportedScheme };
+enum class ParseResult : uint8_t { kOk, kEmpty, kNoHost, kBadPort, kUnsupportedScheme, kUnsupportedTransport };
 /** @brief Read "[scheme://][user[:password]@]host:port". A scheme sets the kind (http, socks5,
  *         socks5h, socks); without one `out->kind` is left as it was. User and password are
  *         replaced only when the text has them.
  *         Also reads Shadowsocks links: "ss://BASE64(method:password)@host:port[#name]" (SIP002, the
  *         user info may also be percent-encoded) and "ss://BASE64(method:password@host:port)[#name]";
- *         the method is stored as given (lower case); whether it is supported is for the caller. */
+ *         the method is stored as given (lower case); whether it is supported is for the caller.
+ *         And Trojan links: "trojan://password@host:port[?sni=…&allowInsecure=1][#name]" (also "peer"
+ *         for sni, "insecure" for allowInsecure); a transport other than plain TCP (type=ws, grpc…)
+ *         gives kUnsupportedTransport. */
 ParseResult Parse(const std::string& text, Config* out);
 
 }  // namespace net_proxy

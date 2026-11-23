@@ -89,8 +89,10 @@ const state = {
   netGrace: 30,
   proxyWifi: false,  // 连 Wi-Fi 时走代理
   proxyCell: false,  // 用 4G 时走代理
-  proxyKind: "http", // http | socks5 | ss（Shadowsocks）
-  proxySsPass: false, // Shadowsocks 的密码填了没有
+  proxyKind: "http", // http | socks5 | ss（Shadowsocks）| trojan
+  proxySsPass: false, // SS / Trojan 的密码填了没有（两种共用这一个，和设备一样只存一个密码）
+  proxySni: "",      // Trojan 的服务器名（SNI），空 = 用地址
+  proxyInsecure: false, // Trojan 不检查服务器证书（节点写着 skip-cert-verify=true 时）
   proxyMethod: "aes-256-gcm", // SS 的加密方式（设备支持的 12 种之一），在弹出列表里选
   proxyPicker: false, // SS 加密方式的弹出列表开着没有
   proxyAddr: "",     // 地址:端口，空 = 没设置

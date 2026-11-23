@@ -434,6 +434,6 @@ const char* MethodName(int index) {
     return index >= 0 && index < kCount ? kMethods[index].name : nullptr;
 }
 
-void Install() { net_proxy::SetShadowsocksOpener(&Open); }
+void Install() { net_proxy::SetOpener(net_proxy::Kind::kShadowsocks, &Open); }
 
 }  // namespace valet::ss

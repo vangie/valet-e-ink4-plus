@@ -19,6 +19,10 @@ struct Prefs {
     std::string user;
     std::string password;
     std::string method;     // Shadowsocks cipher; empty = valet::ss::kDefaultMethod
+    std::string sni;        // Trojan: server name for TLS; empty = the address
+    bool insecure = false;  // Trojan: do not check the server's certificate
+    /** @brief Shadowsocks and Trojan need a password and have no user name. */
+    bool PasswordOnly() const { return kind == net_proxy::Kind::kShadowsocks || kind == net_proxy::Kind::kTrojan; }
     bool HasAddress() const { return !host.empty() && port > 0; }
 };
 
@@ -39,7 +43,7 @@ struct TestResult {
     int error = 0;    // net_proxy::Error, or another code from the connection
     int status = 0;   // HTTP status of the test request, when one came back
     int ms = 0;       // time for the whole request
-    bool shadowsocks = false;   // the tested proxy was Shadowsocks (it has no answer of its own to tell errors apart)
+    net_proxy::Kind kind = net_proxy::Kind::kHttp;   // the tested proxy's kind (SS and Trojan have no answer of their own to tell errors apart)
 };
 /** @brief Blocking (up to about 40 s): one https request through `prefs`' proxy, whatever the
  *         switches say. Call from a task that may wait on the network. */

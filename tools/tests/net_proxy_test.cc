@@ -264,6 +264,23 @@ void TestParse() {
     CHECK(net_proxy::Parse("https://proxy.lan:443", &c) == ParseResult::kUnsupportedScheme);
     CHECK(net_proxy::Parse("socks4://proxy.lan:1080", &c) == ParseResult::kUnsupportedScheme);
     CHECK(c.host == before.host && c.port == before.port && c.kind == before.kind);   // a rejected text changes nothing
+
+    // Shadowsocks links: SIP002 (Base64 user info) and the all-Base64 form.
+    CHECK(net_proxy::Parse("ss://YWVzLTI1Ni1nY206c2VjcmV0@1.2.3.4:8388#name", &c) == ParseResult::kOk);
+    CHECK(c.kind == Kind::kShadowsocks && c.host == "1.2.3.4" && c.port == 8388 && c.method == "aes-256-gcm" && c.password == "secret" && c.user.empty());
+
+    // Trojan links: password percent-decoded, sni (or peer) and allowInsecure (or insecure) read, name dropped.
+    CHECK(net_proxy::Parse("trojan://p%40ss@relay.example:443?sni=real.example&allowInsecure=1&type=tcp#US%2001", &c) == ParseResult::kOk);
+    CHECK(c.kind == Kind::kTrojan && c.host == "relay.example" && c.port == 443 && c.password == "p@ss" && c.user.empty());
+    CHECK(c.sni == "real.example" && c.insecure);
+    CHECK(net_proxy::Parse("TROJAN://pw@10.1.2.3:4065/?peer=cdn.example&security=tls", &c) == ParseResult::kOk);
+    CHECK(c.host == "10.1.2.3" && c.port == 4065 && c.sni == "cdn.example" && !c.insecure);
+    CHECK(net_proxy::Parse("trojan://pw@node.example:443?sni=node.example&insecure=true", &c) == ParseResult::kOk);
+    CHECK(c.sni.empty() && c.insecure);   // an sni equal to the address is the default
+    CHECK(net_proxy::Parse("trojan://pw@node.example:443?type=ws&path=/x", &c) == ParseResult::kUnsupportedTransport);
+    CHECK(net_proxy::Parse("trojan://pw@node.example:443?security=reality", &c) == ParseResult::kUnsupportedTransport);
+    CHECK(net_proxy::Parse("trojan://node.example:443", &c) == ParseResult::kNoHost);
+    CHECK(net_proxy::Parse("trojan://pw@node.example", &c) == ParseResult::kBadPort);
 }
 
 void TestRouting() {

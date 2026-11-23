@@ -689,11 +689,15 @@ function v2SettingsPane(id) {
     const onoff = [["off", L("直连", "Direct")], ["on", L("走代理", "Use proxy")]];
     return `${v2Fld(L("连 Wi-Fi 时", "On Wi-Fi"), v2Seg(onoff, state.proxyWifi ? "on" : "off", "data-proxy-wifi"))}
       ${v2Fld(L("用 4G 时", "On 4G"), v2Seg(onoff, state.proxyCell ? "on" : "off", "data-proxy-cell"), L("4G 下连不到家里局域网里的代理。", "On 4G a proxy on the home network cannot be reached."))}
-      ${v2Fld(L("代理类型", "Proxy type"), v2Seg([["http", "HTTP"], ["socks5", "SOCKS5"], ["ss", "SS"]], state.proxyKind, "data-proxy-kind"))}
+      ${v2Fld(L("代理类型", "Proxy type"), v2Seg([["http", "HTTP"], ["socks5", "SOCKS5"], ["ss", "SS"], ["trojan", "Trojan"]], state.proxyKind, "data-proxy-kind"))}
       <nav class="v-rows"><button class="v-row" data-proxy-addr><span><b>${L("地址", "Address")}</b><em>${state.proxyAddr || L("还没填。点这里输入", "Not set. Tap to enter")}</em></span>${ic("go", "chev")}</button>
-        ${state.proxyKind === "ss"
-          ? `<button class="v-row" data-proxy-user><span><b>${L("密码", "Password")}</b><em>${state.proxySsPass ? L("已填", "Set") : L("还没填。SS 必须有密码", "Not set. SS needs one")}</em></span>${ic("go", "chev")}</button>
-            <button class="v-row" data-proxy-pick><span><b>${L("加密方式", "Cipher")}</b><em>${state.proxyMethod}</em></span>${ic("go", "chev")}</button></nav>`
+        ${proxyPasswordOnly()
+          ? `<button class="v-row" data-proxy-user><span><b>${L("密码", "Password")}</b><em>${state.proxySsPass ? L("已填", "Set") : state.proxyKind === "ss" ? L("还没填。SS 必须有密码", "Not set. SS needs one") : L("还没填。Trojan 必须有密码", "Not set. Trojan needs one")}</em></span>${ic("go", "chev")}</button>
+            ${state.proxyKind === "ss"
+              ? `<button class="v-row" data-proxy-pick><span><b>${L("加密方式", "Cipher")}</b><em>${state.proxyMethod}</em></span>${ic("go", "chev")}</button>`
+              : `<button class="v-row" data-proxy-sni><span><b>${L("服务器名（SNI）", "Server name (SNI)")}</b><em>${state.proxySni || L("和地址一样", "Same as the address")}</em></span>${ic("go", "chev")}</button>`}</nav>
+            ${state.proxyKind === "trojan" ? v2Fld(L("检查证书", "Check the certificate"), v2Seg([["check", L("检查", "Check")], ["skip", L("不检查", "Skip")]], state.proxyInsecure ? "skip" : "check", "data-proxy-cert"),
+              L("要和节点的设置一样：Surge 里写着 skip-cert-verify=true 的选「不检查」。", "Match the node: choose Skip where Surge says skip-cert-verify=true.")) : ""}`
           : `<button class="v-row" data-proxy-user><span><b>${L("账号和密码", "Login")}</b><em>${state.proxyUser ? state.proxyUser + L("，密码已填", ", password set") : L("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one")}</em></span>${ic("go", "chev")}</button></nav>`}
       <div class="v-fld"><button class="v-line is-full" data-proxy-test>${L("测试这个代理", "Test this proxy")}</button>${state.proxyTest ? `<p>${state.proxyTest}</p>` : ""}
         <p>${L("不走代理的：对时、局域网里的地址、上传日志。", "Not proxied: time sync, local addresses, log upload.")}</p></div>`;
@@ -797,9 +801,11 @@ function v2SettingsPane(id) {
       <div class="v-row"><span><b>${L("存储器", "Memory")}</b><em>Flash 16.0 MB · PSRAM 16.0 MB</em></span></div></nav>`;
 }
 // 网络页「代理」一行的说明：没设置 / 没开 / 在用 / 只在另一种上网方式下才走。
+// SS 和 Trojan 只有一个密码，没有账号（和设备上 Prefs::PasswordOnly 一样）。
+function proxyPasswordOnly() { return state.proxyKind === "ss" || state.proxyKind === "trojan"; }
 function proxySummary() {
   if (!state.proxyAddr) return L("没设置。点这里填", "Not set. Tap to set up");
-  const where = `${state.proxyKind === "socks5" ? "SOCKS5" : state.proxyKind === "ss" ? "SS" : "HTTP"} ${state.proxyAddr}`;
+  const where = `${state.proxyKind === "socks5" ? "SOCKS5" : state.proxyKind === "ss" ? "SS" : state.proxyKind === "trojan" ? "Trojan" : "HTTP"} ${state.proxyAddr}`;
   const wifi = state.link === "wifi";
   if (wifi ? state.proxyWifi : state.proxyCell) return L("在用 · ", "In use · ") + where;
   if (!state.proxyWifi && !state.proxyCell) return L("没开 · ", "Off · ") + where;
@@ -960,7 +966,7 @@ panel.addEventListener("click", (e) => {
     const wifi = "proxyWifi" in el.dataset;
     const on = (wifi ? el.dataset.proxyWifi : el.dataset.proxyCell) === "on";
     if (on && !state.proxyAddr) return toast(L("先填代理的地址", "Enter the proxy address first"));
-    if (on && state.proxyKind === "ss" && !state.proxySsPass) return toast(L("先填 SS 的密码", "Enter the SS password first"));
+    if (on && proxyPasswordOnly() && !state.proxySsPass) return toast(state.proxyKind === "ss" ? L("先填 SS 的密码", "Enter the SS password first") : L("先填 Trojan 的密码", "Enter the Trojan password first"));
     state[wifi ? "proxyWifi" : "proxyCell"] = on;
     state.proxyTest = "";
     return render();
@@ -971,6 +977,13 @@ panel.addEventListener("click", (e) => {
   if (hit("[data-pick-close]") || e.target.matches("[data-pick-mask]")) { state.proxyPicker = false; return render(); }
   if (hit(".v-pick")) return;
   if ((el = hit("[data-proxy-kind]"))) { state.proxyKind = el.dataset.proxyKind; state.proxyTest = ""; return render(); }
+  if ((el = hit("[data-proxy-cert]"))) { state.proxyInsecure = el.dataset.proxyCert === "skip"; state.proxyTest = ""; return render(); }
+  if (hit("[data-proxy-sni]")) {
+    state.proxySni = state.proxySni ? "" : "cdn.example.com";
+    state.proxyTest = "";
+    log(state.proxySni ? "假的：当作在键盘上输入了 Trojan 的服务器名（SNI）。" : "假的：清空了服务器名，TLS 里用地址。");
+    return render();
+  }
   if (hit("[data-proxy-addr]")) {
     state.proxyAddr = state.proxyAddr ? "" : "192.168.1.20:7890";
     if (!state.proxyAddr) state.proxyWifi = state.proxyCell = false;
@@ -978,10 +991,11 @@ panel.addEventListener("click", (e) => {
     log(state.proxyAddr ? "假的：当作在键盘上输入了代理地址。" : "假的：清空了代理地址，两个开关跟着关掉。");
     return render();
   }
-  if (hit("[data-proxy-user]") && state.proxyKind === "ss") {
+  if (hit("[data-proxy-user]") && proxyPasswordOnly()) {
     state.proxySsPass = !state.proxySsPass;
     state.proxyTest = "";
-    log(state.proxySsPass ? "假的：当作在密码框里输入了 SS 的密码（只有一个框，没有账号）。" : "假的：清空了 SS 的密码。");
+    const name = state.proxyKind === "ss" ? "SS" : "Trojan";
+    log(state.proxySsPass ? `假的：当作在密码框里输入了 ${name} 的密码（只有一个框，没有账号）。` : `假的：清空了 ${name} 的密码。`);
     return render();
   }
   if (hit("[data-proxy-user]")) {

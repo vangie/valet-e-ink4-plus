@@ -159,6 +159,7 @@ idf_component_register(
         "valet_fonts/extended_fonts.cc"
         "valet_net/proxy.cc"
         "valet_net/shadowsocks.cc"
+        "valet_net/trojan.cc"
         "protocols/valet_wire.cc"
         "haptic_feedback.cc"
         "assets/lang_home.cc"

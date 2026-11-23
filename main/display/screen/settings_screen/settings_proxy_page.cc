@@ -20,9 +20,10 @@
 namespace {
 using valet::proxy::Prefs;
 
-enum Field : intptr_t { kFieldAddress = 0, kFieldLogin = 1, kFieldMethod = 2 };
+enum Field : intptr_t { kFieldAddress = 0, kFieldLogin = 1, kFieldMethod = 2, kFieldSni = 3 };
 // Segment values: which control, and which choice.
-enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindSs = 22 };
+enum Choice : intptr_t { kWifiOff = 0, kWifiOn = 1, kCellOff = 10, kCellOn = 11, kKindHttp = 20, kKindSocks = 21, kKindSs = 22,
+                         kKindTrojan = 23, kCertCheck = 30, kCertSkip = 31 };
 
 struct Ui {
     lv_obj_t* page = nullptr;
@@ -31,8 +32,11 @@ struct Ui {
     lv_obj_t* kind_seg = nullptr;
     lv_obj_t* address_detail = nullptr;
     lv_obj_t* login_detail = nullptr;
-    lv_obj_t* login_title = nullptr;   // 「账号和密码」，Shadowsocks 时是「密码」
+    lv_obj_t* login_title = nullptr;   // 「账号和密码」，SS 和 Trojan 时是「密码」
     lv_obj_t* method_detail = nullptr; // SS only: the cipher row (its detail label)
+    lv_obj_t* sni_detail = nullptr;    // Trojan only: the server-name row (its detail label)
+    lv_obj_t* cert = nullptr;          // Trojan only: the certificate check (label, choice, note)
+    lv_obj_t* cert_seg = nullptr;
     lv_obj_t* picker = nullptr;        // the cipher list, an overlay on the screen
     lv_obj_t* test_label = nullptr;
     lv_obj_t* result = nullptr;
@@ -72,26 +76,33 @@ void SetText(lv_obj_t* label, const char* text) {
     if (label && std::strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
 }
 const char* KindName(net_proxy::Kind kind) {
-    return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : kind == net_proxy::Kind::kShadowsocks ? "SS" : "HTTP";
+    return kind == net_proxy::Kind::kSocks5 ? "SOCKS5" : kind == net_proxy::Kind::kShadowsocks ? "SS"
+         : kind == net_proxy::Kind::kTrojan ? "Trojan" : "HTTP";
 }
 bool IsSs(const Prefs& prefs) { return prefs.kind == net_proxy::Kind::kShadowsocks; }
+bool IsTrojan(const Prefs& prefs) { return prefs.kind == net_proxy::Kind::kTrojan; }
 std::string MethodOf(const Prefs& prefs) { return prefs.method.empty() ? valet::ss::kDefaultMethod : prefs.method; }
 void SetShown(lv_obj_t* obj, bool shown) {
     if (!obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN) != shown) return;
     if (shown) lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
 }
-int KindIndex(net_proxy::Kind kind) { return kind == net_proxy::Kind::kSocks5 ? 1 : kind == net_proxy::Kind::kShadowsocks ? 2 : 0; }
-// Shadowsocks: one box, the password. Others: user name and password.
-int PasswordBox() { return s_ui.boxes == 1 ? 0 : 1; }
+int KindIndex(net_proxy::Kind kind) {
+    return kind == net_proxy::Kind::kSocks5 ? 1 : kind == net_proxy::Kind::kShadowsocks ? 2 : kind == net_proxy::Kind::kTrojan ? 3 : 0;
+}
+// SS and Trojan: one box, the password. Others: user name and password. (The server-name editor
+// also has one box, which is not a password.)
+int PasswordBox() { return s_ui.field == kFieldSni ? -1 : s_ui.boxes == 1 ? 0 : 1; }
 
 std::string AddressText(const Prefs& prefs) {
     if (!prefs.HasAddress()) return Text("还没填。点这里输入", "Not set. Tap to enter");
     return prefs.host + ":" + std::to_string(prefs.port);
 }
 std::string LoginText(const Prefs& prefs) {
-    if (IsSs(prefs)) return prefs.password.empty() ? Text("还没填。SS 必须有密码", "Not set. SS needs one")
-                                                   : Text("已填", "Set");
+    if (prefs.PasswordOnly()) {
+        if (!prefs.password.empty()) return Text("已填", "Set");
+        return IsSs(prefs) ? Text("还没填。SS 必须有密码", "Not set. SS needs one") : Text("还没填。Trojan 必须有密码", "Not set. Trojan needs one");
+    }
     if (prefs.user.empty()) return Text("不用。代理要账号时点这里填", "None. Tap if the proxy asks for one");
     // The password is not shown.
     return prefs.user + (prefs.password.empty() ? Text("，没有密码", ", no password") : Text("，密码已填", ", password set"));
@@ -103,7 +114,13 @@ void Refresh() {
     SettingsValetSelect(s_ui.wifi_seg, prefs.on_wifi ? 1 : 0);
     SettingsValetSelect(s_ui.cell_seg, prefs.on_cell ? 1 : 0);
     SettingsValetSelect(s_ui.kind_seg, KindIndex(prefs.kind));
-    SetText(s_ui.login_title, IsSs(prefs) ? Text("密码", "Password") : Text("账号和密码", "Login"));
+    SetText(s_ui.login_title, prefs.PasswordOnly() ? Text("密码", "Password") : Text("账号和密码", "Login"));
+    if (s_ui.sni_detail) {
+        SetShown(lv_obj_get_parent(s_ui.sni_detail), IsTrojan(prefs));
+        SetText(s_ui.sni_detail, prefs.sni.empty() ? Text("和地址一样", "Same as the address") : prefs.sni.c_str());
+    }
+    SetShown(s_ui.cert, IsTrojan(prefs));
+    SettingsValetSelect(s_ui.cert_seg, prefs.insecure ? 1 : 0);
     if (s_ui.method_detail) {
         SetShown(lv_obj_get_parent(s_ui.method_detail), IsSs(prefs));
         SetText(s_ui.method_detail, MethodOf(prefs).c_str());
@@ -185,7 +202,10 @@ void ConfirmEdit() {
                     problem = Text("端口写在冒号后面，1 到 65535。例如 192.168.0.10:7890", "Put the port after a colon, 1 to 65535, e.g. 192.168.0.10:7890");
                     break;
                 case net_proxy::ParseResult::kUnsupportedScheme:
-                    problem = Text("开头只认 http://、socks5:// 和 ss://，也可以不写", "Only http://, socks5:// and ss:// are accepted in front; or leave it out");
+                    problem = Text("开头只认 http://、socks5://、ss:// 和 trojan://，也可以不写", "Only http://, socks5://, ss:// and trojan:// are accepted in front; or leave it out");
+                    break;
+                case net_proxy::ParseResult::kUnsupportedTransport:
+                    problem = Text("设备只支持普通 TCP 的 Trojan，不支持 ws、grpc 这些传输方式。", "The device supports Trojan over plain TCP only, not ws, grpc and the like.");
                     break;
                 default:
                     problem = Text("没看懂地址。例如 192.168.0.10:7890", "That is not an address, e.g. 192.168.0.10:7890");
@@ -196,14 +216,24 @@ void ConfirmEdit() {
             if (!problem) {
                 prefs.kind = parsed.kind;
                 if (parsed.kind == net_proxy::Kind::kShadowsocks) prefs.method = parsed.method;
+                // A trojan:// link brings its server name and certificate setting; a bare address keeps them.
+                if (parsed.kind == net_proxy::Kind::kTrojan && Trimmed(s_edit[0]).find("://") != std::string::npos) {
+                    prefs.sni = parsed.sni;
+                    prefs.insecure = parsed.insecure;
+                }
                 prefs.host = parsed.host;
                 prefs.port = parsed.port;
                 prefs.user = parsed.user;
                 prefs.password = parsed.password;
             }
         }
+    } else if (s_ui.field == kFieldSni) {
+        // Trojan's server name. Empty, or the same as the address = use the address.
+        const std::string sni = Trimmed(s_edit[0]);
+        if (sni.find_first_of(" /:@") != std::string::npos) problem = Text("服务器名是一个域名，例如 example.com", "The server name is a domain, e.g. example.com");
+        else prefs.sni = sni == prefs.host ? "" : sni;
     } else if (s_ui.boxes == 1) {
-        // Shadowsocks: just the password. Empty = no password; the proxy then stays off.
+        // SS and Trojan: just the password. Empty = no password; the proxy then stays off.
         prefs.user.clear();
         prefs.password = s_password_kept ? prefs.password : std::string(s_edit[0]);
     } else {
@@ -278,12 +308,14 @@ void OpenEditor(Field field) {
     if (s_ui.editor) return;
     s_ui.field = field;
     const Prefs prefs = valet::proxy::Get();
-    s_ui.boxes = field == kFieldLogin && !IsSs(prefs) ? 2 : 1;
+    s_ui.boxes = field == kFieldLogin && !prefs.PasswordOnly() ? 2 : 1;
     s_ui.active = 0;
     s_edit[0][0] = s_edit[1][0] = '\0';
     if (field == kFieldAddress) {
         if (prefs.HasAddress()) std::snprintf(s_edit[0], sizeof(s_edit[0]), "%s:%d", prefs.host.c_str(), prefs.port);
-    } else if (IsSs(prefs)) {
+    } else if (field == kFieldSni) {
+        std::snprintf(s_edit[0], sizeof(s_edit[0]), "%s", prefs.sni.c_str());
+    } else if (prefs.PasswordOnly()) {
         std::snprintf(s_edit[0], sizeof(s_edit[0]), "%s", prefs.password.c_str());
     } else {
         std::snprintf(s_edit[0], sizeof(s_edit[0]), "%s", prefs.user.c_str());
@@ -321,10 +353,12 @@ void OpenEditor(Field field) {
 
     s_ui.edit_hint = lv_label_create(panel);
     lv_label_set_text(s_ui.edit_hint, field == kFieldAddress
-        ? Text("代理的地址和端口，例如 192.168.0.10:7890；也可以输整条 ss:// 链接。清空再确认 = 不要代理。",
-               "Proxy address and port, e.g. 192.168.0.10:7890, or a whole ss:// link. Empty = no proxy.")
-        : s_ui.boxes == 1 ? Text("SS 服务器的密码。存着的显示成星号，一输入就换成新的。",
-                                 "The SS server's password. A stored one shows as stars; typing replaces it.")
+        ? Text("代理的地址和端口，例如 192.168.0.10:7890；也可以输整条 ss:// 或 trojan:// 链接。清空再确认 = 不要代理。",
+               "Proxy address and port, e.g. 192.168.0.10:7890, or a whole ss:// or trojan:// link. Empty = no proxy.")
+        : field == kFieldSni ? Text("TLS 里用的服务器名，和节点设置里的 sni 一样。清空 = 用地址。",
+                                    "The server name used in TLS, as the node's sni. Empty = the address.")
+        : s_ui.boxes == 1 ? Text("服务器的密码。存着的显示成星号，一输入就换成新的。",
+                                 "The server's password. A stored one shows as stars; typing replaces it.")
         : Text("点一个框再输入。存着的密码显示成星号，一输入就换成新的。", "Tap a box, then type. A stored password shows as stars; typing replaces it."));
     lv_obj_set_width(s_ui.edit_hint, lv_pct(100));
     lv_obj_set_height(s_ui.edit_hint, 74);   // two lines, so the boxes below do not move when the text changes
@@ -333,7 +367,8 @@ void OpenEditor(Field field) {
     lv_obj_set_style_text_color(s_ui.edit_hint, lv_color_black(), 0);
     lv_obj_set_style_text_line_space(s_ui.edit_hint, 6, 0);
 
-    if (field == kFieldAddress) AddEditBox(panel, 0, nullptr);
+    if (field == kFieldAddress || field == kFieldSni) AddEditBox(panel, 0, nullptr);
+    else if (s_ui.boxes == 1) AddEditBox(panel, 0, Text("密码", "Password"));
     else {
         AddEditBox(panel, 0, Text("账号", "User"));
         AddEditBox(panel, 1, Text("密码", "Password"));
@@ -528,8 +563,8 @@ void OnChoice(lv_event_t* e) {
         OpenEditor(kFieldAddress);
         return;
     }
-    if (turning_on && IsSs(prefs) && prefs.password.empty()) {
-        ScreenShowToast(Text("先填 SS 的密码", "Enter the SS password first"));
+    if (turning_on && prefs.PasswordOnly() && prefs.password.empty()) {
+        ScreenShowToast(IsSs(prefs) ? Text("先填 SS 的密码", "Enter the SS password first") : Text("先填 Trojan 的密码", "Enter the Trojan password first"));
         OpenEditor(kFieldLogin);
         return;
     }
@@ -539,6 +574,8 @@ void OnChoice(lv_event_t* e) {
         case kKindHttp: prefs.kind = net_proxy::Kind::kHttp; break;
         case kKindSocks: prefs.kind = net_proxy::Kind::kSocks5; break;
         case kKindSs: prefs.kind = net_proxy::Kind::kShadowsocks; break;
+        case kKindTrojan: prefs.kind = net_proxy::Kind::kTrojan; break;
+        case kCertCheck: case kCertSkip: prefs.insecure = choice == kCertSkip; break;
     }
     Save(prefs);
 }
@@ -660,7 +697,8 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
     const char* const choices[] = {Text("直连", "Direct"), Text("走代理", "Use proxy")};
     static const intptr_t kWifiValues[] = {kWifiOff, kWifiOn};
     static const intptr_t kCellValues[] = {kCellOff, kCellOn};
-    static const intptr_t kKindValues[] = {kKindHttp, kKindSocks, kKindSs};
+    static const intptr_t kKindValues[] = {kKindHttp, kKindSocks, kKindSs, kKindTrojan};
+    static const intptr_t kCertValues[] = {kCertCheck, kCertSkip};
 
     SettingsValetLabel(page, Text("连 Wi-Fi 时", "On Wi-Fi"));
     s_ui.wifi_seg = SettingsValetSegments(page, choices, 2, OnChoice, kWifiValues);
@@ -671,12 +709,25 @@ void SettingsProxyPage_Build(lv_obj_t* page) {
                                  "On 4G only a proxy with a public address can be reached."));
     SettingsValetGap(page, 30);
     SettingsValetLabel(page, Text("代理类型", "Proxy type"));
-    static const char* const kKinds[] = {"HTTP", "SOCKS5", "SS"};
-    s_ui.kind_seg = SettingsValetSegments(page, kKinds, 3, OnChoice, kKindValues);
+    static const char* const kKinds[] = {"HTTP", "SOCKS5", "SS", "Trojan"};
+    s_ui.kind_seg = SettingsValetSegments(page, kKinds, 4, OnChoice, kKindValues);
     SettingsValetGap(page, 30);
     s_ui.address_detail = AddRow(page, Text("地址", "Address"), kFieldAddress, true);
     s_ui.login_detail = AddRow(page, Text("账号和密码", "Login"), kFieldLogin, false, &s_ui.login_title);
     s_ui.method_detail = AddRow(page, Text("加密方式", "Cipher"), kFieldMethod, false);   // SS only
+    s_ui.sni_detail = AddRow(page, Text("服务器名（SNI）", "Server name (SNI)"), kFieldSni, false);   // Trojan only
+    // Trojan only: whether the server's certificate is checked against the server name.
+    s_ui.cert = lv_obj_create(page);
+    lv_obj_remove_style_all(s_ui.cert);
+    lv_obj_set_size(s_ui.cert, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_ui.cert, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(s_ui.cert, LV_OBJ_FLAG_SCROLLABLE);
+    SettingsValetGap(s_ui.cert, 30);
+    SettingsValetLabel(s_ui.cert, Text("检查证书", "Check the certificate"));
+    const char* const cert_choices[] = {Text("检查", "Check"), Text("不检查", "Skip")};
+    s_ui.cert_seg = SettingsValetSegments(s_ui.cert, cert_choices, 2, OnChoice, kCertValues);
+    SettingsValetNote(s_ui.cert, Text("要和节点的设置一样：Surge 里写着 skip-cert-verify=true 的选「不检查」。",
+                                      "Match the node: choose Skip where Surge says skip-cert-verify=true."));
     SettingsValetGap(page, 30);
     auto* test = SettingsValetButton(page, "", OnTest);
     s_ui.test_label = lv_obj_get_child(test, 0);
