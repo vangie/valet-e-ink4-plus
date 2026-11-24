@@ -729,7 +729,10 @@ bool ValetProtocol::Submit() {
     awaiting_ = true; ask_deadline_ = esp_timer_get_time() + 180000000; last_poll_ = 0;
     request_id_ = "valet-" + std::to_string(esp_random()) + "-" + std::to_string(++sequence_);
     auto* root = valet::wire::Request(request_id_.c_str(), "chat.send"); auto* params = cJSON_GetObjectItem(root, "params");
-    cJSON_AddStringToObject(params, "sessionKey", session_id_.c_str()); cJSON_AddStringToObject(params, "message", text_question.c_str());
+    // 选中了字：问题在录音里，文字里只带「选中了哪几个字」这句说明
+    const std::string message = text_question.empty() ? valet::ReadingQuoteNote()
+        : text_question + (valet::ReadingQuoteNote().empty() ? "" : "\n\n" + valet::ReadingQuoteNote());
+    cJSON_AddStringToObject(params, "sessionKey", session_id_.c_str()); cJSON_AddStringToObject(params, "message", message.c_str());
     cJSON_AddStringToObject(params, "thinking", "off"); cJSON_AddBoolToObject(params, "fastMode", true);
     cJSON_AddStringToObject(params, "idempotencyKey", request_id_.c_str());
     if (!text_question.empty()) {   // 仅测试：文字问题，不带录音
@@ -741,6 +744,25 @@ bool ValetProtocol::Submit() {
     cJSON_AddStringToObject(attachment, "type", "audio"); cJSON_AddStringToObject(attachment, "mimeType", "audio/wav");
     cJSON_AddStringToObject(attachment, "fileName", "valet.wav"); // The reference stays valid through synchronous Send; avoid another large copy.
     cJSON_AddItemToObject(attachment, "content", cJSON_CreateStringReference(audio.c_str()));
+    if (Send(root)) return true;
+    awaiting_ = false; SetError("提问发送失败，请重新连接助理"); return false;
+}
+bool ValetProtocol::AskText(const std::string& question) {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    if (question.empty() || session_live_ || !IsAudioChannelOpened()) return false;
+    if (awaiting_ || speech_active_) SendAbortSpeaking(kAbortReasonNone);
+    recording_ = false; submit_pending_ = false;
+    run_id_.clear(); reply_.clear(); reply_completed_ = false; interrupted_ = false;
+    awaiting_ = true; ask_deadline_ = esp_timer_get_time() + 180000000; last_poll_ = 0;
+    request_id_ = "valet-" + std::to_string(esp_random()) + "-" + std::to_string(++sequence_);
+    const auto note = valet::ReadingQuoteNote();
+    const std::string message = note.empty() ? question : question + "\n\n" + note;
+    auto* root = valet::wire::Request(request_id_.c_str(), "chat.send"); auto* params = cJSON_GetObjectItem(root, "params");
+    cJSON_AddStringToObject(params, "sessionKey", session_id_.c_str()); cJSON_AddStringToObject(params, "message", message.c_str());
+    cJSON_AddStringToObject(params, "thinking", "off"); cJSON_AddBoolToObject(params, "fastMode", true);
+    cJSON_AddStringToObject(params, "idempotencyKey", request_id_.c_str());
+    ESP_LOGI(TAG, "ask: text question, %u bytes%s", unsigned(message.size()), note.empty() ? "" : " (with the selected text)");
+    Event("stt", nullptr, question);   // 悬窗上写出问的是哪句（不带那句说明）
     if (Send(root)) return true;
     awaiting_ = false; SetError("提问发送失败，请重新连接助理"); return false;
 }

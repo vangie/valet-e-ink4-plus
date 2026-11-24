@@ -10,6 +10,7 @@
 #include "websocket_protocol.h"
 #include "mqtt_protocol.h"
 #include "valet_protocol.h"
+#include "valet_reading_context.h"
 #include "valet_net/proxy.h"
 #include "assets/lang_config.h"
 #include "assets/lang_bluetooth.h"
@@ -61,6 +62,35 @@
 #include <freertos/idf_additions.h>
 
 #define TAG "Application"
+
+namespace {
+// 去掉回显里跟在问题后面的「选中了哪几个字」那句说明。百问回显的是一段界面 JSON：只改里面的文字，不能按字节截断。
+std::string WithoutQuoteNote(const char* raw) {
+    std::string out = raw ? raw : "";
+    const auto cut = [](std::string& text) {
+        const auto at = text.find(valet::kReadingQuoteNoteStart);
+        if (at != std::string::npos && at > 0) text.resize(at);
+    };
+    if (out.find(valet::kReadingQuoteNoteStart) == std::string::npos) return out;
+    std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_Parse(raw), cJSON_Delete);
+    if (!root) { cut(out); return out; }
+    struct Walk {
+        static void Run(cJSON* node) {
+            for (cJSON* child = node ? node->child : nullptr; child; child = child->next) {
+                if (cJSON_IsString(child) && child->valuestring) {
+                    const char* at = std::strstr(child->valuestring, valet::kReadingQuoteNoteStart);
+                    if (at && at != child->valuestring) cJSON_SetValuestring(child, std::string(child->valuestring, size_t(at - child->valuestring)).c_str());
+                }
+                Run(child);
+            }
+        }
+    };
+    Walk::Run(root.get());
+    std::unique_ptr<char, decltype(&cJSON_free)> printed(cJSON_PrintUnformatted(root.get()), cJSON_free);
+    return printed ? std::string(printed.get()) : out;
+}
+}  // namespace
+
 
 namespace {
 
@@ -607,7 +637,9 @@ void Application::EnsureProtocolReady() {
         } else if (strcmp(type->valuestring, "stt") == 0) {
             auto text = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(text)) {
-                auto after = [display, current_session, message = std::string(text->valuestring)]() {
+                // 官方云把文字提问整句回显：跟在问题后面的「选中了哪几个字」那句说明只发给它，不显示（见 ReadingQuoteNote）
+                std::string shown = WithoutQuoteNote(text->valuestring);
+                auto after = [display, current_session, message = std::move(shown)]() {
                     if (!current_session()) return;
                     display->SetChatMessage("user", message.c_str());
                 };
@@ -726,14 +758,16 @@ void Application::EnsureProtocolReady() {
     }
 }
 
-void Application::SwitchChatProviderOnTask() {
+void Application::SwitchChatProviderOnTask() { UseProviderOnTask(chat_cloud::SavedProvider()); }
+
+void Application::UseProviderOnTask(chat_cloud::Provider to) {
     const auto from = chat_cloud::ActiveProvider();
-    const auto to = chat_cloud::SavedProvider();
     if (from == to) return;
-    ESP_LOGI(TAG, "Chat provider %d -> %d without restart", static_cast<int>(from), static_cast<int>(to));
+    ESP_LOGI(TAG, "Chat provider %d -> %d without restart%s", static_cast<int>(from), static_cast<int>(to),
+             to == chat_cloud::SavedProvider() ? "" : " (asking in a book)");
     StopXiaozhiVoiceOnTask();   // 正在提问 / 通话就先结束
     TeardownProtocol();         // 旧云服务的通道（用旧的 IsYunxin 收尾）
-    chat_cloud::ActivateSavedProvider();
+    chat_cloud::ActivateProvider(to);
     // 激活与配置按新的云服务重新来；旧的激活码不再显示
     ClearActivationCode();
     chat_activation_pending_ = false;
@@ -1734,6 +1768,69 @@ bool Application::AskBaiwenImage() try {
 } catch (const std::bad_alloc&) {
     ESP_LOGE(TAG, "image question preparation failed stage=dispatch_allocate");
     return false;
+}
+
+// 文字提问（选字卡片的预设问题、查字典）。刚换了云服务时（书里提问用百问）配置还在路上，协议没建好：
+// 问题先留着，每半秒再试一次，最多 20 秒；悬窗收起了就不问了。
+bool Application::AskValetText(const std::string& question) try {
+    return Schedule([this, question]() {
+        pending_text_question_ = question;
+        pending_text_attempts_ = 0;
+        TryPendingTextQuestion();
+    });
+} catch (const std::bad_alloc&) {
+    ESP_LOGE(TAG, "text question dispatch failed");
+    return false;
+}
+
+void Application::TryPendingTextQuestion() {
+    if (pending_text_question_.empty()) return;
+    const auto still_needed = [] { return AssistantScreen::IsActive() && !StandbyScreen::IsActive(); };
+    const auto give_up = [this] { pending_text_question_.clear(); };
+    if (!still_needed() || RejectUnactivatedListening()) return give_up();
+    const auto retry = [this, &give_up] {
+        if (++pending_text_attempts_ > 40) { ESP_LOGW(TAG, "text question: assistant not ready in 20 s"); return give_up(); }
+        if (!text_question_timer_) {
+            const esp_timer_create_args_t args = {
+                .callback = [](void* arg) {
+                    auto* app = static_cast<Application*>(arg);
+                    app->Schedule([app] { app->TryPendingTextQuestion(); });
+                },
+                .arg = this, .dispatch_method = ESP_TIMER_TASK, .name = "text_question", .skip_unhandled_events = true,
+            };
+            if (esp_timer_create(&args, &text_question_timer_) != ESP_OK) return give_up();
+        }
+        esp_timer_stop(text_question_timer_);
+        esp_timer_start_once(text_question_timer_, 500000);
+    };
+    if (!xiaozhi_voice_active_ || !protocol_) StartXiaozhiVoiceOnTask(false, voice_generation_.load());
+    if (!still_needed()) return give_up();
+    if (!xiaozhi_voice_active_ || !protocol_ || device_state_ == kDeviceStateConnecting) return retry();
+    if (!protocol_->IsAudioChannelOpened()) {
+        SetDeviceState(kDeviceStateConnecting);
+        if (!EnsureAssistantNetworkReady(still_needed) || !still_needed() || !protocol_->OpenAudioChannel()) {
+            give_up();
+            if (!still_needed()) return;
+            ESP_LOGE(TAG, "text question: assistant not reachable");
+            SetDeviceState(kDeviceStateIdle);
+            ApplyIdleStatusBar();
+            Alert(Lang::Strings::SERVER_NOT_CONNECTED, Lang::Strings::SERVER_NOT_CONNECTED, "cloud_slash");
+            return;
+        }
+    }
+    if (!still_needed()) return give_up();
+    const std::string question = std::move(pending_text_question_);
+    pending_text_question_.clear();
+    if (device_state_ == kDeviceStateSpeaking && audio_running_) audio_service_.ResetDecoder();
+    if (chat_cloud::IsCustom()) static_cast<ValetProtocol*>(protocol_.get())->AskText(question);
+    else {
+        // 官方云：文字问题走 listen/detect；选中的字跟在后面（这一页由服务器调设备上的 self.reader.get_current_page 取）。
+        // 答完停下，不像唤醒词那样接着开麦听。
+        listening_mode_ = kListeningModeManualStop;
+        const auto note = valet::ReadingQuoteNote();
+        protocol_->SendTextQuestion(note.empty() ? question : question + note);
+    }
+    SetDeviceState(kDeviceStateIdle);   // 和松开按住说话之后一样：等回答
 }
 
 bool Application::CompleteBaiwenQuestion(uint32_t turn, bool recorded, const std::string& image_id,

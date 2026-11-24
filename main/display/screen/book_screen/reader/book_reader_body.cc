@@ -5,6 +5,7 @@
 #include "valet_book_tools.h"
 #include "valet_protocol.h"
 #include "chat_cloud.h"
+#include "application.h"
 #include "assistant_screen/assistant_screen.h"
 #include "epd_refresh.h"
 #pragma GCC optimize("O1")
@@ -26,6 +27,7 @@
 #include "book_screen/book_vk.h"
 #include "book_screen/book_nav.h"
 #include "book_screen/reader/book_reader_overlay.h"
+#include "book_screen/reader/book_reader_select.h"
 
 #include <lvgl.h>
 #include "src/misc/cache/instance/lv_image_cache.h"
@@ -63,9 +65,13 @@ std::vector<valet::PageLine> ContextLines(const std::vector<reader::PageItem>& i
 
 // 悬窗上沿：在屏幕 1/4 高附近找正文位图里两行之间的空白，让悬窗不切过半行字。
 // 位图是 L8（白 = 255）；找不到（整页是图、位图不在）就用 1/4 高。
-lv_coord_t ReaderPanelTop() {
+// below：从选字进来时选中的字的下沿，悬窗开在它下面（只往下找空白），不盖住问的那几个字；
+// 悬窗至少留 kMinPanelH 高，选中的字太靠下时就盖住一部分（悬窗里写着问的是哪几个字）。
+constexpr lv_coord_t kMinPanelH = 520;
+lv_coord_t ReaderPanelTop(lv_coord_t below = 0) {
     auto& st = Book_State();
-    const lv_coord_t want = LV_VER_RES / 4;
+    const bool keep_below = below > LV_VER_RES / 4 && below < LV_VER_RES - kMinPanelH;
+    const lv_coord_t want = below > LV_VER_RES / 4 ? std::min<lv_coord_t>(below, LV_VER_RES - kMinPanelH) : LV_VER_RES / 4;
     auto* image = st.reader.text_raster_image;
     if (!image || !lv_obj_is_valid(image)) return want;
     auto* raster = static_cast<reader::RasterImage*>(lv_obj_get_user_data(image));
@@ -83,6 +89,7 @@ lv_coord_t ReaderPanelTop() {
     const int target = want - at.y1;
     for (int d = 0; d < LV_VER_RES / 8; ++d) {
         for (int row : {target - d, target + d}) {
+            if (keep_below && row < target) continue;
             if (!blank(row)) continue;
             int start = row, end = row;
             while (blank(start - 1)) --start;
@@ -116,12 +123,50 @@ lv_coord_t ReaderPanelTrim(lv_coord_t top) {
 }
 }  // namespace
 
-bool OpenReaderAskPanel(bool live) {
+namespace {
+// 书里提问和正在用的云服务不一样：先在主任务上换过去，换好了再开悬窗（问题也等那时再发）
+struct PendingPanel { bool live = false; lv_coord_t below = 0; std::string question; };
+PendingPanel* s_pending_panel = nullptr;
+bool OpenPanelNow(bool live, lv_coord_t below, const std::string& question) {
+    auto& st = Book_State();
+    if (!st.reader.read_scr || !lv_obj_is_valid(st.reader.read_scr) || st.reader.read_scr != lv_screen_active()) return false;
+    if (st.reader.read_chrome != BookUiState::ReadChrome::kReading) HideReadChrome();
+    if (!AssistantScreen::OpenPanel(st.reader.read_scr, ReaderPanelTop(below), live)) return false;
+    if (!question.empty()) Application::GetInstance().AskValetText(question);
+    return true;
+}
+// 离开正文（不是去「全屏」接着这场对话）：云服务换回「谁来回答」选的那个
+void RestoreSavedProvider(lv_event_t*) {
+    if (AssistantScreen::PanelReturnPending()) return;
+    if (chat_cloud::ActiveProvider() == chat_cloud::SavedProvider()) return;
+    Application::GetInstance().Schedule([] { Application::GetInstance().UseProviderOnTask(chat_cloud::SavedProvider()); });
+}
+}  // namespace
+
+bool OpenReaderAskPanel(bool live, lv_coord_t below, const std::string& question) {
     auto& st = Book_State();
     if (!st.reader.read_scr || !lv_obj_is_valid(st.reader.read_scr)) return false;
-    if (AssistantScreen::PanelOpen()) return true;
-    if (st.reader.read_chrome != BookUiState::ReadChrome::kReading) HideReadChrome();
-    return AssistantScreen::OpenPanel(st.reader.read_scr, ReaderPanelTop(), live);
+    if (AssistantScreen::PanelOpen()) {
+        if (!question.empty()) Application::GetInstance().AskValetText(question);
+        return true;
+    }
+    lv_obj_remove_event_cb(st.reader.read_scr, RestoreSavedProvider);
+    lv_obj_add_event_cb(st.reader.read_scr, RestoreSavedProvider, LV_EVENT_SCREEN_UNLOAD_START, nullptr);
+    const auto want = chat_cloud::BookProvider();
+    if (want == chat_cloud::ActiveProvider()) return OpenPanelNow(live, below, question);
+    if (s_pending_panel) return true;   // 已经在换了
+    s_pending_panel = new PendingPanel{live, below, question};
+    ESP_LOGI(TAG, "asking in a book: switch to provider %d first", static_cast<int>(want));
+    const bool queued = Application::GetInstance().Schedule([want] {
+        Application::GetInstance().UseProviderOnTask(want);
+        ScreenLvAsync([](void*) {
+            std::unique_ptr<PendingPanel> pending(s_pending_panel);
+            s_pending_panel = nullptr;
+            if (pending && !OpenPanelNow(pending->live, pending->below, pending->question)) ReaderSelectClear();
+        });
+    });
+    if (!queued) { delete s_pending_panel; s_pending_panel = nullptr; return false; }
+    return true;
 }
 
 namespace {
@@ -330,6 +375,7 @@ void RenderReaderPage() {
         AttachReadBodyInput(st.reader.content);
     }
     if (page == nullptr) {
+        ReaderSelectSetPage({}, nullptr);
         valet::PublishReadingPage({}, {}, {}, 0, {});
         FinishReaderFirstPaintGate();
         Book_ShowMessage(st.reader.content, Lang::Strings::BOOK_PAGE_LOAD_FAILED);
@@ -481,6 +527,7 @@ void RenderReaderPage() {
         }
         EpdSetContentRole(st.reader.text_raster_image,BookReaderPrefsAntialias() || background == 3
             ? EpdContentRole::ReaderAntialias : EpdContentRole::Monochrome);
+        ReaderSelectSetPage(std::move(prepared->glyphs), page);   // 长按选字：这一页每个字的位置
 
         size_t image_index = 0;
         for (const auto& item : page->items) {
@@ -501,7 +548,8 @@ void RenderReaderPage() {
         return;
     }
 
-    // LVGL label/插图路径
+    // LVGL label/插图路径（不能选字）
+    ReaderSelectSetPage({}, nullptr);
     if (reuse_raster && st.reader.text_raster_image) {
         lv_obj_clean(st.reader.content);
         AttachReadBodyInput(st.reader.content);

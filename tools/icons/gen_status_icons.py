@@ -42,6 +42,7 @@ NAMES = [
     "Q_WIFI", "Q_CELL", "Q_PROXY",
     "ROW_BULB_OFF", "ROW_BULB_MIN", "ROW_BULB_MAX",
     "ROW_THERMO_COLD", "ROW_THERMO_MID", "ROW_THERMO_WARM",
+    "SEL_QUEST", "SEL_BOOK", "SEL_SENTENCE", "SEL_MIC",
 ]
 
 SB_H = 27          # Wi-Fi / 4G / plane height in the status bar (px); others keep their size relative to Wi-Fi
@@ -50,6 +51,8 @@ BOLT_H = 12        # charging bolt next to the digits (px)
 TILE_H = 32        # Wi-Fi height in a quick panel tile (px)
 ROW_K = 0.3655     # quick panel rows, SF icons: px per SF unit (sim RK 0.172 x 2.125)
 ROW_BOX = (-106, 117)  # SF rows: same vertical box for every row icon so their baselines line up
+SEL_H = 34         # reader selection card: icons in the bottom row (sim 16 px x 2.125)
+SEL_Q_H = 28       # reader selection card: the question mark in front of each preset question (sim 13 px)
 
 
 def render(inner, viewbox, width, height):
@@ -148,6 +151,10 @@ def own_icons():
         out[key] = crop_x(render(stroke(name, 1.9), (0, 0, 24, 24), 36, 36))
     for key in ("ROW_THERMO_COLD", "ROW_THERMO_MID", "ROW_THERMO_WARM"):
         out[key] = crop_x(render(stroke("thermo", 1.9), (0, 0, 24, 24), 36, 36))
+    # 正文选字卡片（sim/design.js 的 v2SelPop）：整格 24 的图，线宽同模拟界面（16 px 时 1.33 px）
+    out["SEL_QUEST"] = render(stroke("quest", 2.0), (0, 0, 24, 24), SEL_Q_H, SEL_Q_H)
+    for key, name in (("SEL_BOOK", "book"), ("SEL_SENTENCE", "sentence"), ("SEL_MIC", "mic")):
+        out[key] = render(stroke(name, 2.0), (0, 0, 24, 24), SEL_H, SEL_H)
     return out
 
 
@@ -243,5 +250,7 @@ if __name__ == "__main__":
     if "--preview" in sys.argv: preview(own, sys.argv[sys.argv.index("--preview") + 1] + "-own.png")
     if os.path.exists(os.path.join(SIM, "local", "icons.js")):
         loc = local_icons()
+        for name in NAMES:          # icons the user did not export: use our own drawing
+            if name not in loc and name in own: loc[name] = own[name]
         emit(loc, os.path.join(OUT_DIR, "local", "status_icons.c"), "sim/local/icons.js, personal use, not in git")
         if "--preview" in sys.argv: preview(loc, sys.argv[sys.argv.index("--preview") + 1] + "-local.png")

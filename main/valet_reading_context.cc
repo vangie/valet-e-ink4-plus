@@ -4,7 +4,7 @@
 #include <cstring>
 #include <cstdio>
 namespace valet {
-namespace { std::mutex mutex; ReadingContext latest, selected; std::function<std::pair<int, std::string>()> expander; }
+namespace { std::mutex mutex; ReadingContext latest, selected; ReadingQuote quote; std::function<std::pair<int, std::string>()> expander; }
 namespace {
 std::string Clip(const std::string& text, size_t max) {
     if (text.size() <= max) return text;
@@ -140,5 +140,15 @@ cJSON* ContextJson(const ReadingContext& context) {
     cJSON_AddStringToObject(root,"bookId",context.book_id.c_str()); cJSON_AddStringToObject(root,"title",context.title.c_str());
     cJSON_AddStringToObject(root,"chapter",context.chapter.c_str()); cJSON_AddNumberToObject(root,"page",context.page);
     cJSON_AddStringToObject(root,"text",context.text.c_str()); cJSON_AddBoolToObject(root,"truncated",context.truncated); return root;
+}
+void SetReadingQuote(const ReadingQuote& value) { std::lock_guard<std::mutex> lock(mutex); quote = value; }
+void ClearReadingQuote() { std::lock_guard<std::mutex> lock(mutex); quote = {}; }
+ReadingQuote CurrentReadingQuote() { std::lock_guard<std::mutex> lock(mutex); return quote; }
+std::string ReadingQuoteNote() {
+    const auto q = CurrentReadingQuote();
+    if (!q.Valid()) return {};
+    std::string note = kReadingQuoteNoteStart + q.text + "」";
+    if (!q.sentence.empty() && q.sentence != q.text) note += "，它所在的句子是「" + q.sentence + "」";
+    return note + "。）";
 }
 }

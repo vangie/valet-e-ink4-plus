@@ -96,6 +96,7 @@ struct Gesture {
     bool active;
     int x1, y1, x2, y2;
     int64_t start_us, duration_us;
+    int64_t hold_us;   // 先在起点按住这么久再开始移动（长按后接着拖，比如正文选字）
 };
 
 portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -118,8 +119,10 @@ void Step(void*) {
             release = true;
         } else {
             touch = busy = true;
-            x = s_gesture.x1 + static_cast<int>((s_gesture.x2 - s_gesture.x1) * t / s_gesture.duration_us);
-            y = s_gesture.y1 + static_cast<int>((s_gesture.y2 - s_gesture.y1) * t / s_gesture.duration_us);
+            const int64_t moved = t > s_gesture.hold_us ? t - s_gesture.hold_us : 0;
+            const int64_t span = s_gesture.duration_us > s_gesture.hold_us ? s_gesture.duration_us - s_gesture.hold_us : 1;
+            x = s_gesture.x1 + static_cast<int>((s_gesture.x2 - s_gesture.x1) * moved / span);
+            y = s_gesture.y1 + static_cast<int>((s_gesture.y2 - s_gesture.y1) * moved / span);
         }
     }
     for (int i = 0; i < 3; ++i) {
@@ -151,11 +154,12 @@ bool EnsureTimer() {
 
 // Raw touch coordinates equal portrait panel pixels; the cover keys report
 // raw_y = TOUCH_VK_Y, below the panel.
-const char* StartGesture(int x1, int y1, int x2, int y2, int ms) {
-    if (ms < 30 || ms > 10000) return "BAD_DURATION";
+const char* StartGesture(int x1, int y1, int x2, int y2, int ms, int hold_ms = 0) {
+    if (ms < 30 || ms > 10000 || hold_ms < 0 || hold_ms > 5000) return "BAD_DURATION";
     portENTER_CRITICAL(&s_mux);
     const bool busy = s_gesture.active;
-    if (!busy) s_gesture = {true, x1, y1, x2, y2, esp_timer_get_time(), static_cast<int64_t>(ms) * 1000};
+    if (!busy) s_gesture = {true, x1, y1, x2, y2, esp_timer_get_time(),
+                            static_cast<int64_t>(ms + hold_ms) * 1000, static_cast<int64_t>(hold_ms) * 1000};
     portEXIT_CRITICAL(&s_mux);
     if (busy) return "BUSY";
     metalio_touch_dev_inject(true, x1, y1);
@@ -333,7 +337,12 @@ void ValetDevLinkHandle(const char* json) {
             !Int(root, "x2", &x2, x1, swipe) || !Int(root, "y2", &y2, y1, swipe)) error = "MISSING_POINT";
         else if (x1 < 0 || x1 >= kPanelW || y1 < 0 || y1 >= kPanelH ||
                  x2 < 0 || x2 >= kPanelW || y2 < 0 || y2 >= kPanelH) error = "OUT_OF_PANEL";
-        else { Int(root, "ms", &ms, swipe ? 400 : 100); error = StartGesture(x1, y1, x2, y2, ms); }
+        else {
+            int hold = 0;
+            Int(root, "ms", &ms, swipe ? 400 : 100);
+            Int(root, "hold", &hold, 0);
+            error = StartGesture(x1, y1, x2, y2, ms, hold);
+        }
     } else if (!strcmp(cmd, "key")) {
         const auto* name = cJSON_GetObjectItemCaseSensitive(root, "name");
         Int(root, "ms", &ms, 100);

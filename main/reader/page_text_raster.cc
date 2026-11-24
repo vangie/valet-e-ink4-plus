@@ -123,9 +123,17 @@ void DrawUnderline(RasterImage& img, int x0, int x1, int y, int mode) {
     }
 }
 
+// 记字位置用：哪一项正文、这一行在那一项里从第几个字节开始
+struct GlyphSink {
+    std::vector<GlyphBox>* out = nullptr;
+    uint16_t item = 0;
+    size_t base = 0;
+};
+
 bool DrawUtf8Line(RasterImage& img, const lv_font_t* font, int x, int line_top, const char* utf8,
                   bool faux_bold, int* out_end_x, bool vertical = false, bool antialias = false,
-                  int* out_ink_bottom = nullptr, const TextLineSpacing& spacing = {}, int letter_gap = 0) {
+                  int* out_ink_bottom = nullptr, const TextLineSpacing& spacing = {}, int letter_gap = 0,
+                  const GlyphSink& sink = {}) {
     if (font == nullptr || utf8 == nullptr) {
         return false;
     }
@@ -144,8 +152,23 @@ bool DrawUtf8Line(RasterImage& img, const lv_font_t* font, int x, int line_top, 
 
     int glyph_index = 0;
     TextSpacingState spacing_state;
+    const size_t first_box = sink.out ? sink.out->size() : 0;
+    // 记下这个字：字格从笔位（加上两端对齐的偏移）开始，右边先按步进算，整行画完再接到下一个字的左边
+    const auto record = [&](const uint8_t* at, size_t n, int left_x, int advance) {
+        if (!sink.out || vertical) return;
+        GlyphBox box;
+        box.item = sink.item;
+        box.begin = static_cast<uint16_t>(std::min<size_t>(sink.base + (at - reinterpret_cast<const uint8_t*>(utf8)), UINT16_MAX));
+        box.len = static_cast<uint8_t>(n);
+        box.x0 = static_cast<int16_t>(left_x);
+        box.x1 = static_cast<int16_t>(left_x + std::max(1, advance));
+        box.y0 = static_cast<int16_t>(line_top);
+        box.y1 = static_cast<int16_t>(line_top + font->line_height);
+        sink.out->push_back(box);
+    };
     while (left > 0) {
         uint32_t cp = 0;
+        const uint8_t* at = p;
         const size_t n = Utf8Next(p, left, &cp);
         if (n == 0) {
             break;
@@ -162,8 +185,10 @@ bool DrawUtf8Line(RasterImage& img, const lv_font_t* font, int x, int line_top, 
         lv_font_glyph_dsc_t gdsc{};
         if (!lv_font_get_glyph_dsc(font, &gdsc, glyph_cp, 0)) {
             if (!vertical) ObserveTextGlyph(spacing_state, font, cp, gdsc, false, letter_gap);
-            pen_x += TextAdvanceWithGap(vertical ? VerticalAdvance(cp, font->line_height, 1)
+            const int advance = TextAdvanceWithGap(vertical ? VerticalAdvance(cp, font->line_height, 1)
                               : std::max(1, static_cast<int>(lv_font_get_glyph_width(font, cp, 0))), letter_gap);
+            if (!vertical) record(at, n, pen_x + spacing.Offset(spacing_state.slots, spacing_state.capacity), advance);
+            pen_x += advance;
             continue;
         }
         if (!vertical) ObserveTextGlyph(spacing_state, font, cp, gdsc, true, letter_gap);
@@ -222,7 +247,15 @@ bool DrawUtf8Line(RasterImage& img, const lv_font_t* font, int x, int line_top, 
                 font->release_glyph(font, &gdsc);
             }
         }
-        pen_x += TextAdvanceWithGap(vertical ? VerticalAdvance(cp, font->line_height, std::max(1, static_cast<int>(gdsc.adv_w))) : TextGlyphAdvance(gdsc), letter_gap);
+        const int advance = TextAdvanceWithGap(vertical ? VerticalAdvance(cp, font->line_height, std::max(1, static_cast<int>(gdsc.adv_w))) : TextGlyphAdvance(gdsc), letter_gap);
+        record(at, n, pen_x + shift, advance);
+        pen_x += advance;
+    }
+    // 同一行相邻的字首尾相接：两端对齐拉开的空隙算前一个字的，反显时没有缝，也不会重叠
+    if (sink.out) {
+        auto& boxes = *sink.out;
+        for (size_t i = first_box; i + 1 < boxes.size(); ++i)
+            if (boxes[i + 1].x0 > boxes[i].x0) boxes[i].x1 = boxes[i + 1].x0;
     }
     if (out_end_x != nullptr) {
         *out_end_x = pen_x + (vertical ? spacing.Offset(std::max(0, glyph_index - 1))
@@ -274,9 +307,11 @@ int EstimatePageTextHeight(const Page& page, const lv_font_t* font, int spacing_
 
 bool RasterPageTextToL8(const Page& page, const lv_font_t* font, int spacing_percent,
                         lv_coord_t para_gap, int page_w, int page_h, int underline_mode,
-                        RasterImage& out, bool antialias, std::vector<int>* image_tops, const TextStyle& style) {
+                        RasterImage& out, bool antialias, std::vector<int>* image_tops, const TextStyle& style,
+                        std::vector<GlyphBox>* glyphs) {
     out.Reset();
     if (image_tops) image_tops->clear();
+    if (glyphs) glyphs->clear();
     if (font == nullptr || page_w <= 0 || page_h <= 0) {
         return false;
     }
@@ -302,7 +337,9 @@ bool RasterPageTextToL8(const Page& page, const lv_font_t* font, int spacing_per
     int row = 0;
     bool any = false, previous_title = false;
 
+    uint16_t item_index = 0;
     for (const auto& item : page.items) {
+        const uint16_t this_item = item_index++;
         if (item.kind != ContentKind::kText) {
             if (image_tops) image_tops->push_back(y);
             y += item.image_h;
@@ -332,7 +369,8 @@ bool RasterPageTextToL8(const Page& page, const lv_font_t* font, int spacing_per
                 const int line_y = y + layout.TextOffset(row);
                 int ink_bottom = -1;
                 if (!DrawUtf8Line(out, font, text_x, line_y, line.c_str(), true,
-                                  &end_x, false, antialias, &ink_bottom, spacing, style.letter_gap)) {
+                                  &end_x, false, antialias, &ink_bottom, spacing, style.letter_gap,
+                                  GlyphSink{glyphs, this_item, static_cast<size_t>(p - txt)})) {
                     out.Reset();
                     return false;
                 }
@@ -359,7 +397,8 @@ bool RasterPageTextToL8(const Page& page, const lv_font_t* font, int spacing_per
         int end_x = text_x;
         int ink_bottom = -1;
         const int line_y = y + layout.TextOffset(row);
-        if (!DrawUtf8Line(out, font, text_x, line_y, txt, item.chapter_title, &end_x, false, antialias, &ink_bottom, spacing, style.letter_gap)) {
+        if (!DrawUtf8Line(out, font, text_x, line_y, txt, item.chapter_title, &end_x, false, antialias, &ink_bottom, spacing, style.letter_gap,
+                          GlyphSink{glyphs, this_item, 0})) {
             out.Reset();
             return false;
         }

@@ -1790,11 +1790,11 @@ static void ValetAskFromCard(lv_event_t* e) {
 }
 static void BuildValetAskRow(lv_obj_t* body, int width) {
     const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
-    const bool custom = chat_cloud::IsCustom(), call = chat_cloud::HasCallEntry();
+    // 找谁看「书里提问」；官方云也带上这一页，所以都叫「问这一页」。通话只有自己的助理有。
+    const bool call = chat_cloud::BookHasCallEntry();
     auto* row = SheetBox(body, width, kValetAskRowH);
     const int gap = 14, ask_w = call ? (width - gap) * 3 / 5 : width;
-    const std::string ask_text = custom ? (zh ? "问这一页" : "Ask this page")
-        : std::string(zh ? "问" : "Ask ") + AssistantScreen::DisplayName();
+    const std::string ask_text = zh ? "问这一页" : "Ask this page";
     for (int i = 0; i < (call ? 2 : 1); ++i) {
         auto* button = SheetBox(row, i ? width - ask_w - gap : ask_w, 76);
         lv_obj_set_pos(button, i ? ask_w + gap : 0, 10);

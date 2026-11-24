@@ -4,6 +4,8 @@
  */
 
 #include "mcp_server.h"
+#include "valet_reading_context.h"
+#include "sdkconfig.h"
 #include <esp_log.h>
 #include <esp_app_desc.h>
 #include <algorithm>
@@ -89,6 +91,22 @@ void McpServer::AddCommonTools() {
                 return camera->Explain(properties["question"].value<std::string>());
             });
     }
+
+    // 官方云（百问）问书里的事：服务器需要时来取正在读的这一页和选中的字（2026-11-24 实测百问会调）
+    AddTool("self.reader.get_current_page",
+        "Returns the text of the book page the user is reading right now, plus the words the user selected on it (if any). "
+        "Call this first whenever the user asks about \"this page\", \"this sentence\", \"this word\" or the book they are reading.\n"
+        "返回用户正在读的这一页书的正文，以及用户在这一页上选中的字。用户问「这一页」「这句」「这个词」或正在读的书时，先调用它。",
+        PropertyList(),
+        [](const PropertyList&) -> ReturnValue {
+            const auto page = valet::LatestReadingPage();
+            const auto quote = valet::CurrentReadingQuote();
+            ESP_LOGI(TAG, "self.reader.get_current_page: page %d, %u bytes", page.page, unsigned(page.text.size()));
+            if (!page.Valid()) return std::string("用户现在没有打开书。The user has no book open.");
+            std::string out = "《" + page.title + "》" + page.chapter + "，第 " + std::to_string(page.page) + " 页：\n" + page.text;
+            if (quote.Valid()) out += "\n\n用户选中了：「" + quote.text + "」，所在句子：「" + quote.sentence + "」";
+            return out;
+        });
 
 #if 0 // S31：MCP 屏幕主题/截图工具暂关（无 LvglThemeManager / Snapshot）
 #ifdef HAVE_LVGL
@@ -367,6 +385,10 @@ void McpServer::ParseMessage(const cJSON* json) {
         return;
     }
     auto id_int = id->valueint;
+    {   // 服务器来调了哪个方法（看官方云会不会用设备上的工具）
+        const auto* name = params ? cJSON_GetObjectItem(params, "name") : nullptr;
+        ESP_LOGI(TAG, "request: %s%s%s", method_str.c_str(), cJSON_IsString(name) ? " " : "", cJSON_IsString(name) ? name->valuestring : "");
+    }
     
     if (method_str == "initialize") {
         ParseCapabilities(cJSON_GetObjectItem(params, "capabilities"));

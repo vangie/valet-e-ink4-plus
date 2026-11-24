@@ -302,6 +302,7 @@ def main():
     for name in ("x", "y", "x2", "y2"):
         p.add_argument(name, type=int)
     p.add_argument("--ms", type=int, default=400)
+    p.add_argument("--hold", type=int, default=0, help="press this long at the start before moving (long press, then drag)")
     p = sub.add_parser("key"); p.add_argument("name"); p.add_argument("--ms", type=int, default=100)
     p = sub.add_parser("log"); p.add_argument("-n", type=int, default=60); p.add_argument("--grep")
     p = sub.add_parser("sdlog"); p.add_argument("path")
@@ -347,10 +348,11 @@ def main():
         print(f"{args.path}  screen={info['screen']} orient={info['orient']}")
     elif args.command in ("tap", "swipe"):
         request = {"cmd": args.command, "x": args.x, "y": args.y, "ms": args.ms}
+        hold = getattr(args, "hold", 0)
         if args.command == "swipe":
-            request.update(x2=args.x2, y2=args.y2)
+            request.update(x2=args.x2, y2=args.y2, hold=hold)
         dev(request)
-        time.sleep(args.ms / 1000 + 0.05)
+        time.sleep((args.ms + hold) / 1000 + 0.05)
     elif args.command == "key":
         dev({"cmd": "key", "name": args.name, "ms": args.ms})
         time.sleep(args.ms / 1000 + 0.05)

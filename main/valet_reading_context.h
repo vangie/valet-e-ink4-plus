@@ -33,6 +33,19 @@ void SetReadingTextExpander(std::function<std::pair<int, std::string>()> expande
 bool SelectBookContext();
 void SelectStandaloneContext();
 ReadingContext SelectedReadingContext();
+// 正文里长按选中的字：问的时候连同所在的句子一起带给助理，悬窗的提示也写着它。悬窗收起时清掉。
+struct ReadingQuote {
+    std::string text;       // 选中的字
+    std::string sentence;   // 选中处所在的整句
+    bool word = true;       // 一个词（四个字以内）；否则当一句
+    bool Valid() const { return !text.empty(); }
+};
+void SetReadingQuote(const ReadingQuote& quote);
+void ClearReadingQuote();
+ReadingQuote CurrentReadingQuote();
+// 带上选中的字时，跟问题一起发给助理的那句说明；没有选中返回空。说明以 kReadingQuoteNoteStart 开头（显示回显时去掉它）
+inline constexpr const char* kReadingQuoteNoteStart = "（我在这一页选中了「";
+std::string ReadingQuoteNote();
 std::string ContextStorageKey(const std::string& assistant_id);
 cJSON* ContextJson(const ReadingContext& context);
 }

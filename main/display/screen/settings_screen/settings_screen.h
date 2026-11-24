@@ -30,3 +30,5 @@ void SettingsScreen_OnEnterStandby();
 void SettingsScreen_OnResumeFromStandby();
 /** @brief 在已打开的设置页里显示 网络 → 代理 */
 void SettingsScreen_OpenProxy();
+/** @brief Open 阅读与字库 (from the assistant page's 「书里提问另外设了」 row). */
+void SettingsScreen_OpenReading();

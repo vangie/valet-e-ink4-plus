@@ -56,6 +56,8 @@ public:
     // host = 阅读页，top = 悬窗上沿（落在两行之间）。只在 LVGL 线程调用。
     static bool OpenPanel(lv_obj_t* host, lv_coord_t top, bool live);
     static void ClosePanel();
+    // 悬窗收起（点了 ✕、点书页、离开阅读页）时调一次：阅读页用它去掉选字的反显
+    static void SetPanelClosedHook(void (*hook)());
     static bool PanelOpen();
     // 书页翻到别的页：标题换页码，下一句带上新的这一页
     static void PanelPageChanged();
@@ -65,6 +67,8 @@ public:
     // 「全屏」：换到完整的助手页，同一场对话；从那里返回时阅读页用 ConsumePanelReturn 接着开悬窗
     static void PanelFullScreen();
     static bool ConsumePanelReturn();
+    // 悬窗点了「全屏」、还没回到书页（同一场对话还要接着用）
+    static bool PanelReturnPending();
     // 悬窗开着时阅读页把 AI 键转过来；没开返回 false
     static bool PanelBootClick();
     static bool PanelBootLongPress();

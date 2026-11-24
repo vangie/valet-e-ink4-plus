@@ -203,6 +203,9 @@ void Assistant_Leave() {
                 if (!s_panel_return) return;
                 s_panel_return = false; s_keep_voice = false;
                 if (!AssistantScreen::IsActive()) Application::GetInstance().StopXiaozhiVoice();
+                // 没回书页：书里单独选的云服务用完了，换回「谁来回答」那个
+                if (!AssistantScreen::IsActive() && chat_cloud::ActiveProvider() != chat_cloud::SavedProvider())
+                    Application::GetInstance().Schedule([] { Application::GetInstance().UseProviderOnTask(chat_cloud::SavedProvider()); });
             }, 8000, nullptr);
         }
         if (s_keep_voice) ESP_LOGI(TAG, "leave: voice kept for the next view of the same conversation");
@@ -711,14 +714,40 @@ std::string PanelSubtitle() {
     const auto reading = valet::SelectedReadingContext();
     std::string who;
     const auto profiles = valet::LoadAssistantProfiles();
-    if (const auto* active = profiles.Active()) who = active->name;
+    if (!chat_cloud::IsCustom()) who = AssistantScreen::DisplayName();   // 书里提问用的是官方云
+    else if (const auto* active = profiles.Active()) who = active->name;
     char page[48];
     std::snprintf(page, sizeof(page), ValetText("第 %d 页", "p.%d"), reading.page);
-    return who.empty() ? std::string(page) : std::string(page) + " · " + who;
+    std::string where = page;
+    // 从正文选字进来：写问的是哪几个字（长了只留开头），这一页以前的问答还在下面也不会弄混
+    const auto quote = valet::CurrentReadingQuote();
+    if (quote.Valid()) {
+        std::string q;
+        const auto* p = reinterpret_cast<const uint8_t*>(quote.text.data());
+        size_t left = quote.text.size(), chars = 0;
+        while (left > 0) {
+            const size_t n = (*p < 0x80) ? 1 : (*p >> 5) == 6 ? 2 : (*p >> 4) == 14 ? 3 : 4;
+            if (n > left) break;
+            if (++chars > 6) { q += "…"; break; }
+            q.append(reinterpret_cast<const char*>(p), n);
+            p += n; left -= n;
+        }
+        where = "「" + q + "」";
+    }
+    return who.empty() ? where : where + " · " + who;
 }
 const char* PanelTitle(bool live, bool listening) {
     if (listening) return ValetText("在听 · 松开发送", "Listening");
-    return live ? ValetText("聊这一页", "Talking about it") : ValetText("问这一页", "Ask this page");
+    if (live) return ValetText("聊这一页", "Talking about it");
+    const auto quote = valet::CurrentReadingQuote();
+    // 从正文选字进来：标题写功能（和选字卡片上的「问 AI」一样），问的是哪几个字写在副标题里
+    if (quote.Valid()) return ValetText("问 AI", "Ask AI");
+    return ValetText("问这一页", "Ask this page");
+}
+void (*s_panel_closed_hook)() = nullptr;
+void NotifyPanelClosed() {
+    valet::ClearReadingQuote();
+    if (auto* hook = s_panel_closed_hook) hook();
 }
 }  // namespace
 void BuildPanelHead(lv_obj_t* scr, bool live) {
@@ -766,6 +795,7 @@ void BuildPanelHead(lv_obj_t* scr, bool live) {
     lv_obj_set_style_text_color(sub, lv_color_white(), 0);
     lv_obj_set_width(sub, LV_HOR_RES - kValetSide - 230 - lv_obj_get_width(title) - 24);
     lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(sub, ValetSmall()->line_height);   // 只占一行：放不下就以「…」收尾，不折行
     lv_obj_align(sub, LV_ALIGN_LEFT_MID, kValetSide + lv_obj_get_width(title) + 24, 2);
     s_panel.sub = sub;
     // 右边：「全屏」（换到完整的助手页，同一场对话）和 ✕（收起）
@@ -824,7 +854,7 @@ void Assistant_PanelListening(bool listening) {
 
 bool AssistantScreen::OpenPanel(lv_obj_t* host, lv_coord_t top, bool live) {
     if (s_panel.root) return true;
-    if (!host || !chat_cloud::IsCustom()) return false;
+    if (!host) return false;   // 官方云也行：这一页由服务器来设备上取（self.reader.get_current_page），只是没有通话
     if (!valet::SelectBookContext()) { ScreenShowToast(ValetText("当前页没有可提问的正文，请等待页面加载", "This page has no text to ask about yet")); return false; }
     if (live && !chat_cloud::HasCallEntry()) { ScreenShowToast(ValetText("这个助理还没配置通话", "This assistant has no Call set up")); return false; }
     ValetProtocol::SetLive(live);
@@ -839,6 +869,7 @@ bool AssistantScreen::OpenPanel(lv_obj_t* host, lv_coord_t top, bool live) {
         (void)sub;
         s_panel = {};
         Assistant_Leave();
+        NotifyPanelClosed();
     }, LV_EVENT_DELETE, nullptr);
     ESP_LOGI(TAG, "panel open at y=%d (%s), page %d", int(top), live ? "call" : "ask", valet::SelectedReadingContext().page);
     Assistant_Enter(root);
@@ -851,8 +882,11 @@ void AssistantScreen::ClosePanel() {
     s_panel = {};
     Assistant_Leave();
     if (lv_obj_is_valid(root)) lv_obj_delete(root);
+    NotifyPanelClosed();
     ESP_LOGI(TAG, "panel closed");
 }
+
+void AssistantScreen::SetPanelClosedHook(void (*hook)()) { s_panel_closed_hook = hook; }
 
 void AssistantScreen_PanelHostUnload(lv_event_t* e) {
     if (s_panel.root && lv_event_get_target(e) == s_panel.host) AssistantScreen::ClosePanel();
@@ -874,6 +908,7 @@ void AssistantScreen::PanelFullScreen() {
     ScreenNavigateTo(AssistantScreen::Create);
 }
 
+bool AssistantScreen::PanelReturnPending() { return s_panel_return; }
 bool AssistantScreen::ConsumePanelReturn() {
     if (!s_panel_return) return false;
     s_panel_return = false;

@@ -29,6 +29,9 @@ public:
     static bool Reconnecting();
     // 悬窗里翻了页（同一本书）：把新的这一页发给网关，下一句问的就是这一页。不等确认。
     static void ReadingContextChanged();
+    // 不用录音，直接发一句文字问题（正文选字卡片上的预设问题、查字典）。正在说的回答先停下。
+    // 问题照常带上当前页；选中了字时连同那句说明一起发（valet::ReadingQuoteNote）。语音任务调用，通道须已打开。
+    bool AskText(const std::string& question);
 #if CONFIG_VALET_DEV_LINK
     static void DropLinkForTest();   // 仅测试版：主动关掉当前连接，模拟线路断开
     // 仅测试版：下一次「按住说话」松开后不传录音，改发这段文字（问题照常带上当前页）。不用出声就能测提问。

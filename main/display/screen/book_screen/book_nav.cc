@@ -26,6 +26,7 @@
 #include "book_screen/book_vk.h"
 #include "book_screen/reader/book_reader_body.h"
 #include "book_screen/reader/book_reader_overlay.h"
+#include "book_screen/reader/book_reader_select.h"
 #include "book_screen/settings/book_settings_sheet.h"
 #include "book_screen/settings/book_font_multi.h"
 #include "wallpaper_screen/wallpaper_screen.h"
@@ -412,6 +413,7 @@ void DetachReadBodyInput(lv_obj_t* obj) {
         return;
     }
     lv_obj_remove_event_cb(obj, OnReadContentClicked);
+    ReaderSelectDetach(obj);
     // 正文整页热区：进目录/设置后须摘掉，否则空白处仍早震
     HapticDetachClick(obj);
 }
@@ -425,6 +427,7 @@ void AttachReadBodyInput(lv_obj_t* obj) {
     // 页内热区：touch_feed 按下早震；业务回调里勿再 Pulse
     HapticAttachClick(obj);
     lv_obj_add_event_cb(obj, OnReadContentClicked, LV_EVENT_CLICKED, nullptr);
+    ReaderSelectAttach(obj);   // 长按选字
 }
 
 bool QueueReaderPageTurn(int dir) {
@@ -652,16 +655,10 @@ void OpenAssistantFromReaderAsync(void* /*user_data*/) {
         ESP_LOGI(TAG, "assistant from reader: already active");
         return;
     }
-    if (chat_cloud::IsCustom()) {
-        if (Book_State().reader.opening || ReaderPageWorkPending()) { ScreenShowToast("请等待正文翻页完成"); return; }
-        // 自建助理：在书页下方的悬窗里问，不切出去（sim/ 新设计 → 正文 → 问这一页）
-        HapticPulseIfEnabled();
-        OpenReaderAskPanel(false);
-        return;
-    }
+    if (Book_State().reader.opening || ReaderPageWorkPending()) { ScreenShowToast("请等待正文翻页完成"); return; }
+    // 在书页下方的悬窗里问，不切出去（sim/ 新设计 → 正文 → 问这一页）。找谁看「书里提问」，官方云也一样带上这一页。
     HapticPulseIfEnabled();
-    ESP_LOGI(TAG, "assistant from reader -> ScreenNavigateTo (resume via .pos)");
-    ScreenNavigateTo(AssistantScreen::Create);
+    OpenReaderAskPanel(false);
 }
 
 void RequestOpenAssistantFromReader() {

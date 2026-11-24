@@ -1,5 +1,6 @@
 #pragma GCC optimize("O1")
 
+#include "book_screen/reader/book_reader_select.h"
 #include "assistant_screen/assistant_screen.h"
 #include "book_screen/reader/book_layout_worker.h"
 #include "assets/lang_reader.h"
@@ -325,6 +326,7 @@ void OnReadContentClicked(lv_event_t* e) {
         // 目录整页：页内触摸不退出、不翻页；仅盖板 vk 返回
         return;
     }
+    if (ReaderSelectConsumeClick()) return;   // 长按选字松手后的那一下、有选中时点正文（收起选中）
     lv_point_t pt = {};
     if (!ReadEventPoint(e, &pt)) {
         return;

@@ -18,10 +18,12 @@ uint8_t ReadingBackgroundPixel(int mode, int x, int y, int width, int height);
  * @param page_h 完整阅读视口高度；内部按实际占用裁剪输出，保留完整视口的行布局
  * @param image_tops 按页内插图顺序返回插图顶部坐标，可为空
  * @param underline_mode kBookReaderUnderline* 同名取值（0/1/2），本头不依赖 book UI
+ * @param glyphs 不为空时按阅读顺序记下每个字的位置（见 GlyphBox），供长按选字
  */
 bool RasterPageTextToL8(const Page& page, const lv_font_t* font, int spacing_percent,
                         lv_coord_t para_gap, int page_w, int page_h, int underline_mode,
-                        RasterImage& out, bool antialias = false, std::vector<int>* image_tops = nullptr, const TextStyle& style = {});
+                        RasterImage& out, bool antialias = false, std::vector<int>* image_tops = nullptr, const TextStyle& style = {},
+                        std::vector<GlyphBox>* glyphs = nullptr);
 
 /**
  * @brief 将竖排正文画成 L8 位图，按文字方向排列各列

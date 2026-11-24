@@ -16,7 +16,10 @@ inline constexpr Provider kDefaultProvider = Provider::Yunxin;
 inline constexpr Provider kDefaultProvider = Provider::Baiwen;
 #endif
 
+// 书里提问（正文选字、问这一页、书页下方的悬窗）找谁：跟「谁来回答」走，或单独选官方云 / 自己的助理。
+enum class BookAsk { Follow = 0, Official = 1, Custom = 2 };
 namespace detail {
+inline std::atomic<BookAsk> book_ask{BookAsk::Follow};
 inline std::atomic<Provider> saved{kDefaultProvider};
 inline std::atomic<Provider> active{kDefaultProvider};   // 正在用的；换云服务不重启，所以可能在运行中变
 inline std::atomic<bool> local_tts{true};
@@ -33,12 +36,13 @@ inline void InitializeFromNvs() {
     detail::active.store(provider, std::memory_order_release);
     detail::saved.store(provider, std::memory_order_release);
     detail::local_tts.store(settings.GetBool(provider == Provider::Custom ? "agent_tts" : provider == Provider::Yunxin ? "yx_tts" : "xz_tts", true), std::memory_order_release);
+    const int book = settings.GetInt("book_ask", 0);
+    detail::book_ask.store(book >= 0 && book <= 2 ? static_cast<BookAsk>(book) : BookAsk::Follow, std::memory_order_release);
 }
 
-// 换云服务不重启：把已保存的那个设为正在用的，并读回它自己的「回答出声」开关。
+// 换云服务不重启：把 provider 设为正在用的（不改保存的选择），并读回它自己的「回答出声」开关。
 // 只在应用的内部 RAM 任务上调（读 NVS），且旧的对话通道已经拆掉之后。
-inline void ActivateSavedProvider() {
-    const auto provider = detail::saved.load(std::memory_order_acquire);
+inline void ActivateProvider(Provider provider) {
     Settings settings("chat_cloud");
     detail::local_tts.store(settings.GetBool(provider == Provider::Custom ? "agent_tts" : provider == Provider::Yunxin ? "yx_tts" : "xz_tts", true), std::memory_order_release);
     detail::active.store(provider, std::memory_order_release);
@@ -58,6 +62,24 @@ inline void SaveProvider(Provider provider) {
     detail::saved.store(provider, std::memory_order_release);
 }
 
+inline void ActivateSavedProvider() { ActivateProvider(SavedProvider()); }
+inline BookAsk BookAskChoice() { return detail::book_ask.load(std::memory_order_acquire); }
+// 书里提问实际用哪一个
+inline Provider BookProvider() {
+    switch (BookAskChoice()) {
+        case BookAsk::Official: return kDefaultProvider;
+        case BookAsk::Custom: return Provider::Custom;
+        default: return SavedProvider();
+    }
+}
+// Application's internal-RAM task only (writes NVS).
+inline void SaveBookAsk(BookAsk choice) {
+    {
+        Settings settings("chat_cloud", true);
+        settings.SetInt("book_ask", static_cast<int>(choice));
+    }
+    detail::book_ask.store(choice, std::memory_order_release);
+}
 inline bool IsXiaozhi() { return ActiveProvider() == Provider::Xiaozhi; }
 inline bool IsYunxin() { return ActiveProvider() == Provider::Yunxin; }
 inline bool IsCustom() { return ActiveProvider() == Provider::Custom; }
@@ -71,6 +93,10 @@ inline custom_chat::Config CustomConfig() {
 // 「自建」 is selected and an assistant is connected.
 inline bool HasCallEntry() {
     return IsCustom() && valet::LoadAssistantProfiles().Active() != nullptr;
+}
+// 书里（阅读卡片、悬窗）有没有通话：书里提问用的是自己的助理，并且有一个助理
+inline bool BookHasCallEntry() {
+    return BookProvider() == Provider::Custom && valet::LoadAssistantProfiles().Active() != nullptr;
 }
 inline std::string CustomUrl() {
     return CustomConfig().url;
@@ -105,6 +131,12 @@ inline bool CustomConfigured() {
     return active && valet::ValidProfile(*active);
 }
 inline bool Available() { return IsCustom() ? CustomConfigured() : UsesXiaozhiProtocol() || api::HasHost(); }
+// 书里提问用的那一个能不能用（自建要有一个配好的助理；百问要有服务地址）
+inline bool BookProviderReady() {
+    const auto provider = BookProvider();
+    if (provider == Provider::Custom) return CustomConfigured();
+    return provider != Provider::Baiwen || api::HasHost();
+}
 inline const char* WebsocketNamespace() { return IsYunxin() ? "yx_websocket" : IsXiaozhi() ? "xz_websocket" : "websocket"; }
 inline const char* MqttNamespace() { return IsYunxin() ? "yx_mqtt" : IsXiaozhi() ? "xz_mqtt" : "mqtt"; }
 inline std::string YunxinWebsocketUrl(const std::string& mac) {

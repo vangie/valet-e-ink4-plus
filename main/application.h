@@ -36,6 +36,8 @@ enum AecMode {
     kAecOnServerSide,
 };
 
+namespace chat_cloud { enum class Provider; }   // chat_cloud.h
+
 class Application {
 public:
     static Application& GetInstance() {
@@ -62,6 +64,8 @@ public:
     /** @brief 换云服务，不重启：结束对话、拆掉旧的对话通道、换成已保存的云服务，再重新检查激活。
      *         只在 Voice 任务上调（Schedule(..., TaskDomain::Voice)）。 */
     void SwitchChatProviderOnTask();
+    // 正在用的云服务换成 provider，不改保存的选择（书里提问单独选了别的时用）。主任务调用。
+    void UseProviderOnTask(chat_cloud::Provider provider);
     void SetDeviceState(DeviceState state);
     void Alert(const char* status, const char* message, const char* emotion = "");
     void DismissAlert();
@@ -77,6 +81,8 @@ public:
     };
     /** @brief 准备百问 WebSocket 会话，就绪后请求页面上传单张照片 */
     bool AskBaiwenImage();
+    // 「自建」助理：不用录音，直接问一句文字（正文选字卡片上的预设问题、查字典）。连上助理再发。
+    bool AskValetText(const std::string& question);
     /**
      * @brief 在语音任务中完成本轮提问；新轮次会使旧提问失效
      * @param recorded 为 true 时结束录音；false 且 image_id 为空时取消本轮
@@ -185,6 +191,10 @@ private:
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     esp_timer_handle_t yunxin_text_timer_handle_ = nullptr;
+    std::string pending_text_question_;          // 等协议建好再发的文字提问（AskValetText）
+    int pending_text_attempts_ = 0;
+    esp_timer_handle_t text_question_timer_ = nullptr;
+    void TryPendingTextQuestion();
     YunxinTextInbox yunxin_text_inbox_;
     std::atomic<DeviceState> device_state_{kDeviceStateUnknown};
     ListeningMode listening_mode_ = kListeningModeAutoStop;

@@ -625,8 +625,45 @@ static void ShowProxy() {
 void SettingsScreen_OpenProxy() {
     if (s_settings_scr && s_ui.content_page) ShowProxy();
 }
+void SettingsScreen_OpenReading() {
+    if (s_settings_scr && s_ui.content_page) { ShowGroup(3); s_ui.direct = false; }
+}
+// 阅读与字库 → 书里提问：选字查词、问这一页找谁。跟「谁来回答」走，或单独选官方云 / 自己的助理（sim/ 新设计同名一项）。
+static lv_obj_t* s_book_ask_note = nullptr;
+static std::string BookAskNote(chat_cloud::BookAsk choice) {
+    const bool custom = choice == chat_cloud::BookAsk::Custom ||
+        (choice == chat_cloud::BookAsk::Follow && chat_cloud::SavedProvider() == chat_cloud::Provider::Custom);
+    const char* official = chat_cloud::kDefaultProvider == chat_cloud::Provider::Yunxin ? Text("网易", "NetEase") : Text("百问", "Baiwen");
+    std::string note = Text("选字查词、问这一页找谁。", "Who answers selection and page questions. ");
+    if (choice == chat_cloud::BookAsk::Follow)
+        return note + Text("现在和「谁来回答」一样，用", "Same as Who answers: ") + (custom ? Text("自建", "Custom") : official) + Text("。", ".");
+    if (!custom) return note + Text("用", "") + official + Text("：开口快，没有通话。正在读的这一页照样带上。", ": quick, no calls. The page is still attached.");
+    return note + (chat_cloud::CustomConfigured()
+        ? Text("用你自己的助理：能在书页下方通话，回答慢一些。", "Your own assistant: calls work, answers are slower.")
+        : Text("还没连上自己的助理。书里提问时会先让你去连接。", "No assistant connected yet."));
+}
+static void BuildBookAskField() {
+    SettingsValetLabel(s_ui.content_page, Text("书里提问", "Asking in books"));
+    const char* official = chat_cloud::kDefaultProvider == chat_cloud::Provider::Yunxin ? Text("网易", "NetEase") : Text("百问", "Baiwen");
+    const char* const names[] = {Text("跟系统一样", "Same as system"), official, Text("自建", "Custom")};
+    auto* seg = SettingsValetSegments(s_ui.content_page, names, 3, [](lv_event_t* e) {
+        const auto choice = static_cast<chat_cloud::BookAsk>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+        SettingsValetSelect(lv_obj_get_parent(static_cast<lv_obj_t*>(lv_event_get_target(e))), static_cast<int>(choice));
+        if (s_book_ask_note && lv_obj_is_valid(s_book_ask_note)) lv_label_set_text(s_book_ask_note, BookAskNote(choice).c_str());
+        if (choice == chat_cloud::BookAskChoice()) return;
+        // 写 NVS 交给主任务；正在用的云服务等下次在书里提问时再换
+        Application::GetInstance().Schedule([choice] { chat_cloud::SaveBookAsk(choice); });
+    });
+    SettingsValetSelect(seg, static_cast<int>(chat_cloud::BookAskChoice()));
+    s_book_ask_note = SettingsValetNote(s_ui.content_page, BookAskNote(chat_cloud::BookAskChoice()).c_str());
+    lv_obj_add_event_cb(s_book_ask_note, [](lv_event_t* e) {
+        if (s_book_ask_note == lv_event_get_target(e)) s_book_ask_note = nullptr;
+    }, LV_EVENT_DELETE, nullptr);
+    SettingsValetGap(s_ui.content_page);
+}
 static void ShowGroup(int group) {
     if (group < 0 || group >= 6) return;
+    s_book_ask_note = nullptr;
     ClearContent();
     s_ui.group = group;
     lv_label_set_text(s_ui.heading, Text(kGroups[group].zh, kGroups[group].en));
@@ -653,6 +690,7 @@ static void ShowGroup(int group) {
             // on the page being read, where the change can be seen.
             BookReaderPrefsEnsureLoaded();
             BuildFontPackCard();
+            BuildBookAskField();
             SettingsValetLabel(s_ui.content_page, Text("翻页方式", "Page turn"));
             const char* const turns[] = {Text("左右滑动", "Slide"), Text("水波纹", "Ripple"), Text("推白翻页", "Wipe")};
             auto* turn = SettingsValetSegments(s_ui.content_page, turns, 3, [](lv_event_t* e) {

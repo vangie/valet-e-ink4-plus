@@ -89,8 +89,9 @@ void PreparePage(void* data) {
                     ? reader::RasterPageVerticalTextToL8(*page, work->font, result.cursor->LineSpacingPercent(), result.cursor->ParaGap(),
                         result.column_width, work->height, work->underline, result.raster, work->antialias, work->rtl, work->style)
                     : reader::RasterPageTextToL8(*page, work->font, result.cursor->LineSpacingPercent(), result.cursor->ParaGap(),
-                        result.column_width, work->height, work->underline, result.raster, work->antialias, &result.image_tops, work->style);
-                if (!raster_ok) { result.raster.Reset(); result.image_tops.clear(); }
+                        result.column_width, work->height, work->underline, result.raster, work->antialias, &result.image_tops, work->style,
+                        &result.glyphs);
+                if (!raster_ok) { result.raster.Reset(); result.image_tops.clear(); result.glyphs.clear(); }
                 if (raster_ok) result.ink_height = result.raster.height;
                 if (raster_ok && result.background) {
                     const auto& background = *result.background;

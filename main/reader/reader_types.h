@@ -67,6 +67,16 @@ struct Page {
     std::vector<PageItem> items;
 };
 
+// 正文页上一个字的位置（横排光栅时顺带记下，长按选字用）。坐标是这一页正文位图里的像素。
+// item / begin / len：这个字在 Page::items[item].text 里的字节位置。x0..x1 是字格（相邻两字首尾相接，不重叠），
+// y0..y1 是这一行的字形行框。
+struct GlyphBox {
+    uint16_t item = 0;
+    uint16_t begin = 0;
+    uint8_t len = 0;
+    int16_t x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+};
+
 struct TextStyle {
     int line_gap = -1; // 行间首选留白像素，负数沿用相对行距
     int letter_gap = 0; // 每字额外步进像素

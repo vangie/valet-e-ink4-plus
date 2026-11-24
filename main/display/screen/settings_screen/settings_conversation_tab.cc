@@ -691,7 +691,8 @@ void SettingsConversationTab_Build(lv_obj_t* page) {
     s_ui.alive = true;
     s_page = page;
     lv_obj_set_style_pad_row(page, 0, 0);
-    const bool custom = chat_cloud::IsCustom();
+    // 显示保存的选择：在书里提问时正在用的可能临时是另一个（见 阅读与字库 → 书里提问）
+    const bool custom = chat_cloud::SavedProvider() == chat_cloud::Provider::Custom;
     // While an assistant is being added the page does that one thing.
     const bool adding = custom && s_setup_visible;
 
@@ -699,7 +700,7 @@ void SettingsConversationTab_Build(lv_obj_t* page) {
     if (!adding) {
         const auto profiles = valet::LoadAssistantProfiles();
         const auto* active = profiles.Active();
-        std::string title = ProviderName(chat_cloud::ActiveProvider()), detail;
+        std::string title = ProviderName(chat_cloud::SavedProvider()), detail;
         bool ok = true;
         if (!custom) detail = CloudText("官方订阅，正在用", "Official plan, in use");
         else if (active) {
@@ -718,10 +719,18 @@ void SettingsConversationTab_Build(lv_obj_t* page) {
         s_ui.provider_seg = SettingsValetSegments(page, names, 2, OnCloudClicked, kValues);
         s_ui.cloud_status = SettingsValetNote(page, "");
         if (!custom) {
-            const std::string plan = official + CloudText("用的是随机送的订阅。只有按住说话，没有通话，也拿不到正在读的那一页。",
-                                                         " uses the bundled plan: hold to talk only, no calls, no reading context.");
+            const std::string plan = official + CloudText("用的是随机送的订阅。只有按住说话，没有通话。",
+                                                         " uses the bundled plan: hold to talk, no calls.");
             // Its own paragraph: the line above is about switching, this one about the current service.
             lv_obj_set_style_margin_top(SettingsValetNote(page, plan.c_str()), 14, 0);
+        }
+        // 书里提问单独设了：说一声，免得在书里发现不是同一个助理；点进去改
+        if (chat_cloud::BookAskChoice() != chat_cloud::BookAsk::Follow) {
+            const std::string title = std::string(CloudText("书里提问另外设了：", "In books you use: ")) +
+                ProviderName(chat_cloud::BookProvider());
+            SettingsValetGap(page, 14);
+            SettingsValetRow(page, title.c_str(), CloudText("选字和问这一页走它 · 去阅读与字库改", "Selection and page questions · change in Reading"),
+                             [](lv_event_t*) { lv_async_call([](void*) { SettingsScreen_OpenReading(); }, nullptr); }, 0, true);
         }
         SettingsValetGap(page, 30);
     } else {

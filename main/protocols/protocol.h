@@ -71,6 +71,8 @@ public:
     virtual bool IsAudioChannelOpened() const = 0;
     virtual bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) = 0;
     virtual void SendWakeWordDetected(const std::string& wake_word);
+    // 不用录音，直接问一句文字（官方云：和拍照提问一样走 listen/detect，文字放在 text 里）
+    virtual bool SendTextQuestion(const std::string& text);
     virtual void SendStartListening(ListeningMode mode);
     virtual void SendStopListening();
     /** @brief 提交单张照片问题，录音问题附在 stop 消息中 */

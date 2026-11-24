@@ -173,6 +173,18 @@ void Assistant_BuildIdleHint(lv_obj_t* host) {
     const int top = Assistant_ValetBodyTop();
     if (Assistant_State().chrome.panel) {
         // 悬窗：一句话就够，标题栏已经写着「问这一页 · 第几页」
+        // 从正文选字进来：写出问的是哪几个字（句末标点不进引号）
+        const auto quote = valet::CurrentReadingQuote();
+        if (quote.Valid()) {
+            std::string q = quote.text;
+            for (const char* mark : {"\xe3\x80\x82", "\xef\xbc\x8c", "\xef\xbc\x81", "\xef\xbc\x9f", "\xef\xbc\x9b", "\xe3\x80\x81"})
+                while (q.size() > 3 && q.compare(q.size() - 3, 3, mark) == 0) q.resize(q.size() - 3);
+            const std::string tip = en ? "About \"" + q + "\". Hold to talk below." : "问「" + q + "」。按住下面说话，问完接着读。";
+            lv_obj_t* label = Label(host, tip.c_str(), kSide, top + 30, width - 2 * kSide, regular);
+            lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+            lv_obj_set_height(label, regular->line_height * 3);
+            return;
+        }
         Label(host, en ? "The page is attached. Hold to talk below, then keep reading."
                        : "正文已经带上。按住下面说话，问完接着读。",
               kSide, top + 30, width - 2 * kSide, regular);

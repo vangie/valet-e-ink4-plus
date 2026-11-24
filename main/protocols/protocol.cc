@@ -55,6 +55,20 @@ void Protocol::SendWakeWordDetected(const std::string& wake_word) {
     SendText(json);
 }
 
+bool Protocol::SendTextQuestion(const std::string& text) {
+    std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_CreateObject(), cJSON_Delete);
+    if (!root) return false;
+    cJSON_AddStringToObject(root.get(), "session_id", session_id_.c_str());
+    cJSON_AddStringToObject(root.get(), "type", "listen");
+    cJSON_AddStringToObject(root.get(), "state", "detect");
+    cJSON_AddStringToObject(root.get(), "mode", "auto");
+    cJSON_AddStringToObject(root.get(), "text", text.c_str());
+    std::unique_ptr<char, decltype(&cJSON_free)> json(cJSON_PrintUnformatted(root.get()), cJSON_free);
+    if (!json || !SendText(json.get())) { ESP_LOGW(TAG, "text question: send failed"); return false; }
+    ESP_LOGI(TAG, "text question sent, %u bytes", unsigned(text.size()));
+    return true;
+}
+
 void Protocol::SendStartListening(ListeningMode mode) {
     std::string message = "{\"session_id\":\"" + session_id_ + "\"";
     message += ",\"type\":\"listen\",\"state\":\"start\"";
