@@ -15,12 +15,27 @@ function L(zh, en) {
 function agentReady() {
   return state.paired && /^wss?:\/\/.+/.test(state.gateway) && state.pair.trim() !== "";
 }
+// 书里提问（选字、问这一页、悬窗）可以和「谁来回答」不一样：设置 → 阅读与字库 → 书里提问。默认跟着走。
+// 比如平时用自己的助理，书里用百问：开口快，查词解句用不着那么聪明。官方云也能拿到这一页（设备上的「取当前页」工具）。
+function officialProvider() {
+  return "baiwen";
+}
+function bookProvider() {
+  return state.bookAsk === "follow" ? state.provider : state.bookAsk === "official" ? officialProvider() : "agent";
+}
+function inBook() {
+  return state.float || state.screen === "reader";
+}
+// 现在这个地方用谁：正文和悬窗里看书里提问，别处看「谁来回答」
+function hereProvider() {
+  return inBook() ? bookProvider() : state.provider;
+}
 // 通话只属于自己的助理：没选「自建」或还没配对时，哪里都不出现通话入口。
 function callEntry() {
-  return state.provider === "agent" && agentReady();
+  return hereProvider() === "agent" && agentReady();
 }
 function onBook() {
-  return state.provider === "agent" && state.sessionType === "book";
+  return state.sessionType === "book" && (state.float || state.provider === "agent");
 }
 // 当前这一场。带书时每一页各有一条「注」，不带书是单独一场。
 function nowTalk() {
@@ -58,6 +73,8 @@ const V2_ICONS = {
   shelf: '<path d="M5 4v15.5M9.5 4v15.5M13.5 5.5l4.5 14M3 20h18"/>',
   buddy: '<path d="M4 4.5h16v11.5h-9l-4.5 4v-4H4z"/><path d="M8.5 10.3h.01M12 10.3h.01M15.5 10.3h.01"/>',
   store: '<path d="M5 8.5h14l-1 12H6zM9 8.5V7a3 3 0 0 1 6 0v1.5"/>',
+  sentence: '<path d="M4 6h16M4 12h16M4 18h9"/><path d="M17 16v4h3"/>',
+  quest: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6M12 17.2h.01"/>',
 };
 function ic(name, cls = "") {
   return `<svg class="ic${cls ? " " + cls : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${V2_ICONS[name]}</svg>`;
@@ -181,13 +198,14 @@ function v2Head(title, sub = "", right = "") {
 
 // ── 可以问的话（假数据）。一项是 [按钮上的字, 问的那句, 回答分页, 顺带做的事]。
 function v2Sugs() {
-  if (state.provider !== "agent") {
+  if (hereProvider() !== "agent" && !state.float) {
     return [
       ["这一页在讲什么？", "这一页在讲什么？", ["我不知道你在读哪一页。把这段念给我听，我再帮你看。"]],
       ["三国演义从哪里开始讲？", "三国演义从哪里开始讲？", ["开篇从「分久必合，合久必分」讲起。"]],
       ["明天出门要带伞吗？", "明天出门要带伞吗？", ["明天多云转小雨，18 到 22 度。", "下午三点以后有雨，出门带把伞。"]],
     ];
   }
+  if (v2.quote) return v2QuoteSugs(v2.quote);
   if (state.sessionType !== "book") {
     return [
       ["记一条待办", "帮我记一下，周六去取装裱的字。", ["记下了：周六去取装裱的字。", "已经放进每日清单，首页的待办多了一条。"], () => {
@@ -248,7 +266,7 @@ function v2LeaveAi() {
 }
 // 松手发送前：把这次问的那句和回答放进当前这一场。
 function v2Commit() {
-  if (state.provider === "agent" && !agentReady()) {
+  if (hereProvider() === "agent" && !agentReady()) {
     toast(L("还没连上你的助手", "Assistant not connected"));
     return false;
   }
@@ -282,7 +300,10 @@ function v2SwitchSubject(type) {
 // 回答太长、要看以前的问答、要随口问或拍照时点「全屏」去完整助手页，同一场对话；从那里返回又回到悬窗。
 function v2OpenFloat(live) {
   // 官方云拿不到正在读的这一页，照旧进完整的百问页；还没连上自己的助手也去完整页（那里有「去连接」）
-  if (state.provider !== "agent" || !agentReady()) return live ? v2GoLive() : go("ai");
+  // 书里提问用自己的助理但还没连上：去完整页（那里有「去连接」）。用官方云时悬窗照样开，只是没有通话。
+  const agent = bookProvider() === "agent";
+  if (agent && !agentReady()) return live ? v2GoLive() : go("ai");
+  if (live && !agent) return toast(L(`书里提问用的是${PROVIDERS[bookProvider()]}，没有通话`, "Calls need Custom"));
   if (live && !assistantCaps().live) return toast(L("这个助理还没配置通话", "This assistant has no Call set up"));
   const was = state.float;
   state.sheet = false;
@@ -308,6 +329,7 @@ function v2CloseFloat(why) {
   nowTalk().p = state.answerPage;
   stopSession();
   state.float = false;
+  v2.quote = null;
   log(`${why}：收起悬窗，接着读第 ${state.page + 1} 页。${state.answered ? "这一页的注留着。" : ""}`);
   render();
   return true;
@@ -317,6 +339,16 @@ function v2SnapFloat() {
   const float = document.querySelector(".v-float"), body = document.querySelector(".v-read .read-body");
   if (!float || !body) return;
   const read = float.parentElement.getBoundingClientRect();
+  // 从选字进来：开在选中的字下面，不盖住问的那几个字；悬窗至少留屏高的 43%（设备上 1212 里的 520 像素），选得太靠下就盖住一部分
+  const sel = [...body.querySelectorAll(".sel")].pop();
+  if (v2.quote && sel) {
+    const scale0 = read.height / float.parentElement.offsetHeight || 1;
+    const minH = read.height * 520 / 1212, below = sel.getBoundingClientRect().bottom + 4 * scale0;
+    if (below > read.top + read.height * 0.25) {
+      float.style.height = `${Math.round((read.bottom - Math.min(below, read.bottom - minH)) / scale0)}px`;
+      return;
+    }
+  }
   const want = read.top + read.height * 0.25;   // 3/4 高时的上沿
   let best = 0;
   const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
@@ -355,7 +387,10 @@ function v2FloatBody(s) {
     return `${v2Answer(s)}${long}`;
   }
   const sugs = v2Sugs().slice(0, 2).map(([label], i) => `<button data-sug="${i}">${glyphs(esc(label))}${ic("go")}</button>`).join("");
-  return `<p class="v-float-tip">${L("正文已经带上。按住下面说话，问完接着读。", "The page is attached. Hold to talk, then keep reading.")}</p><div class="v-float-sugs">${sugs}</div>`;
+  const qt = v2.quote && v2.quote.text.replace(/[。！？；，、]+$/, "");   // 句末的标点不跟着进引号，免得「…。」。
+  const tip = v2.quote ? L(`问「${qt}」。点下面的问题，或按住说话。`, `About "${qt}". Tap a question or hold to talk.`)
+    : L("正文已经带上。按住下面说话，问完接着读。", "The page is attached. Hold to talk, then keep reading.");
+  return `<p class="v-float-tip">${glyphs(esc(tip))}</p><div class="v-float-sugs">${sugs}</div>`;
 }
 function v2Float() {
   const s = nowTalk();
@@ -370,7 +405,7 @@ function v2Float() {
     : `<div class="v-talk${state.listening ? " rec" : ""}"><i></i><span data-hold>${state.listening ? L("松开发送", "Release to send") : L("按住说话", "Hold to talk")}</span>
       ${callEntry() ? `<button class="tolive" data-live>${ic("wave")}${L("通话", "Call")}</button>` : ""}</div>`;
   return `<div class="v-float">
-    <div class="v-float-head"><b>${state.live ? L("聊这一页", "Talking about it") : L("问这一页", "Ask this page")}</b><span>${L(`第 ${state.page + 1} 页`, `p.${state.page + 1}`)} · ${esc(v2Who())}</span>
+    <div class="v-float-head"><b>${state.live ? L("聊这一页", "Talking about it") : v2.quote ? L("问 AI", "Ask AI") : L("问这一页", "Ask this page")}</b><span>${v2.quote && !state.live ? `「${glyphs(esc([...v2.quote.text].length > 6 ? [...v2.quote.text].slice(0, 6).join("") + "…" : v2.quote.text))}」` : L(`第 ${state.page + 1} 页`, `p.${state.page + 1}`)} · ${esc(hereProvider() === "agent" ? v2Who() : `${PROVIDERS[hereProvider()]}AI`)}</span>
       <button class="v-txt" data-float-expand>${L("全屏", "Full screen")}</button><button class="v-float-x" data-float-close aria-label="${L("收起", "Close")}">${ic("x")}</button></div>
     <div class="v-float-body">${v2FloatBody(s)}</div>${pager}${foot}</div>`;
 }
@@ -380,7 +415,7 @@ function v2Ask() {
   if (state.live) switchMode("ask");
 }
 function v2GoLive() {
-  if (state.screen === "reader" && state.provider === "agent" && agentReady()) return v2OpenFloat(true);
+  if (state.screen === "reader" && bookProvider() === "agent" && agentReady()) return v2OpenFloat(true);
   if (state.screen !== "ai") go("ai");
   if (state.provider !== "agent") return toast(L("通话要用「自建」", "Calls need Custom"));
   if (!agentReady()) return render();
@@ -475,7 +510,7 @@ function v2Chin(dir) {
 
 // ── 首页
 function v2Who() {
-  if (state.provider !== "agent") return `${PROVIDERS[state.provider]} · ${L("官方订阅", "official plan")}`;
+  if (hereProvider() !== "agent") return `${PROVIDERS[hereProvider()]} · ${L("官方订阅", "official plan")}`;
   const current = state.assistants.find((item) => item.id === state.activeAssistant);
   return agentReady() ? `${current?.name || L("自建", "Custom")} · ${state.gatewayKind}` : L("自建 · 还没配对", "Custom · not paired");
 }
@@ -649,11 +684,11 @@ function v2Ai() {
 
 // ── 正文：页面上不放按钮。问过的页有「注」，缺字形的页在页脚提示。
 function v2Reader() {
-  const agent = state.provider === "agent";
+  const agent = true;   // 官方云也拿得到这一页（悬窗、注都一样）；没连上的自建在 v2OpenFloat 里去连接
   const note = v2.notes[state.page];
   const marked = agent && note && note.a.length > 0;
   const miss = missingGlyphs(state.page);
-  const body = pages[state.page].map((p) => `<p>${glyphs(p)}</p>`).join("");
+  const body = v2ReadBody();
   const tabs = sheetTabs().map((name, i) => `<span data-sheet="${i}" class="${state.sheetTab === i ? "on" : ""}">${name}</span>`).join("");
   const pack = state.sheetTab === 1
     ? `<button class="v-pack" data-setting="read"><span>${L("扩展字库", "Extended fonts")}：${state.fontpack ? L("已安装", "installed") : L(miss ? `未安装，这一页缺 ${miss} 个字` : "未安装", "not installed")}</span>${ic("go")}</button>` : "";
@@ -667,7 +702,7 @@ function v2Reader() {
     <div class="read-head"><span>三国演义 · 第一回</span>${marked ? `<button class="v-mark" data-ask>${L("注", "Note")}</button>` : ""}</div>
     <div class="read-body">${body}</div>
     <div class="read-foot"><span>10:48</span>${miss ? `<button class="v-miss" data-fontfix>${L(`缺 ${miss} 个字`, `${miss} missing`)}</button>` : `<span>${state.battery}%</span>`}<span>${state.page + 1} / ${pages.length}</span></div>
-    ${state.sheet ? `<div class="v-shade" data-sheet-shade></div>` : ""}${sheet}${state.float ? v2Float() : ""}</div>`;
+    ${state.sheet ? `<div class="v-shade" data-sheet-shade></div>` : ""}${sheet}${state.float ? v2Float() : ""}${v2.sel && !v2.drag ? v2SelPop() : ""}</div>`;
 }
 
 // ── 设置：按「我想做什么」分六项，每项直接写着现在的值。不滚动。
@@ -790,16 +825,31 @@ function assistantSetupScreen() {
     <button class="v-line" data-assistant-action="cancel">${L("取消", "Cancel")}</button></div>`;
 }
 
+// 阅读与字库 → 书里提问：跟「谁来回答」走，或者单独选官方云 / 自己的助理
+function v2BookAskField() {
+  const official = officialProvider(), now = bookProvider();
+  const note = state.bookAsk === "follow"
+    ? L(`现在和「谁来回答」一样，用${PROVIDERS[state.provider]}。`, `Same as Who answers: ${PROVIDERS[state.provider]}.`)
+    : now === "agent"
+      ? (agentReady() ? L("用你自己的助理：能在书页下方通话，回答慢一些。", "Your own assistant: calls work, answers are slower.")
+        : L("还没连上自己的助理。书里提问时会先让你去连接。", "No assistant connected yet."))
+      : L(`用${PROVIDERS[official]}：开口快，没有通话。正在读的这一页照样带上。`, `${PROVIDERS[official]}: quick, no calls. The page is still attached.`);
+  return v2Fld(L("书里提问", "Asking in books"),
+    v2Seg([["follow", L("跟系统一样", "Same as system")], ["official", PROVIDERS[official]], ["agent", L("自建", "Custom")]], state.bookAsk, "data-bookask"),
+    L("选字查词、问这一页找谁。", "Who answers selection and page questions. ") + note);
+}
+
 function v2SettingsPane(id) {
   if (id === "talk") {
     const agent = state.pendingProvider === "agent";
     const ok = agentReady();
     const mine = agent ? assistantConnection()
-      : `<p class="v-tip">${L(`${PROVIDERS[state.pendingProvider]}用的是随机送的订阅。只有按住说话，没有通话，也拿不到正在读的那一页。`, "Official plan: hold to talk only.")}</p>`;
+      : `<p class="v-tip">${L(`${PROVIDERS[state.pendingProvider]}用的是随机送的订阅。只有按住说话，没有通话。`, "Official plan: hold to talk, no calls.")}</p>`;
     // 添加助理时整屏只做这一件事，不再同时放「谁来回答」。
     if (agent && state.assistantSetup) return mine;
     // 换了马上生效，不重启；正在进行的对话会结束
-    const reboot = `<p class="v-tip">${L("换一个马上生效，不用重启。正在进行的对话会结束。", "Takes effect at once, no restart. A conversation in progress ends.")}</p>`;
+    const reboot = `<p class="v-tip">${L("换一个马上生效，不用重启。正在进行的对话会结束。", "Takes effect at once, no restart. A conversation in progress ends.")}</p>`
+      + (state.bookAsk !== "follow" ? `<button class="v-row" data-setting="read"><span><b>${L("书里提问另外设了", "In books you use")}：${PROVIDERS[bookProvider()]}</b><em>${L("选字和问这一页走它 · 去阅读与字库改", "Selection and page questions · change in Reading")}</em></span>${ic("go")}</button>` : "");
     return `<div class="v-card${agent && !ok ? " bad" : ""}">${ic(agent && !ok ? "x" : "check")}<span><b>${state.provider === "agent" ? v2Who() : PROVIDERS[state.provider]}</b>
         <em>${state.provider !== "agent" ? L("官方订阅，正在用", "Official plan, in use") : state.assistantSetup ? L("正在配置 · 原有配对保留", "Setup in progress") : ok ? L(`已配对 · 走 ${state.link === "4G" ? "4G" : "Wi-Fi"}`, "Paired") : L("尚未连接", "Not connected")}</em></span></div>
       ${v2Fld(L("谁来回答", "Who answers"), v2Seg(providerChoices(), state.pendingProvider, "data-provider"))}${mine}${reboot}`;
@@ -861,6 +911,7 @@ function v2SettingsPane(id) {
       <p class="v-tip">${L("这不是屏的限制，是缺字形。把 extended-fonts.fontpack（约 255 MB）传到 SD 卡，再重新打开书。", "Not a screen limit. Copy extended-fonts.fontpack (about 255 MB) to the SD card.")}</p>
       <div class="v-two"><button class="v-line" data-go="transfer">${L("去传输页上传", "Open Transfer")}</button><button class="v-line dashed" data-fontpack>${state.fontpack ? L("假的：当作没装", "Fake: remove") : L("假的：当作已装好", "Fake: installed")}</button></div>
       ${v2Fld(L("正文字号", "Text size"), `<div class="v-step"><button data-size="-">A−</button><b>${state.fontSize}</b><button data-size="+">A+</button></div>`, L("字体、边距、行距在正文里点屏幕中间改。", "Font, margins and spacing are in the reading card."))}
+      ${v2BookAskField()}
       ${shakeOptions}
       <nav class="v-rows">${v2Row("pager", "", L("翻页器", "Page turner"), state.pagerOn ? "PageTurner-A · " + L("已连接", "connected") : L("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"))}</nav>`;
   }
@@ -1308,3 +1359,270 @@ panel.addEventListener("contextmenu", (e) => {
   log(`长按快捷面板的开关：进设置 → ${target}。`);
   openSetting(target);
 });
+
+
+// ── 选字：长按正文选中一个词（词表里最长的那个；没有就是这个字），可以换成整句。
+// 选中后底下出卡片，几个现成的问题直接问 AI：查字典（读音、意思）、解读（结合上下文），或者自己问。
+// 都走自己的助理，正文这一页一起带上；设备上不放词典。划线和笔记以后再做。
+// 下面这些词：模拟界面里分词用，也是「查字典」的假回答。
+const DICT = {
+  "大势": ["dà shì", "名", ["事情发展的总的趋势；局势。", "「天下大势」：整个天下分合的走向。"]],
+  "分久必合": ["fēn jiǔ bì hé", "成语", ["分裂久了必定会统一。常和「合久必分」连用。"]],
+  "合久必分": ["hé jiǔ bì fēn", "成语", ["统一久了又会分裂。"]],
+  "周末": ["zhōu mò", "名", ["① 一个星期的末尾。", "② 周朝末年（这里是这个意思）。"]],
+  "七国": ["qī guó", "名", ["战国时的七个大国：齐、楚、燕、韩、赵、魏、秦。"]],
+  "分争": ["fēn zhēng", "动", ["分裂开来互相争斗。"]],
+  "起义": ["qǐ yì", "动", ["为反抗统治而发动武装斗争。"]],
+  "一统": ["yī tǒng", "动", ["统一（全国）。"]],
+  "中兴": ["zhōng xīng", "动", ["衰落以后重新兴盛。「光武中兴」指刘秀重建汉朝。"]],
+  "献帝": ["xiàn dì", "名", ["汉献帝刘协，东汉最后一个皇帝。"]],
+  "望日": ["wàng rì", "名", ["农历每月十五。"]],
+  "骤起": ["zhòu qǐ", "动", ["突然刮起、突然发生。"]],
+  "蟠": ["pán", "动", ["盘曲；环绕。"]],
+  "须臾": ["xū yú", "名", ["极短的时间；片刻。"]],
+  "冰雹": ["bīng báo", "名", ["夏天随雷雨落下的冰块。"]],
+  "泛溢": ["fàn yì", "动", ["（水）漫出来。"]],
+  "雌鸡化雄": ["cí jī huà xióng", "成语", ["母鸡变成公鸡。古人看作阴阳颠倒的凶兆。"]],
+  "朔": ["shuò", "名", ["农历每月初一。"]],
+  "玉堂": ["yù táng", "名", ["宫殿的美称。"]],
+  "崩裂": ["bēng liè", "动", ["（山石等）塌下来裂开。"]],
+};
+const SEL_STOP = /[，。、；：！？「」『』（）]/;
+const SEL_END = /[。！？；]/;
+v2.sel = null;     // {page, para, start, end, at, mode: "word"|"sentence"|"free"}（free = 手指拖出来的范围）
+v2.drag = null;    // 正在拖：{para, a, b, which: "grow"|"s"|"e"}
+v2.quote = null;   // 问 AI 时带上的那个词或句子：{text, mode, sentence, page, para, start, end}；悬窗开着时正文里还反显着
+
+function v2ReadBody() {
+  const on1 = v2.sel || (state.float && v2.quote);
+  const sel = on1 && on1.page === state.page ? on1 : null;
+  return pages[state.page].map((text, pi) => {
+    let html = "";
+    [...text].forEach((ch, ci) => {
+      const on = sel && sel.para === pi && ci >= sel.start && ci < sel.end;
+      // 长按后手指还按着、正在往外扩时不画把手（和设备一样），免得把手挡住旁边的字
+      const hdl = v2.sel === sel && sel && sel.para === pi && !(v2.drag && v2.drag.which === "grow");   // 只有正在选的时候带两个把手，问的时候只反显
+      // 把手放在两头那个字里面（绝对定位），不占位置，不让这一段重新排行
+      const h = hdl ? (ci === sel.start ? `<i class="v-hdl s" data-hdl="s"></i>` : "") + (ci === sel.end - 1 ? `<i class="v-hdl e" data-hdl="e"></i>` : "") : "";
+      html += `<span data-ch="${pi}:${ci}"${on ? ' class="sel"' : ""}>${glyphs(ch)}${h}</span>`;
+    });
+    return `<p>${html}</p>`;
+  }).join("");
+}
+// 长按选中的范围：和设备一样，中文只选按到的那一个字，英文选整个单词。要选词就接着滑或拖把手。
+// （设备上没有词表；以后 SD 卡上有了词表，两边再一起改成选整个词。DICT 只用来给假回答。）
+function v2WordAt(text, i) {
+  const word = (c) => /[A-Za-z0-9'\u00C0-\u024F]/.test(c || "");
+  if (!word(text[i])) return [i, i + 1];
+  let a = i, b = i + 1;
+  while (a > 0 && word(text[a - 1])) a--;
+  while (b < text.length && word(text[b])) b++;
+  return [a, b];
+}
+function v2SentenceAt(text, i) {
+  let a = i, b = i;
+  while (a > 0 && !SEL_END.test(text[a - 1])) a--;
+  while (b < text.length && !SEL_END.test(text[b])) b++;
+  return [a, Math.min(text.length, b + 1)];
+}
+function v2SelText() {
+  const sel = v2.sel;
+  return [...pages[sel.page][sel.para]].slice(sel.start, sel.end).join("");
+}
+function v2SelectAt(ref) {
+  const [pi, ci] = ref.split(":").map(Number);
+  const text = [...pages[state.page][pi]].join("");
+  if (SEL_STOP.test(text[ci])) return;
+  if (state.float) v2CloseFloat("长按正文换一处问");   // 悬窗开着：先收起，再选这一处
+  const [start, end] = v2WordAt(text, ci);
+  v2.drag = null;   // 新的一次选择：上一次没收到的松手不留着
+  v2.sel = { page: state.page, para: pi, start, end, at: ci, mode: "word" };
+  state.sheet = false;
+  log(`长按「${text[ci]}」：选中「${v2SelText()}」。`);
+  render();
+}
+// 卡片里的现成问题：[按钮上的字, 一句说明, 问的那句]。整句不查字典。
+// 拖出来的范围：四个字以内当词（能查字典），再长当一句来解读
+function v2SelKind(text, mode) {
+  return mode === "word" || (mode === "free" && [...text].length <= 4) ? "word" : "sentence";
+}
+// 卡片上面那几行：预设好的问题，点一下就问，不用自己说。固定句式（和设备一样）：卡片一出来就有，不用联网、不花用量。
+// 以后可以加一个开关，让助理按上下文生成更贴切的问题。
+function v2SelPresets(q) {
+  if (q.mode === "sentence") return [
+    [L("没看懂，解释一下这句", "Explain this sentence"), q.sentence.includes("汉朝")
+      ? ["这一句把汉朝四百年一笔带过：高祖起兵，光武中兴，到献帝分成三国。", "交代完这个大背景，下面才开始讲具体的人和事。"]
+      : ["这一句在交代背景：天下分久了会合，合久了会分。", "后面一百二十回，都照着这个走向写。"]],
+    [L("这句在书里起什么作用？", "Why is it here?"), ["这是开篇的总纲，先把天下分合的大势摆出来。", "后面每一段兴亡，都是这个走向里的一环。"]],
+    [L("讲讲这句的背景", "What's the background?"), ["东汉末年朝政腐败，天灾不断，黄巾起义后各地军阀割据。", "这就是三国故事开场时的局面。"]],
+  ];
+  const entry = DICT[q.text];
+  const out = [[`「${q.text}」${L("在这里是什么意思？", " — what does it mean here?")}`,
+    [`「${q.text}」在这里：${entry ? entry[2][0] : "照字面理解就行。"}`, `放回这句「${q.sentence}」里，是在交代时势。`]]];
+  out.push([L("没看懂这句，解释一下", "Explain the sentence"), ["这一句在交代背景：天下分久了会合，合久了会分。", "后面一百二十回，都照着这个走向写。"]]);
+  return out;
+}
+// 底下「查字典」问的那句和假回答（读音和词典意思一页，在这一句里取哪个意思一页）
+function v2SelLook(q) {
+  const entry = DICT[q.text];
+  return [L("查字典", "Dictionary"), `「${q.text}」怎么读，是什么意思？`, entry
+    ? [`${entry[0]}（${entry[1]}）：${entry[2][0]}`, entry[2][1] || "这一句里就是这个意思。"]
+    : [`「${q.text}」是常用字词，照字面理解就行。`, "这一句里没有特别的用法。"]];
+}
+function v2SelQuote() {
+  const sel = v2.sel, text = v2SelText();
+  const para = [...pages[sel.page][sel.para]].join(""), [a, b] = v2SentenceAt(para, sel.at);
+  return { text, mode: v2SelKind(text, sel.mode), sentence: para.slice(a, b), page: sel.page, para: sel.para, start: sel.start, end: sel.end };
+}
+
+// 选中后在选中的字旁边浮出一条小菜单（像手机上的复制粘贴条）：上面放得下就在上面，不然在下面，
+// 不管选的是页首还是页尾都不挡字。拖把手的时候先收起，松手再出来。
+function v2SelPop() {
+  const sel = v2.sel, q = v2SelQuote(), word = q.mode === "word";
+  const agent = bookProvider() !== "agent" || agentReady();
+  // 上面：预设问题，一行一条；没连上自己的助理时换成一句说明和去连接
+  const top = agent
+    ? v2SelPresets(q).map(([text], i) => `<button data-sel-ask="${i}">${ic("quest")}<span>${glyphs(esc(text))}</span></button>`).join("")
+    : `<p class="v-pop-tip">${glyphs(L("查字典、问 AI 要连上自己的助理。", "Needs your own assistant."))}</p><button data-setting="talk">${ic("go")}<span>${L("去连接", "Connect")}</span></button>`;
+  // 下面一排：查字典 / 整句 / 问 AI。整句是开关：按下去是整句，再按回到原来那个词
+  const tools = `<div class="v-pop-tools">
+    <button data-sel-look ${agent && word ? "" : "disabled"}>${ic("book")}<span>${L("查字典", "Dictionary")}</span></button>
+    <button data-sel-mode="${sel.mode === "sentence" ? "word" : "sentence"}" class="${sel.mode === "sentence" ? "on" : ""}">${ic("sentence")}<span>${L("整句", "Sentence")}</span></button>
+    <button data-sel-own ${agent ? "" : "disabled"}>${ic("mic")}<span>${L("问 AI", "Ask AI")}</span></button></div>`;
+  return `<div class="v-selpop" data-selpop><div class="v-pop-qs">${top}</div>${tools}<i class="v-pop-arrow"></i></div>`;
+}
+// 菜单放在选中范围的上方或下方，横向对着选中的字，不出屏
+function v2PlaceSelPop() {
+  const pop = document.querySelector(".v-selpop"), read = document.querySelector(".v-read");
+  const on = [...document.querySelectorAll(".read-body .sel")];
+  if (!pop || !read || !on.length) return;
+  const box = read.getBoundingClientRect(), scale = box.height / read.offsetHeight || 1;
+  const rect = (el) => { const r = el.getBoundingClientRect(); return { l: (r.left - box.left) / scale, r: (r.right - box.left) / scale, t: (r.top - box.top) / scale, b: (r.bottom - box.top) / scale }; };
+  const first = rect(on[0]), last = rect(on[on.length - 1]);
+  const topLine = on.filter((el) => Math.abs(rect(el).t - first.t) < 2).map(rect);
+  const botLine = on.filter((el) => Math.abs(rect(el).t - last.t) < 2).map(rect);
+  const gap = 16;   // 让出把手的圆点
+  const w = pop.offsetWidth, h = pop.offsetHeight, W = read.offsetWidth, headH = 30;
+  const above = first.t - gap - h >= headH;
+  const line = above ? topLine : botLine;
+  const cx = (Math.min(...line.map((r) => r.l)) + Math.max(...line.map((r) => r.r))) / 2;
+  const x = Math.max(8, Math.min(W - 8 - w, cx - w / 2));
+  pop.style.left = `${x}px`;
+  const H = read.offsetHeight;
+  pop.style.top = `${Math.max(headH, Math.min(H - h - 8, above ? first.t - gap - h : last.b + gap))}px`;
+  pop.classList.toggle("below", !above);
+  pop.querySelector(".v-pop-arrow").style.left = `${Math.max(10, Math.min(w - 10, cx - x))}px`;
+}
+// 悬窗里带着选中的字：上面几条预设问题照样能点，选词时最后一条是查字典
+function v2QuoteSugs(q) {
+  const out = v2SelPresets(q).map(([text, answer]) => [text, text, answer]);
+  if (q.mode === "word") out.push(v2SelLook(q));
+  return out;
+}
+
+// 长按：设备上按住约半秒；模拟界面里按住或右键都行
+let selTimer = null, selFired = false;
+panel.addEventListener("pointerdown", (e) => {
+  selFired = false;   // 只吞掉长按松手后紧跟的那一下点按
+  // 拖把手：一头固定，另一头跟着手指
+  const hdl = isV2() && v2.sel && e.target.closest("[data-hdl]");
+  if (hdl) {
+    e.preventDefault();
+    const sel = v2.sel;
+    v2.drag = { para: sel.para, a: sel.start, b: sel.end, which: hdl.dataset.hdl };
+    try { panel.setPointerCapture(e.pointerId); } catch {}
+    return render();
+  }
+  if (!isV2() || state.screen !== "reader" || state.sheet) return;
+  const ch = e.target.closest(".read-body [data-ch]");
+  if (!ch) return;
+  clearTimeout(selTimer);
+  const id = e.pointerId;
+  selTimer = setTimeout(() => {
+    selFired = true;
+    v2SelectAt(ch.dataset.ch);
+    if (!v2.sel) return;
+    // 手指不抬起接着滑：从这个词往两边扩
+    v2.drag = { para: v2.sel.para, a: v2.sel.start, b: v2.sel.end, which: "grow" };
+    try { panel.setPointerCapture(id); } catch {}
+    render();   // 手指还按着：只反显，菜单等松手
+  }, 500);
+});
+// 手指下面是第几个字：同一段里取那个字；滑出这一段就停在段头或段尾
+function v2CharAt(x, y, para) {
+  const el = document.elementsFromPoint(x, y).find((e) => e.matches(".read-body [data-ch]"));   // 跳过把手
+  if (el) {
+    const [pi, ci] = el.dataset.ch.split(":").map(Number);
+    if (pi === para) return ci;
+    return pi < para ? 0 : [...pages[state.page][para]].length - 1;
+  }
+  const p = document.querySelectorAll(".read-body p")[para];
+  if (!p) return null;
+  const r = p.getBoundingClientRect();
+  return y < r.top ? 0 : y > r.bottom ? [...pages[state.page][para]].length - 1 : null;
+}
+panel.addEventListener("pointermove", (e) => {
+  const d = v2.drag, sel = v2.sel;
+  if (!d || !sel) return;
+  const ci = v2CharAt(e.clientX, e.clientY, d.para);
+  if (ci === null) return;
+  let start, end;
+  if (d.which === "grow") [start, end] = [Math.min(d.a, ci), Math.max(d.b, ci + 1)];
+  else if (d.which === "s") [start, end] = [Math.min(ci, d.b - 1), d.b];
+  else [start, end] = [d.a, Math.max(ci + 1, d.a + 1)];
+  if (start === sel.start && end === sel.end) return;
+  [sel.start, sel.end] = [start, end];
+  sel.mode = "free";
+  render();
+});
+for (const type of ["pointerup", "pointercancel"]) panel.addEventListener(type, () => {
+  if (!v2.drag) return;
+  v2.drag = null;
+  selFired = true;   // 松手后那一下点按不算「点正文收起」
+  if (v2.sel) log(`选中「${v2SelText()}」。`);
+  render();
+});
+for (const type of ["pointerup", "pointercancel", "pointermove"]) panel.addEventListener(type, (e) => {
+  if (type === "pointermove" && !(e.movementX || e.movementY)) return;
+  clearTimeout(selTimer);
+});
+panel.addEventListener("contextmenu", (e) => {
+  const ch = isV2() && state.screen === "reader" && !state.sheet && e.target.closest(".read-body [data-ch]");
+  if (!ch) return;
+  e.preventDefault();
+  clearTimeout(selTimer);
+  v2SelectAt(ch.dataset.ch);   // 右键后面没有点按，不用吞
+});
+// 选字卡片的点按先在这里处理，不让正文的「点左右翻页、点中间出卡片」接着走
+panel.addEventListener("click", (e) => {
+  if (!isV2() || state.screen !== "reader") return;
+  const stop = () => { e.stopPropagation(); e.preventDefault(); };
+  if (selFired) { selFired = false; return stop(); }
+  const hit = (q) => e.target.closest(q);
+  let el;
+  if (!v2.sel) return;
+  const sel = v2.sel;
+  if (hit(".read-body")) { stop(); v2.sel = null; log("点正文：收起选字卡片。"); return render(); }
+  if (!hit(".v-selpop")) return;
+  stop();
+  if ((el = hit("[data-setting]"))) { v2.sel = null; return openSetting(el.dataset.setting); }
+  if ((el = hit("[data-sel-mode]"))) {
+    const text = [...pages[sel.page][sel.para]].join("");
+    sel.mode = el.dataset.selMode;
+    [sel.start, sel.end] = sel.mode === "sentence" ? v2SentenceAt(text, sel.at) : v2WordAt(text, sel.at);
+    return render();
+  }
+  const ask = hit("[data-sel-ask]"), look = hit("[data-sel-look]");
+  if (ask || look || hit("[data-sel-own]")) {
+    v2.quote = v2SelQuote();
+    v2.sel = null;
+    v2OpenFloat(false);
+    // 问 AI：停在悬窗等按住说话。这一页以前的问答照样留着，标题栏写着问的是哪几个字
+    if (!ask && !look) return log(`问 AI「${v2.quote.text}」：悬窗等你按住说话。`);
+    const pick = look ? v2QuoteSugs(v2.quote).length - 1 : Number(ask.dataset.selAsk);
+    log(`${(look || ask).textContent.trim()}：「${v2.quote.text}」连同这一页发给助理。`);
+    v2.pending = pick;
+    startListening();
+    return stopListeningAndSend();
+  }
+}, true);

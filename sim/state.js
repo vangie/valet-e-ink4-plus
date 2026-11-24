@@ -33,7 +33,6 @@ const PROVIDERS = { baiwen: "百问", xiaozhi: "小智", yunxin: "网易", agent
 const state = {
   design: "v2", // "v2" 新设计（随行）| "classic" 原始设计（官方 2.0.80）
   screen: "home",
-  edition: "cn",
   vcomRead: false,
   vcom: 1200,
   blackDepth: "standard",
@@ -138,6 +137,7 @@ const state = {
   buddyBound: false,
   buddyMenu: false,
   pagerOn: false,
+  bookAsk: "follow",   // 书里提问（选字、问这一页）找谁：follow 跟「谁来回答」/ official 官方云 / agent 自建
   photo: false,
   photoOpen: false,
   fontName: "MiSans",

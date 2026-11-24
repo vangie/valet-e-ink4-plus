@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Valet 随行 · valet-e-ink4-plus</title>
+<link rel="icon" href="assets/valet_icon.png" />
 <link rel="stylesheet" href="sim.css?v=20261118-touch2" />
 <link rel="stylesheet" href="screen.css" />
 <link rel="stylesheet" href="design.css?v=20261118-touch2" />
@@ -12,12 +13,11 @@
 <body>
 <div class="stage">
   <header class="top">
-    <div class="brand"><b>Valet 随行</b><span>Metalio E-Ink4 Plus · 界面模拟</span></div>
+    <div class="brand"><img class="brand-icon" src="assets/valet_icon.png" alt="Valet" /><b>Valet 随行</b><span>Metalio E-Ink4 Plus · 界面模拟</span></div>
     <div class="design-tabs" role="tablist" aria-label="界面设计">
       <button role="tab" data-design="classic">原始设计</button>
       <button role="tab" data-design="v2" class="on">新设计</button>
     </div>
-    <label class="edition-select">固件版本区域 <select id="edition" aria-label="固件区域"><option value="cn">国内版</option><option value="global">国际版</option></select></label>
     <button class="reset" data-reset>重置演示</button>
   </header>
 
@@ -66,9 +66,7 @@
 <script src="keys2.js"></script>
 <script src="local/icons.js"></script>
 <script src="design.js"></script>
-<script src="prompts.js"></script>
 <script src="setup.js"></script>
-<script src="setup-ui.js"></script>
 <script src="sim.js?v=20261118-touch2"></script>
 <script src="touch.js"></script>
 </body>

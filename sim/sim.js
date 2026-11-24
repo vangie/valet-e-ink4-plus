@@ -45,6 +45,7 @@ function render() {
   panel.classList.toggle("v2", isV2());
   panel.innerHTML = html;
   if (isV2() && state.float) v2SnapFloatSoon();
+  if (isV2() && v2.sel && !v2.drag) v2PlaceSelPop();
   const where = state.off ? "关机" : state.booting ? "开机中" : state.standby ? "待机" : names()[state.screen];
   nowEl.innerHTML = `<p>现在在「${where}」，按键是：</p><dl>${keyHelp()
     .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
@@ -67,13 +68,13 @@ const ABOUT = {
     "设置是左侧十四个页签，云服务在「对话」里，换了要重启。",
   ]],
 };
-const JUMPS = [["home", "首页"], ["reader", "正文"], ["ask", "提问"], ["call", "通话"], ["settings", "设置"], ["standby", "待机"]];
+const JUMPS = [["home", "首页"], ["reader", "正文"], ["ask", "提问"], ["call", "通话"], ["settings", "设置"], ["standby", "待机"], ["setup", "配置页"]];
 
 function renderAbout() {
   document.querySelector("#upstream-status").textContent = `公开源码 ${UPSTREAM.sourceVersion} · 官方固件 ${UPSTREAM.releaseVersion} · 原型 ${UPSTREAM.prototypeVersion}（界面已按源码复核，底层硬件行为仍需实机验证）`;
   const [title, lede, points] = ABOUT[state.design];
   aboutEl.innerHTML = `<h2>${title}</h2><p class="lede">${lede}</p><ul class="points">${points.map((p) => `<li>${p}</li>`).join("")}</ul>`;
-  jumpEl.innerHTML = JUMPS.map(([id, name]) => `<button data-jump="${id}">${id === "ask" && !isV2() ? "百问" : name}</button>`).join("");
+  jumpEl.innerHTML = JUMPS.filter(([id]) => id !== "setup" || isV2()).map(([id, name]) => `<button data-jump="${id}">${id === "ask" && !isV2() ? "百问" : name}</button>`).join("");
   document.querySelectorAll("[data-design]").forEach((b) => {
     const on = b.dataset.design === state.design;
     b.classList.toggle("on", on);
@@ -120,6 +121,17 @@ function jumpTo(id) {
     return switchMode("live");
   }
   if (id === "settings") go("settings");
+  // 配置页：设备停在「添加助理」，在 Wi-Fi 上就走同一个 Wi-Fi，否则开临时热点；浏览器小窗直接打开
+  if (id === "setup" && isV2()) {
+    openSetting("talk");
+    SetupPage.reset();
+    const wifi = state.link === "wifi";
+    Object.assign(state, { assistantDetail: null, assistantSetup: true, assistantAdvanced: false, assistantRename: false,
+      localService: true, localServiceMode: wifi ? "wifi" : "ap", localServiceUrl: wifi ? "http://192.168.1.86" : "http://192.168.4.1" });
+    log(`直接打开配置页（设备在「添加助理」，${wifi ? "同一个 Wi-Fi" : "临时热点"}）。`);
+    SetupPage.open();
+    return render();
+  }
 }
 
 document.querySelector(".design-tabs").addEventListener("click", (e) => {

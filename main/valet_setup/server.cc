@@ -71,7 +71,7 @@ esp_err_t Page(httpd_req_t* req) {
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_set_hdr(req, "Referrer-Policy", "no-referrer");
-    httpd_resp_set_hdr(req, "Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    httpd_resp_set_hdr(req, "Content-Security-Policy", "default-src 'self'; img-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
     return httpd_resp_send(req, reinterpret_cast<const char*>(setup_page_start), setup_page_end - setup_page_start);
 }
 esp_err_t Profiles(httpd_req_t* req) {

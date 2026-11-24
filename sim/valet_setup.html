@@ -1,0 +1,146 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><meta name="theme-color" content="#060d0a"><title>Valet 随行 · 连接助理</title><link rel="icon" href="data:image/webp;base64,UklGRtwEAABXRUJQVlA4INAEAAAQHQCdASpQAFAAPh0MhEGhBXLjMAQAcSgC83jjcXZa/HTmVeTPEGHN/h/sP7WfmAfqN0uvMB+sf6q+zx/jv7N2AH9O/0Hok+wZ6AH8A/lvpZftV8IP7I/87+9ezbR7Mg//GxijHN45f9NzEvor/teqt/hfzLLgngQmCj1v5sfjJiQ2gr2nmP/pkTvcgfgg68kRHYodzCj7Df3oJvgx9Yoec45hoqGBSJ03sVJ8DSm5aAVUyjFrmwDhTqGxmVG/EoewevSP9f9lQHSUVDQr/tQEL8zspPOFjkJpW3BM42uVw+yo1altZHkv5YaTvaMQe3gAANFxU7xrs5qXwNN/4cp+HKfhynFYqSvqRVvVmvOWymka+8YbryL3N/WvnzlEMk0UufFzfDPiXvn3XofHRLGhzhYtjg/v2s2hOX0oY+00OTBBtL05osP1YniYevxGF2gLP5S6c7LUHeoHSzf6LweBGyKaGFHq55pnKBZu2O5vw1JaNWd+eQlRjhHNMocWDHwn9F+wh5o3Q2M8Ol7riL66XZ3v/6hERlIuxo7kSyIsB8EOsaZbe1oqD43V8zo9ndLwDG+Egi0CApJ4EHHB0FjgaqysDtWSveBBgM2s+/uQN/df2fvJ6/2akajRrxn6AdgMotk38ffR51vQBXbEQyh/J36m1e6SWcpENEwi4fs1uyLLWCZqRUh+q881UbT5ho0vUlA767YN8eU+A1enbhv79lfmcCdYHGpmvuX0q4KY2MzRDVhk0ci48X/+YARc2kp8DBBGjzcvhN+nvJhgIP1gtI9tPvpe8yyZ9Aon7ywpSfhwGVJ+FpWGAjzlquoW3AGgR+yBMNfOxoCZu617HjUa3Bci/JQX5V2fMbJ+kHYd3v67bT8l8HJkL3TaY3c4mHg3tf/clP/Zx3l/umDRqHhlcCx2uLEvfI1haKPmLOmBglZ3Udeg30sDLwpEvhaM+/3VI6NYKg2b0cYroKTlEU0wH91j7WeOcc6VpPRfLOfM6BTUVRqtepup/HRCFpnbJywGRN4dbNyW2vVlo7iXXtugDB0sznr+mM8XYZsgW/BHoqTZLzrmzyIv+Ea8UbfJI2diU1kBA/wiL/FxmbQyef3zhKhVJFez8vo7tsmW+H9+y1pHa0Sd44q7Tck/HT6KhfIYbB70ds1P1ScX7UJxRVc2d73QprfxlLTd1KNu2dSu/vn4sxnrvXbzWoOK2f07knqBPnxwHcUFLAzFGki6seBImUDIoxv3YJ3FI7YWzNLsFrfDcNOk1+GlTFa2ZsOjEQWOVSXbf1W/u54Cc6VLIEQTQCKkBxL4yQMZvpklgpwkeSIao4xgFMl/eVkWWDmkNyKKQVud2F0+oXGmeSizJquiwOCM387Re4n8goDlZ6h073L4v6eUp+5yQb7CY10jHD+zEj6dWUxKCQ1u4RK4WKIV+Y7iA/5IgHjvcQKOCXiIbk/fZcI+r9+M7ug1OLt2szQ4DDnfSPFTnB5kd3QceK9o/0gF41hOeuJOmjIgFLtKVPF1ouUKpuTEMufBV6pxADCGcX0XLbFmv7WORKl+ZWPPxKqmbCxRHPQLfggoUKAtIc5ZxuYPnXngyIdpbo/U+fOejbfW7u6h5kYSOmeSNJJTP+SxkRgzpQ6Q/aJ0pBhYAA==">
+<style>
+@property --a{syntax:'<angle>';inherits:false;initial-value:0deg}
+:root{--ink:#f1f6f3;--sub:rgba(232,242,237,.66);--line:rgba(255,255,255,.11);--base:#060d0a;--ok:#34d399;--warn:#fbbf24;--bad:#fb7185;--accent:#6ee7b7;--accent-2:#34d399;--gold:#f6c467;--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;background:var(--base)}
+body{margin:0;min-height:100vh;color:var(--ink);font:13.5px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+/* 背景：深松墨底上三团翠玉绿、暖琥珀金、青碧色柔光，暗色毛玻璃透出呼应图标的温润光泽 */
+.ambient{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.ambient i{position:absolute;border-radius:50%;filter:blur(70px)}
+.ambient .b1{width:64vmax;height:64vmax;left:-16vmax;top:-18vmax;background:radial-gradient(circle at 30% 30%,#108558 0,transparent 62%);opacity:.55;animation:drift 26s ease-in-out infinite alternate}
+.ambient .b2{width:58vmax;height:58vmax;right:-18vmax;top:16vh;background:radial-gradient(circle at 60% 40%,#b4781e 0,transparent 60%);opacity:.42;animation:drift 32s ease-in-out infinite alternate-reverse}
+.ambient .b3{width:52vmax;height:52vmax;left:10vw;bottom:-20vmax;background:radial-gradient(circle,#0d7478 0,transparent 60%);opacity:.45;animation:drift 38s ease-in-out infinite alternate}
+@keyframes drift{to{transform:translate(6vmax,4vmax) scale(1.08)}}
+main{max-width:640px;margin:auto;padding:12px 14px 20px}
+button,input,textarea,select{font:inherit;color:inherit}
+header{display:flex;align-items:center;gap:11px;margin:0 2px 10px}
+.logo{width:40px;height:40px;border-radius:11px;display:block;flex:none;box-shadow:0 8px 22px -6px rgba(16,133,88,.55),0 0 0 1px rgba(255,255,255,.16)}
+h1{font-size:16.5px;margin:0;letter-spacing:.01em;color:var(--ink)}
+header p{margin:0;color:var(--sub);font-size:12px}
+h2{font-size:14.5px;margin:0;color:var(--ink)}
+p{margin:3px 0;color:var(--sub)}
+.card{position:relative;margin:8px 0;padding:12px 14px;border-radius:18px;background:linear-gradient(160deg,rgba(255,255,255,.078),rgba(255,255,255,.03));border:1px solid var(--line);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 28px 56px -28px rgba(0,0,0,.65);-webkit-backdrop-filter:blur(24px) saturate(1.65);backdrop-filter:blur(24px) saturate(1.65)}
+.head{display:flex;align-items:center;gap:7px;margin-bottom:4px}
+.num,.count{height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:600;background:rgba(255,255,255,.08);color:var(--ink);border:1px solid rgba(255,255,255,.14);box-shadow:inset 0 1px 0 rgba(255,255,255,.1);flex:none}
+.num{width:20px}
+.count{min-width:20px;padding:0 6px;color:var(--accent)}
+/* 聚光 + 倾斜（参照 printer.local） */
+.spot{transform:perspective(1000px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .6s var(--ease)}
+.spot.live{transition:transform .12s linear}
+.spot::before,.spot::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .5s var(--ease)}
+.spot::before{background:radial-gradient(320px circle at var(--mx,50%) var(--my,50%),rgba(110,231,183,.13),transparent 60%)}
+.spot::after{inset:-1px;padding:1px;background:radial-gradient(220px circle at var(--mx,50%) var(--my,50%),rgba(209,250,229,.9),rgba(246,196,103,.38) 42%,transparent 68%);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.spot.live::before,.spot.live::after{opacity:1}
+.spot>*{position:relative;z-index:1}
+/* 助理卡片 */
+.item{position:relative;margin-top:6px;padding:8px 11px;border-radius:13px;background:rgba(255,255,255,.045);border:1px solid var(--line);box-shadow:inset 0 1px 0 rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.item-info{min-width:160px;flex:1}
+.item.cur{background:linear-gradient(160deg,rgba(16,133,88,.22),rgba(246,196,103,.07));border-color:rgba(110,231,183,.3)}
+.item h3{margin:0;font-size:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--ink)}
+.tag{font-size:11px;font-weight:600;padding:0 7px;border-radius:7px;background:rgba(52,211,153,.18);color:#a7f3d0;border:1px solid rgba(110,231,183,.32)}
+.meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:1px}
+.item small{color:var(--sub);overflow-wrap:anywhere;font-size:12px}
+.state{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--sub)}
+.state i{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(52,211,153,.16),0 0 10px rgba(52,211,153,.65)}
+.state.off i{background:var(--warn);box-shadow:0 0 0 3px rgba(251,191,36,.16),0 0 10px rgba(251,191,36,.5)}
+/* 边缘流光 */
+.beam{position:absolute;inset:-1px;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;background:conic-gradient(from var(--a),transparent 0 250deg,#5eead4 300deg,#6ee7b7 328deg,#f6c467 350deg,transparent 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:beam 4.5s linear infinite}
+.beam+.beam{filter:blur(10px);opacity:.75}
+@keyframes beam{to{--a:360deg}}
+/* 按钮 */
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}
+.item .actions{margin-top:0}
+.bar-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
+.bar-row .actions{margin-top:0}
+.btn{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:var(--ink);border-radius:9px;padding:4px 11px;font-size:12.5px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.09);transition:transform .2s var(--ease),background .2s,border-color .2s}
+.btn:hover{background:rgba(255,255,255,.11);border-color:rgba(255,255,255,.24)}
+.btn:active{transform:scale(.97)}
+.btn.primary{border-color:transparent;color:#fff;background:linear-gradient(135deg,#1f9d6b,#13754f);box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 10px 22px -10px rgba(31,157,107,.85)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.quiet{border-color:transparent;background:transparent;box-shadow:none;color:var(--sub);padding:4px 6px}
+.btn.quiet:hover{color:var(--ink);background:rgba(255,255,255,.06)}
+.btn.danger{color:#fff;background:rgba(239,68,68,.82);border-color:transparent}
+.btn:disabled{opacity:.45;pointer-events:none}
+.link{border:0;background:none;padding:2px 0;font-size:12.5px;color:var(--sub);cursor:pointer;display:inline-flex;align-items:center;gap:4px;border-bottom:1px dashed rgba(255,255,255,.26);border-radius:0}
+.link:hover{color:var(--ink)}
+/* 液态玻璃胶囊 */
+.seg{position:relative;display:inline-flex;padding:3px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09)}
+.seg button{position:relative;z-index:1;border:0;background:none;padding:4px 13px;border-radius:9px;font-size:12.5px;cursor:pointer;color:var(--sub);transition:color .3s}
+.seg button[aria-pressed=true]{color:var(--ink);font-weight:600}
+.cap{position:absolute;left:0;top:0;border-radius:9px;background:linear-gradient(rgba(180,245,215,.25),rgba(110,231,183,.09) 55%,rgba(255,255,255,.14));-webkit-backdrop-filter:blur(12px) saturate(1.9);backdrop-filter:blur(12px) saturate(1.9);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 1px rgba(255,255,255,.12),inset 0 0 12px rgba(255,255,255,.06),0 6px 18px -6px rgba(0,0,0,.55);pointer-events:none;transform-origin:center;will-change:transform}
+textarea,input{display:block;width:100%;border:1px solid rgba(255,255,255,.13);border-radius:11px;padding:6px 10px;background:rgba(255,255,255,.045);color:var(--ink);outline:none;transition:border-color .2s,box-shadow .2s,background .2s}
+textarea::placeholder,input::placeholder{color:rgba(232,242,237,.34)}
+textarea:focus,input:focus{border-color:rgba(110,231,183,.65);background:rgba(255,255,255,.07);box-shadow:0 0 0 3px rgba(52,211,153,.18)}
+textarea{min-height:48px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+label{display:block;margin:6px 0 3px;font-size:12px;font-weight:600}
+.save-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.save-row input{flex:1;min-width:0}
+.save-row .btn{flex:none;height:33px;padding:0 14px}
+.status{display:flex;gap:8px;align-items:flex-start;margin-top:8px;padding:7px 10px;border-radius:10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink);font-size:12.5px}
+.status[hidden]{display:none}
+.status i{flex:none;width:7px;height:7px;border-radius:50%;margin-top:5px;background:rgba(232,242,237,.4)}
+.status.ok i{background:var(--ok);box-shadow:0 0 10px var(--ok)}.status.wait i{background:var(--warn);box-shadow:0 0 10px var(--warn);animation:pulse 1.4s ease-in-out infinite}.status.bad i{background:var(--bad);box-shadow:0 0 10px var(--bad)}
+@keyframes pulse{50%{transform:scale(.6);opacity:.5}}
+.note{font-size:12px}
+.note:empty{display:none}
+/* 原位展开 */
+.veil{position:fixed;inset:0;z-index:40;background:rgba(4,10,7,.58);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:0;transition:opacity .4s var(--ease)}
+.veil.on{opacity:1}
+.sheet{position:fixed;z-index:41;display:flex;flex-direction:column;overflow:hidden;background:rgba(14,28,22,.85);-webkit-backdrop-filter:blur(28px) saturate(1.8);backdrop-filter:blur(28px) saturate(1.8);border-radius:20px;border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 30px 80px -20px rgba(0,0,0,.8)}
+.sheet .in{display:flex;flex-direction:column;gap:10px;padding:16px;height:100%;opacity:0;transition:opacity .25s}
+.sheet.open .in{opacity:1;transition-delay:.18s}
+.sheet textarea{flex:1;min-height:0}
+.sheet .bar{display:flex;align-items:center;gap:8px}
+.sheet .bar h2{margin-right:auto}
+.x{width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);cursor:pointer;font-size:16px;line-height:1}
+@media (prefers-reduced-motion:reduce){.beam,.ambient i{animation:none}.beam{--a:200deg}.spot,.spot.live{transform:none}html{scroll-behavior:auto}}
+@media (max-width:480px){.card{padding:12px 13px;border-radius:16px}}
+</style>
+<div class="ambient" aria-hidden="true"><i class="b1"></i><i class="b2"></i><i class="b3"></i></div>
+<main>
+<header><img class="logo" src="data:image/webp;base64,UklGRtwEAABXRUJQVlA4INAEAAAQHQCdASpQAFAAPh0MhEGhBXLjMAQAcSgC83jjcXZa/HTmVeTPEGHN/h/sP7WfmAfqN0uvMB+sf6q+zx/jv7N2AH9O/0Hok+wZ6AH8A/lvpZftV8IP7I/87+9ezbR7Mg//GxijHN45f9NzEvor/teqt/hfzLLgngQmCj1v5sfjJiQ2gr2nmP/pkTvcgfgg68kRHYodzCj7Df3oJvgx9Yoec45hoqGBSJ03sVJ8DSm5aAVUyjFrmwDhTqGxmVG/EoewevSP9f9lQHSUVDQr/tQEL8zspPOFjkJpW3BM42uVw+yo1altZHkv5YaTvaMQe3gAANFxU7xrs5qXwNN/4cp+HKfhynFYqSvqRVvVmvOWymka+8YbryL3N/WvnzlEMk0UufFzfDPiXvn3XofHRLGhzhYtjg/v2s2hOX0oY+00OTBBtL05osP1YniYevxGF2gLP5S6c7LUHeoHSzf6LweBGyKaGFHq55pnKBZu2O5vw1JaNWd+eQlRjhHNMocWDHwn9F+wh5o3Q2M8Ol7riL66XZ3v/6hERlIuxo7kSyIsB8EOsaZbe1oqD43V8zo9ndLwDG+Egi0CApJ4EHHB0FjgaqysDtWSveBBgM2s+/uQN/df2fvJ6/2akajRrxn6AdgMotk38ffR51vQBXbEQyh/J36m1e6SWcpENEwi4fs1uyLLWCZqRUh+q881UbT5ho0vUlA767YN8eU+A1enbhv79lfmcCdYHGpmvuX0q4KY2MzRDVhk0ci48X/+YARc2kp8DBBGjzcvhN+nvJhgIP1gtI9tPvpe8yyZ9Aon7ywpSfhwGVJ+FpWGAjzlquoW3AGgR+yBMNfOxoCZu617HjUa3Bci/JQX5V2fMbJ+kHYd3v67bT8l8HJkL3TaY3c4mHg3tf/clP/Zx3l/umDRqHhlcCx2uLEvfI1haKPmLOmBglZ3Udeg30sDLwpEvhaM+/3VI6NYKg2b0cYroKTlEU0wH91j7WeOcc6VpPRfLOfM6BTUVRqtepup/HRCFpnbJywGRN4dbNyW2vVlo7iXXtugDB0sznr+mM8XYZsgW/BHoqTZLzrmzyIv+Ea8UbfJI2diU1kBA/wiL/FxmbQyef3zhKhVJFez8vo7tsmW+H9+y1pHa0Sd44q7Tck/HT6KhfIYbB70ds1P1ScX7UJxRVc2d73QprfxlLTd1KNu2dSu/vn4sxnrvXbzWoOK2f07knqBPnxwHcUFLAzFGki6seBImUDIoxv3YJ3FI7YWzNLsFrfDcNOk1+GlTFa2ZsOjEQWOVSXbf1W/u54Cc6VLIEQTQCKkBxL4yQMZvpklgpwkeSIao4xgFMl/eVkWWDmkNyKKQVud2F0+oXGmeSizJquiwOCM387Re4n8goDlZ6h073L4v6eUp+5yQb7CY10jHD+zEj6dWUxKCQ1u4RK4WKIV+Y7iA/5IgHjvcQKOCXiIbk/fZcI+r9+M7ug1OLt2szQ4DDnfSPFTnB5kd3QceK9o/0gF41hOeuJOmjIgFLtKVPF1ouUKpuTEMufBV6pxADCGcX0XLbFmv7WORKl+ZWPPxKqmbCxRHPQLfggoUKAtIc5ZxuYPnXngyIdpbo/U+fOejbfW7u6h5kYSOmeSNJJTP+SxkRgzpQ6Q/aJ0pBhYAA==" alt="Valet"><div><h1>Valet 随行 · 连接助理</h1><p>设备本地配置</p></div></header>
+<section class="card spot" id="mine"><div class="head"><h2>我的助理</h2><span class="count" id="count">…</span></div><div id="list"><p>正在读取设备…</p></div></section>
+<section class="card spot" id="prep"><div class="head"><span class="num">1</span><h2>让助理做好准备</h2></div><p>把配置提示发给你平时的助理，让它准备好入口并返回配对 JSON。</p>
+<div class="bar-row"><div class="seg" id="backend" role="group" aria-label="助理类型"><span class="cap"></span><button data-v="openclaw" aria-pressed="true">OpenClaw</button><button data-v="hermes" aria-pressed="false">Hermes</button></div><div class="actions"><button id="copy" class="btn primary">复制配置提示</button><button id="more" class="link">提示全文 · <span id="len"></span> 字</button></div></div><p id="copied" class="note" role="status"></p></section>
+<section class="card spot" id="paste"><div class="head"><span class="num">2</span><h2>粘贴配对信息</h2></div><textarea id="reply" rows="3" aria-label="配对信息" placeholder='粘贴助理返回的配对回复或 {"url":"wss://…","code":"…"}'></textarea><div class="save-row"><input id="name" maxlength="32" aria-label="助理名字" placeholder="给助理起个名字（例如：家里的助理）"><button id="save" class="btn primary">保存到设备</button></div><div class="status" id="statusBox" hidden><i></i><span id="status" role="status"></span></div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);let token=location.hash.slice(1);if(!token)token=window.prompt('输入设备屏幕上的访问码')||'';history.replaceState(null,'',location.pathname);let busy=false;let current=[];let backend='openclaw';
+const still=matchMedia('(prefers-reduced-motion:reduce)').matches,fine=matchMedia('(hover:hover) and (pointer:fine)').matches;
+const prefix=`请在运行网关的主机上帮我配置 Valet 随行（Metalio E-Ink4 Plus）。我已安装并通过聊天窗口使用你的助手。先检查现有部署，复用正常配置；缺少组件时请实际检查项目文档。修改前备份，说明会影响当前连接的重启。不要自动升级宿主、购买资源或覆盖其他助手。\n\n设备仓库：https://github.com/vangie/valet-e-ink4-plus\n共享网关固定版本：v0.2.0，提交 d935cf3c90c51fd783d9d327cbfc86457771c83f\n正式包与 SHA256SUMS.txt：https://github.com/vangie/valet-gateway/releases/tag/v0.2.0\n插件包版本仍为 0.8.0，与共享仓库版本分开编号。\n固件使用 Passport v1 签名设备协议，支持提问和实时通话。请使用共享网关项目 https://github.com/vangie/valet-gateway 中的匹配插件，保留原有 Passport 兼容性。首次连接可能需要批准新设备；网页保存配置不等于设备语音测试通过。\n\n`;
+function promptText(){return prefix+(backend==='openclaw'?`后端是 OpenClaw。参考 https://github.com/vangie/valet-gateway 的 tools/openclaw 文档，确认实际 Release、插件兼容范围及 passport-realtime、/passport/v1 接口。若需安装，按固定版本文档安装并核对发布校验信息，不能只凭插件名猜安装命令。确认插件与公网入口就绪后，再使用该版本支持的 openclaw qr --json --no-ascii --limited --url '<实际已验证的公网 WSS 地址>' 获取 gatewayUrl 与 setupCode。不要输出管理员 token。`:`后端是 Hermes。参考 https://github.com/vangie/valet-gateway 的 tools/hermes 文档，核对活动 home/profile 和实际插件版本。按版本文档启用 ai-passport-hermes 平台。配对使用该插件实际存在的 passport_auth.py 和活动 home；先核对 --help，再执行 pair --url '<实际已验证的公网 WSS 地址>'。不要套用 OpenClaw 的 qr 命令。`)+`\n\n网络：设备会通过 Wi-Fi 或 4G 直连。复用证书有效、持久的公网 wss:// 入口，保留真实端口与 WebSocket 路径。检查 DNS、TLS、WebSocket 升级与鉴权挑战；HTTP 网页可打开不代表语音可用。不得关闭证书校验或允许匿名访问。缺少登录或资源时明确指出我需要做的一步。\n\n能力：分别报告提问、实时语音和工具调用是否就绪，缺少实时语音不影响保存配置。阅读上下文与带书通话由 v0.2.0 能力协商启用，按书与独立会话隔离。问答播报在插件内选择 OpenAI speech，复用已有私有凭据文件或环境变量，不改全局 TTS；不要宣称未经设备验收的能力已实测。正文不默认写长期记忆。\n\n回复：简要报告实际版本、复用或新增项、尚未验证的事项。成功签发后提供一行真实 JSON：{"url":"gatewayUrl 实际值","code":"setupCode 实际值"}，另给助理名称。配对码应包含 url 与 bootstrapToken，可带 oc-pair:// 前缀。不要输出模型 Key、隧道密钥、长期 device token，不使用第三方二维码服务。受阻时只报告阻碍，不编造配对码。`}
+// 液态玻璃胶囊：滑向新位置，途中沿移动方向拉长，到位弹一下
+function glass(track){const cap=track.querySelector('.cap');let x=null;return(el,anim=true)=>{const t=track.getBoundingClientRect(),r=el.getBoundingClientRect(),nx=r.left-t.left;Object.assign(cap.style,{width:r.width+'px',height:r.height+'px',top:(r.top-t.top)+'px'});const to=`translateX(${nx}px)`;if(x===null||!anim||still||Math.abs(nx-x)<1){cap.getAnimations().forEach(a=>a.cancel());cap.style.transform=to;x=nx;return}const d=nx-x,s=1+Math.min(Math.abs(d)/r.width*.5,.8),o=Math.sign(d)*Math.min(10,Math.abs(d)*.12);const io='cubic-bezier(.45,0,.25,1)',sp='cubic-bezier(.3,.6,.4,1)';cap.animate([{transform:`translateX(${x}px)`,easing:io},{transform:`translateX(${x+d*.55}px) scaleX(${s}) scaleY(.9)`,offset:.4,easing:io},{transform:`translateX(${nx+o}px) scaleX(.94) scaleY(1.06)`,offset:.68,easing:sp},{transform:`translateX(${nx-o*.3}px) scaleX(1.02) scaleY(.98)`,offset:.85,easing:sp},{transform:to}],{duration:680});cap.style.transform=to;x=nx}}
+const segCap=glass($('backend'));
+function setBackend(v,anim){backend=v;for(const b of $('backend').querySelectorAll('button'))b.setAttribute('aria-pressed',b.dataset.v===v);segCap($('backend').querySelector(`[data-v=${v}]`),anim);$('len').textContent=promptText().length;if(sheet)sheet.querySelector('textarea').value=promptText()}
+$('backend').onclick=e=>{const b=e.target.closest('button');if(b&&b.dataset.v!==backend)setBackend(b.dataset.v,true)};
+// 聚光 + 不超过 4 度的倾斜，移开平滑复原
+function rest(el){el.classList.remove('live');el.style.setProperty('--rx','0deg');el.style.setProperty('--ry','0deg')}
+function spot(el){if(!fine||still)return;el.addEventListener('pointermove',e=>{if(e.target.closest('.spot')!==el)return rest(el);const r=el.getBoundingClientRect(),px=(e.clientX-r.left)/r.width,py=(e.clientY-r.top)/r.height;el.classList.add('live');el.style.setProperty('--mx',px*100+'%');el.style.setProperty('--my',py*100+'%');el.style.setProperty('--ry',((px-.5)*8).toFixed(2)+'deg');el.style.setProperty('--rx',((.5-py)*8).toFixed(2)+'deg')});el.addEventListener('pointerleave',()=>rest(el))}
+document.querySelectorAll('.spot').forEach(spot);
+// 复制提示
+$('copy').onclick=async()=>{try{await navigator.clipboard.writeText(promptText());$('copied').textContent='已复制。发给你平时聊天的助理，再把它返回的配对信息粘到下面。'}catch{openSheet(true);$('copied').textContent='本地 HTTP 网页需要手动复制：提示全文已选中，请使用系统的复制菜单。'}};
+// 点击原位放大为详情，关闭原路收回
+let sheet=null,veil=null,origin=null;
+function rectOf(r){return{left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'}}
+function target(){const w=Math.min(innerWidth-32,640),h=Math.min(innerHeight-48,620);return{left:(innerWidth-w)/2+'px',top:(innerHeight-h)/2+'px',width:w+'px',height:h+'px'}}
+function openSheet(select){if(sheet)return;origin=$('more');const from=origin.getBoundingClientRect();veil=document.createElement('div');veil.className='veil';veil.onclick=closeSheet;sheet=document.createElement('div');sheet.className='sheet';sheet.setAttribute('role','dialog');sheet.setAttribute('aria-label','提示全文');sheet.innerHTML='<div class="in"><div class="bar"><h2>提示全文</h2><button class="btn primary" data-c>复制</button><button class="x" data-x aria-label="关闭">×</button></div><textarea readonly></textarea><p class="note">发给你平时聊天的助理。提示里没有任何密钥。</p></div>';sheet.querySelector('textarea').value=promptText();sheet.querySelector('[data-x]').onclick=closeSheet;sheet.querySelector('[data-c]').onclick=()=>$('copy').click();document.body.append(veil,sheet);const end=target();Object.assign(sheet.style,end);origin.style.visibility='hidden';requestAnimationFrame(()=>{veil.classList.add('on');sheet.classList.add('open')});if(!still)sheet.animate([{...rectOf(from),borderRadius:'10px',opacity:.6},{...end,borderRadius:'22px',opacity:1}],{duration:480,easing:'cubic-bezier(.2,.9,.25,1.05)'});const ta=sheet.querySelector('textarea');if(select)setTimeout(()=>{ta.focus();ta.select()},still?0:420)}
+function closeSheet(){if(!sheet)return;const s=sheet,v=veil;sheet=veil=null;s.classList.remove('open');v.classList.remove('on');const done=()=>{s.remove();v.remove();origin.style.visibility=''};if(still)return done();const to=origin.getBoundingClientRect();s.animate([{left:s.style.left,top:s.style.top,width:s.style.width,height:s.style.height,borderRadius:'22px',opacity:1},{...rectOf(to),borderRadius:'10px',opacity:.4}],{duration:380,easing:'cubic-bezier(.4,0,.2,1)'}).onfinish=done}
+$('more').onclick=()=>openSheet(false);addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});addEventListener('resize',()=>{if(sheet)Object.assign(sheet.style,target())});
+// 设备接口
+// 嵌在模拟界面（sim/）里时走它给的假接口；单独打开时就是设备
+let send=(u,o)=>fetch(u,o);try{if(parent!==window&&parent.ValetSetupApi)send=parent.ValetSetupApi}catch{}
+async function request(method='GET',data){const r=await send('/api/assistants',{method,headers:{'X-Valet-Setup':token,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{})});const result=await r.json();if(!r.ok)throw Error(result.error||'设备返回错误');return result}
+function message(text,paired){const box=$('statusBox');if(!text){box.hidden=true;return}box.hidden=false;$('status').textContent=text;box.className='status '+(paired||/已连接/.test(text)?'ok':/正在|请在助理|已保存|稍候/.test(text)?'wait':/未保存|错误|失败|连不上|过期|繁忙|请粘贴|起个名字/.test(text)?'bad':'')}
+function button(text,fn,cls=''){const b=document.createElement('button');b.className='btn '+cls;b.textContent=text;b.onclick=fn;return b}
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+function host(url){try{return new URL(url).host}catch{return url}}
+let removing=null,removeTimer;
+async function load(){const data=await request();current=data.items;busy=data.saving;$('save').disabled=busy;$('count').textContent=data.items.length;$('list').replaceChildren();for(const a of data.items){const cur=a.id===data.active,row=el('article','item spot'+(cur?' cur':''));if(cur&&!still)row.append(el('i','beam'),el('i','beam'));const info=el('div','item-info'),h=el('h3',null,a.name);if(cur)h.append(el('span','tag','当前使用'));const st=el('span','state'+(a.paired?'':' off'));st.append(el('i'),document.createTextNode(a.paired?'已连接':'还没连上'));const meta=el('div','meta');meta.append(el('small',null,a.backend+' · '+host(a.url)),st);info.append(h,meta);const actions=el('div','actions');if(!cur)actions.append(button('使用',()=>mutate({action:'select',id:a.id})));actions.append(button('改名',()=>{const name=(window.prompt('新的名字（最多 32 个字）',a.name)||'').trim();if(name&&name!==a.name)mutate({action:'rename',id:a.id,name})}));actions.append(removing===a.id?button('确认移除',()=>{removing=null;mutate({action:'remove',id:a.id})},'danger'):button('移除',()=>{removing=a.id;clearTimeout(removeTimer);removeTimer=setTimeout(()=>{removing=null;load().catch(()=>{})},4000);load().catch(()=>{})},'quiet'));row.append(info,actions);spot(row);$('list').append(row)}if(!data.items.length)$('list').replaceChildren(el('p',null,'还没有助理，在下面添加第一个。'));if(data.note)message(data.note,data.paired);return data}
+async function mutate(data){if(busy)return;busy=true;$('save').disabled=true;try{await request('POST',data);message('正在保存…');let result;for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,500));result=await load();if(!result.saving)break}if(result?.saving)message('设备仍在保存，请稍候；不要重复提交。');if(data.action==='add'&&!result?.saving&&!result?.note.startsWith('未保存')){$('reply').value='';watch()}}catch(e){message(e.message)}finally{busy=false;$('save').disabled=false}}
+let watching=false;async function watch(){if(watching)return;watching=true;try{for(let i=0;i<150;i++){await new Promise(r=>setTimeout(r,2000));if(busy)continue;const d=await load();if(d.paired||!(d.note.startsWith('请在助理')||d.note.startsWith('已保存')||d.note.startsWith('连不上')))break}}catch(e){message(e.message)}finally{watching=false}}
+$('save').onclick=()=>{try{const raw=$('reply').value.trim();let reply;try{reply=JSON.parse(raw)}catch{const candidates=raw.match(/\{[^{}]*\}/g)||[];reply=candidates.map(s=>{try{return JSON.parse(s)}catch{return null}}).find(v=>v&&(v.url||v.gatewayUrl)&&(v.code||v.setupCode));if(!reply)throw Error('请粘贴包含 url 和 code 的配对 JSON')}const name=$('name').value.trim();if(!name)throw Error('先给助理起个名字');mutate({action:'add',id:'new',name,backend:backend==='hermes'?'hermes':'openclaw',url:reply.url||reply.gatewayUrl||'',code:reply.code||reply.setupCode||''})}catch(e){message(e.message)}};
+setBackend('openclaw',false);addEventListener('resize',()=>setBackend(backend,false));
+load().catch(e=>message(e.message));
+</script></html>

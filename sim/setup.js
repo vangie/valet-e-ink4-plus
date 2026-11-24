@@ -1,16 +1,12 @@
 // 配置页。真机上是设备在局域网里提供的一个网页，手机或电脑打开 http://<设备 IP>/setup。
-// 模拟器里把它画成一个浏览器小窗，和设备屏幕同时在页面上，两边的进度是同步的。
-// 流程：选助理类型 → 复制提示发给助理 → 把助理的回复整段粘回来 → 保存到设备并连接测试。
-// 页面只在设备的「添加助理」界面开着时才有；它不中转语音，也不保存配对码。
+// 模拟器里画一个浏览器小窗，里面嵌的就是设备上那一个页面（sim/valet_setup.html；
+// main/valet_setup/valet_setup.html 是指过来的链接），不另画一份。页面通过 window.ValetSetupApi 读写这里的助理列表，
+// 字段和设备的 /api/assistants（main/valet_setup/server.cc）一样，所以两边的进度同步。
 const SetupPage = (() => {
-  const S = {
-    open: false, view: "desktop", lang: null, backend: "openclaw",
-    copied: "", raw: "", name: "", demo: "ok", run: null, removing: "", done: null,
-  };
-  const T = (zh, en) => ((S.lang || state.lang) === "en" ? en : zh);
-  const lang = () => ((S.lang || state.lang) === "en" ? "en" : "zh");
-  const BACKENDS = { openclaw: "OpenClaw", hermes: "Hermes" };
+  const S = { open: false, view: "desktop" };
+  const T = (zh, en) => (state.lang === "en" ? en : zh);
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let el = null;
 
   // ── 设备那一头：配置页做的每一步，设备屏幕都跟着变。
   function phase(next, note = "") {
@@ -20,66 +16,6 @@ const SetupPage = (() => {
   }
   function deviceUrl() {
     return `${state.localServiceUrl}/setup`;
-  }
-
-  // ── 读助理的回复。助理通常回一段话，里面有一行 JSON、地址、配对码，所以整段粘贴也要认得出来。
-  function b64json(code) {
-    const raw = code.replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(raw + "=".repeat((4 - (raw.length % 4)) % 4)));
-  }
-  function privateHost(host) {
-    return /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$|0\.0\.0\.0)/i.test(host)
-      || /\.(local|lan|internal|home|localdomain)$/i.test(host) || !host.includes(".");
-  }
-  function parse(raw) {
-    const text = raw.trim();
-    if (!text) return { empty: true, problems: [] };
-    const found = (text.match(/\{[^{}]*\}/g) || []).map((s) => { try { return JSON.parse(s); } catch { return null; } })
-      .find((o) => o && (o.url || o.gatewayUrl));
-    let url = found?.url || found?.gatewayUrl || "";
-    let code = found?.code || found?.setupCode || "";
-    let name = found?.name || found?.assistantName || "";
-    if (!url) url = (text.match(/wss?:\/\/[^\s"'<>，。,]+/i) || [])[0] || "";
-    if (!code) code = (text.match(/(?:配对码|setup\s*code|code)\s*[:：=]\s*["']?([A-Za-z0-9_\-+/=]{8,})/i) || [])[1] || "";
-    if (!name) name = ((text.match(/(?:助理名称|assistant\s*name)\s*[:：=]\s*([^\n\r]+)/i) || [])[1] || "").trim().replace(/[。.]$/, "");
-    const problems = [];
-    let host = "";
-    let urlCount = 0;
-    if (!url) problems.push(T("没找到地址。助理的回复里应该有一个 wss:// 开头的网关地址。", "No address found. The reply should contain a gateway address starting with wss://."));
-    else {
-      try {
-        const u = new URL(url);
-        host = u.hostname;
-        if (u.protocol === "ws:") problems.push(T("ws:// 是明文连接，设备不会用。请让助理换成证书有效的 wss://。", "ws:// is plain text and the device will not use it. Ask for a wss:// address with a valid certificate."));
-        else if (u.protocol !== "wss:") problems.push(T("地址要以 wss:// 开头。", "The address must start with wss://."));
-        else if (privateHost(host)) problems.push(T("这是局域网或本机地址。设备可能在用 4G，连不上。请让助理换成公网 wss:// 入口。", "This is a LAN or local address. The device may be on 4G and could not reach it. Ask for a public wss:// entry."));
-      } catch { problems.push(T("地址格式不对。", "The address is malformed.")); }
-    }
-    urlCount = problems.length;
-    if (!code) problems.push(T("没找到配对码。", "No pairing code found."));
-    else {
-      try {
-        const inner = b64json(code);
-        if (!inner.bootstrapToken) throw new Error();
-        if (url && new URL(inner.url).href !== new URL(url).href) problems.push(T("地址和配对码里的地址不一致。请让助理重新生成，不要手改。", "The address differs from the one inside the code. Ask the assistant to generate it again; do not edit by hand."));
-      } catch { problems.push(T("配对码读不出来。它应该是助理用配对命令生成的一整串字符，别只复制一半。", "The code cannot be read. It is one long string made by the pairing command; do not copy only part of it.")); }
-    }
-    const same = state.assistants.find((item) => item.url === url);
-    return { empty: false, url, code, name, host, problems, same, ok: problems.length === 0, urlOk: Boolean(url) && urlCount === 0, codeOk: Boolean(code) && problems.length === urlCount };
-  }
-
-  // 演示用的助理回复，格式和提示里要求的一样。
-  function demoReply(live) {
-    const hermes = S.backend === "hermes";
-    const url = `wss://${hermes ? "hermes" : "openclaw"}.example.com/valet/v1`;
-    const inner = JSON.stringify({ url, bootstrapToken: `demo-${Math.random().toString(36).slice(2, 10)}` });
-    const code = btoa(inner).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const first = lang() === "en"
-      ? `Result: plugin ${hermes ? "valet-hermes" : "valet-openclaw"} reused, public entry reused (Cloudflare named tunnel). Ask is ready; Call is ${live ? "ready" : "not configured: the gateway has no realtime voice credential"}. Not tested: real device voice.`
-      : `准备结果：插件 ${hermes ? "valet-hermes" : "valet-openclaw"} 已复用，公网入口复用 Cloudflare 命名隧道。提问已就绪；通话${live ? "已就绪" : "尚未配置：网关缺少实时语音凭据"}。未实测：设备实机语音。`;
-    return lang() === "en"
-      ? `${first}\n{"url":"${url}","code":"${code}"}\nAddress: ${url}\nPairing code: ${code}\nAssistant name: ${hermes ? "Work Hermes" : "Home OpenClaw"}`
-      : `${first}\n{"url":"${url}","code":"${code}"}\n地址：${url}\n配对码：${code}\n助理名称：${hermes ? "工作的 Hermes" : "家里的 OpenClaw"}`;
   }
 
   // 一个看起来像二维码的图案，只画样子，扫不出来。三个角是定位点，其余按地址生成。
@@ -103,5 +39,98 @@ const SetupPage = (() => {
     return `<svg class="pair-qr" viewBox="-1 -1 ${n + 2} ${n + 2}" width="${size}" height="${size}" shape-rendering="crispEdges" role="img" aria-label="QR"><rect x="-1" y="-1" width="${n + 2}" height="${n + 2}" fill="#fff"/><g fill="#111">${cells}</g></svg>`;
   }
 
-  return { S, T, lang, BACKENDS, wait, phase, deviceUrl, parse, demoReply, qr };
+  // ── 浏览器小窗
+  function mount() {
+    if (el) return;
+    el = document.createElement("aside");
+    el.className = "sw";
+    el.hidden = true;
+    el.setAttribute("role", "dialog");
+    el.innerHTML = `<div class="sw-chrome"><span class="sw-lights"><i></i><i></i><i></i></span><span class="sw-url"><b></b></span><span class="sw-view"></span><button class="sw-x" data-sw-close aria-label="close">×</button></div><iframe class="sw-frame" title="Valet 连接助理"></iframe>`;
+    document.body.appendChild(el);
+    el.addEventListener("click", (e) => {
+      const view = e.target.closest("[data-sw-view]");
+      if (view) { S.view = view.dataset.swView; return paint(); }
+      if (e.target.closest("[data-sw-close]")) { close(); render(); }
+    });
+  }
+  function paint() {
+    if (!el) return;
+    el.setAttribute("aria-label", T("连接助理", "Connect an assistant"));
+    el.querySelector(".sw-url b").textContent = deviceUrl();
+    el.querySelector(".sw-view").innerHTML = [["desktop", T("电脑", "Computer")], ["phone", T("手机", "Phone")]]
+      .map(([v, name]) => `<button data-sw-view="${v}" class="${S.view === v ? "is-on" : ""}">${name}</button>`).join("");
+    el.classList.toggle("phone", S.view === "phone");
+    const frame = el.querySelector(".sw-frame");
+    if (!frame.getAttribute("src")) frame.src = "valet_setup.html#sim";
+  }
+  function open() {
+    mount();
+    S.open = true;
+    el.hidden = false;
+    document.body.classList.add("sw-on");
+    paint();
+    if (state.setupPhase === "waiting") phase("opened");
+  }
+  function close() {
+    S.open = false;
+    if (!el) return;
+    el.hidden = true;
+    el.querySelector(".sw-frame").removeAttribute("src");   // 下次打开是新的一页
+    document.body.classList.remove("sw-on");
+  }
+  // 设备上点「取消」或「完成」：这次配置结束，页面关掉。
+  function reset() {
+    state.setupPhase = "waiting";
+    state.setupNote = "";
+    state.setupResult = null;
+    close();
+  }
+  // 设备上改了助理（使用、移除）：开着的页面跟着刷新
+  function repaintList() {
+    const page = el?.querySelector(".sw-frame")?.contentWindow;
+    if (page && typeof page.load === "function") page.load().catch(() => {});
+  }
+
+  // ── 设备的 /api/assistants（假的）
+  let apiNote = "", apiPaired = true;
+  const reply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  window.ValetSetupApi = async (url, opts = {}) => {
+    await wait(120);
+    if (!opts.method || opts.method === "GET") {
+      return reply({ active: state.activeAssistant || "", saving: false, note: apiNote, paired: apiPaired, transport: "passport-v1",
+        items: state.assistants.map((a) => ({ id: a.id, name: a.name, backend: a.backend, url: a.url, paired: a.code !== "" })) });
+    }
+    const d = JSON.parse(opts.body || "{}");
+    const find = (id) => state.assistants.find((a) => a.id === id);
+    if (d.action === "select" && find(d.id)) { useAssistant(d.id); apiNote = ""; log(`配置页：改用「${find(d.id).name}」。`); }
+    else if (d.action === "rename" && find(d.id)) { find(d.id).name = String(d.name).slice(0, 32); log(`配置页：改名为「${d.name}」。`); }
+    else if (d.action === "remove" && find(d.id)) { const n = find(d.id).name; removeAssistant(d.id); apiNote = ""; log(`配置页：移除「${n}」。`); }
+    else if (d.action === "add") {
+      if (!/^wss?:\/\//.test(d.url || "") || !d.code) return reply({ error: "配对信息不对：要有 wss:// 地址和配对码" }, 400);
+      const id = `assistant-${Date.now()}`;
+      state.assistants.push({ id, name: String(d.name).slice(0, 32), backend: d.backend === "hermes" ? "Hermes" : "OpenClaw", url: d.url, code: "", caps: { ask: true, live: true, ctx: true } });
+      useAssistant(id);
+      state.paired = false;
+      apiPaired = false;
+      apiNote = "请在助理那边批准这台设备。批准后这一页会自己变成「已连接」。";
+      phase("connecting", T("等助理批准", "Waiting for approval"));
+      log(`配置页：保存「${d.name}」，等助理批准（模拟 4 秒后批准）。`);
+      setTimeout(() => {
+        const a = find(id);
+        if (!a) return;
+        a.code = "device-token";
+        state.paired = true;
+        apiPaired = true;
+        apiNote = "已连接。可以在设备上关闭配置页了。";
+        state.setupResult = { id, name: a.name, backend: a.backend, caps: a.caps };
+        phase("done");
+        log(`配置页：「${a.name}」已连接。`);
+      }, 4000);
+    } else return reply({ error: "设备不认识这个操作" }, 400);
+    render();
+    return reply({ ok: true });
+  };
+
+  return { open, close, reset, isOpen: () => S.open, repaintList, qr, deviceUrl };
 })();

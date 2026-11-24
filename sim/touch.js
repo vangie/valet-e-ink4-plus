@@ -272,6 +272,7 @@ panel.addEventListener("click", (e) => {
     return true;
   };
   if (set("[data-sim]", "sim")) return;
+  if (set("[data-bookask]", "bookAsk", "书里提问改了：选字和问这一页按这里找人，别处不变。")) return;
   if (set("[data-theme]", "theme", isV2() ? "应用页样式改了。首页第二屏能看到。" : "首页主题改了。返回首页就能看到。")) return;
   if (set("[data-lang]", "lang")) return;
   if (set("[data-haptic]", "haptic")) return;
@@ -405,12 +406,3 @@ document.addEventListener("keyup", (e) => {
 
 log("假壳子就绪。页头可以在原始设计和新设计之间切。");
 render();
-
-// Regional firmware selection is separate from Chinese/English UI language.
-document.querySelector("#edition").addEventListener("change", (event) => {
-  state.edition = event.target.value;
-  const available = providerChoices().map(([id]) => id);
-  if (!available.includes(state.provider)) state.provider = available[0];
-  if (!available.includes(state.pendingProvider)) state.pendingProvider = state.provider;
-  stopSession(); render();
-});

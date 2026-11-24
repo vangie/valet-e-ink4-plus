@@ -139,7 +139,4 @@ h1 { margin: 0; font-size: 32px; font-weight: 650; letter-spacing: -0.03em; }
   .top { flex-direction: column; align-items: start; }
 }
 
-.edition-select { font-size: 12px; display:flex; gap:6px; align-items:center; }
-.edition-select select { font:inherit; background:white; color:#222; border:1px solid #bbb; border-radius:6px; padding:5px; }
 .diagnostic-detail { border:1px solid currentColor; padding:12px; margin-bottom:12px; }
-@media(max-width:600px) { .edition-select { width:100%; justify-content:center; } }

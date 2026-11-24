@@ -7,9 +7,7 @@ const UPSTREAM = Object.freeze({
   prototypeBasis: "source-verified",
 });
 function providerChoices() {
-  // Edition is a hardware/firmware build choice, independent of UI language.
-  const official = state.edition === "global" ? "yunxin" : "baiwen";
-  return Object.entries(PROVIDERS).filter(([id]) => id === official || id === "agent");
+  return Object.entries(PROVIDERS).filter(([id]) => id === "baiwen" || id === "agent");
 }
 function prototypeVersionLabel() {
   return L(`原型 ${UPSTREAM.prototypeVersion} · 源码 ${UPSTREAM.sourceVersion}`,
