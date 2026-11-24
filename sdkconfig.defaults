@@ -31,7 +31,9 @@ CONFIG_LV_USE_CLIB_SPRINTF=y
 CONFIG_LV_OS_NONE=y
 CONFIG_LV_USE_DRAW_SW=y
 CONFIG_LV_DRAW_SW_SUPPORT_I1=y
-CONFIG_LV_USE_LODEPNG=y
+# LVGL 自带的 PNG 解码（lodepng，约 27 KB）不要：esp_lv_decoder 后注册、先被问到，已经用 libpng 解 PNG；
+# 书里的插图走 reader/image_stream.cc 自己的解码。留着它永远轮不到。
+# CONFIG_LV_USE_LODEPNG is not set
 CONFIG_ELF_LOADER=y
 CONFIG_ELF_LOADER_LOAD_PSRAM=y
 # CONFIG_ELF_LOADER_LIBC_SYMBOLS is not set
