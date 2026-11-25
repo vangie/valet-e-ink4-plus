@@ -117,7 +117,9 @@ struct BookUiState {
         std::shared_ptr<reader::RasterImage> background_image; // UI 与后台页面准备共享只读背景
         lv_obj_t* footer_host = nullptr; // 底栏白底槽；page_label 放其中
         lv_obj_t* page_label = nullptr;
-        lv_obj_t* title_label = nullptr;
+        lv_obj_t* footer_left = nullptr;   // 页脚左侧：时间
+        lv_obj_t* footer_right = nullptr;  // 页脚右侧：进度
+        lv_obj_t* title_label = nullptr;   // 页眉：章节，不和页码挤在一行
         lv_obj_t* open_bar = nullptr;
         lv_obj_t* open_pct_lbl = nullptr;
 

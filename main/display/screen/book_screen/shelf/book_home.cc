@@ -24,6 +24,7 @@
 #include "reader/reader.h"
 #include "reader/book_library.h"
 #include "reader/book_home_snapshot.h"
+#include "screen_common.h"
 
 // One-bit output needs a stippled texture to retain the reference's light gray blocks.
 static const lv_image_dsc_t* EmptyWeekTexture() {
@@ -81,8 +82,10 @@ void RenderReadingHome() {
     const lv_coord_t nh =
         (num_font != nullptr && num_font->line_height > 0) ? num_font->line_height : lh;
 
-    // 继续阅读黑卡略抬；余量留给最近阅读封面下单行书名
-    const lv_coord_t dash_h = UiSy(164);
+    // 一屏放完：正在读、本周、最近、书架。书架钉在最底下，不再被挤出屏幕。
+    const lv_coord_t body_h = lv_obj_get_height(st.shelf.list_body);
+    const lv_coord_t usable = body_h > 80 ? body_h : LV_VER_RES - ScreenStatusBarHeight() - kListPad * 2;
+    const lv_coord_t dash_h = std::min<lv_coord_t>(UiSy(150), usable / 5);
 
     lv_obj_t* dash = lv_obj_create(st.shelf.list_body);
     lv_obj_remove_style_all(dash);
@@ -285,7 +288,7 @@ void RenderReadingHome() {
         lv_obj_clear_flag(gap, LV_OBJ_FLAG_CLICKABLE);
         Book_DisableScroll(gap);
     };
-    make_vgap(UiSy(34));
+    make_vgap(UiSy(16));
     const lv_coord_t stats_block_h = nh + UiSy(8) + ih;
     lv_obj_t* stats_row = lv_obj_create(st.shelf.list_body);
     lv_obj_remove_style_all(stats_row);
@@ -331,7 +334,7 @@ void RenderReadingHome() {
     make_stat_col(0, weekly, Lang::Strings::BOOK_WEEK_DURATION);
     make_stat_col(1, duration, Lang::Strings::BOOK_TOTAL_DURATION);
     make_stat_col(2, finished, Lang::Strings::BOOK_FINISHED);
-    make_vgap(UiSy(24));
+    make_vgap(UiSy(12));
 
     // 最近阅读：左对齐标题与双封面。
     {
@@ -355,12 +358,11 @@ void RenderReadingHome() {
         make_vgap(8);
 
         const lv_coord_t recent_cell_w = (content_w - kHomeGap) / 2;
-        lv_obj_update_layout(st.shelf.list_body);
-        const lv_coord_t available_h = lv_obj_get_content_height(st.shelf.list_body);
-        const lv_coord_t reserved_h = dash_h + UiSy(34) + stats_block_h + UiSy(24) +
-            kShelfViewToggleH + 8 + kRecentTitleGap + ih + kHomeShelfTopGap + kHomeShelfBtnH;
-        const lv_coord_t recent_cover_h = std::max<lv_coord_t>(UiSy(100),
-            std::min<lv_coord_t>(recent_cell_w * 7 / 5, available_h - reserved_h));
+        // 封面用去掉正在读、本周、统计和书架之后剩下的高度，书架钉在屏里。
+        const lv_coord_t reserved_h = dash_h + UiSy(16) + stats_block_h + UiSy(12) +
+            kShelfViewToggleH + 8 + kRecentTitleGap + ih + UiSy(12) + kHomeShelfBtnH;
+        const lv_coord_t recent_cover_h = std::max<lv_coord_t>(UiSy(72),
+            std::min<lv_coord_t>(recent_cell_w * 7 / 5, usable - reserved_h));
 
         lv_obj_t* recent_row = lv_obj_create(st.shelf.list_body);
         lv_obj_remove_style_all(recent_row);
@@ -407,7 +409,7 @@ void RenderReadingHome() {
             }
         }
 
-        make_vgap(kHomeShelfTopGap);
+        make_vgap(UiSy(12));
     }
 
     // —— 底部「我的书架 >」——

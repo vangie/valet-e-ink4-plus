@@ -721,6 +721,26 @@ lv_obj_t* CreateReaderScreen(const reader::BookInfo& info) {
     lv_obj_center(footer);
     Book_DisableScroll(footer);
     st.reader.page_label = footer;
+    auto make_side = [&](bool right) {
+        lv_obj_t* side = lv_label_create(foot_host);
+        lv_obj_set_style_text_font(side, Book_ItemFont(), 0);
+        lv_obj_set_style_text_color(side, lv_color_black(), 0);
+        lv_label_set_text(side, "");
+        lv_obj_align(side, right ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, right ? -UiSx(14) : UiSx(14), 0);
+        Book_DisableScroll(side);
+        return side;
+    };
+    st.reader.footer_left = make_side(false);
+    st.reader.footer_right = make_side(true);
+    // 章节单独放在页眉，不跟页码挤在页脚。
+    lv_obj_t* chapter = lv_label_create(scr);
+    lv_obj_set_style_text_font(chapter, Book_ItemFont(), 0);
+    lv_obj_set_style_text_color(chapter, lv_color_black(), 0);
+    lv_label_set_long_mode(chapter, LV_LABEL_LONG_DOT);
+    lv_label_set_text(chapter, "");
+    lv_obj_add_flag(chapter, LV_OBJ_FLAG_HIDDEN);
+    Book_DisableScroll(chapter);
+    st.reader.title_label = chapter;
 
     // 建屏时固定层叠顺序：正文、底栏、设置、状态栏；尺寸与显隐不再调整层级。
     lv_obj_move_foreground(sheet);

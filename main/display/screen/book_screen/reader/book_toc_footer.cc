@@ -10,6 +10,7 @@
 #include "book_screen/cover/book_cover_workers.h"
 #include "book_screen/book_font_runtime.h"
 #include "book_screen/book_geom.h"
+#include "screen_common.h"
 #include "book_screen/reader/book_layout_debounce.h"
 #include "book_screen/reader/book_layout_worker.h"
 #include "book_screen/reader/book_reader_prefs.h"
@@ -107,11 +108,16 @@ void UpdateReadFooter() {
         return;
     }
     const int pct_x10 = st.reader.session->ReadingProgressX10();
+    if (st.reader.title_label && lv_obj_is_valid(st.reader.title_label)) {
+        lv_obj_add_flag(st.reader.title_label, LV_OBJ_FLAG_HIDDEN);
+    }
     if (st.reader.read_chrome == BookUiState::ReadChrome::kToc) {
         const int n = st.reader.session->TocCount();
         const int pages = std::max(1, (n + st.reader.toc_page_size - 1) / st.reader.toc_page_size);
         std::snprintf(buf, sizeof(buf), Lang::Strings::BOOK_TOC_PAGE_FMT, st.reader.toc_list_page + 1, pages);
         lv_label_set_text(st.reader.page_label, buf);
+        if (st.reader.footer_left) lv_label_set_text(st.reader.footer_left, "");
+        if (st.reader.footer_right) lv_label_set_text(st.reader.footer_right, "");
         return;
     }
 
@@ -129,14 +135,6 @@ void UpdateReadFooter() {
         std::snprintf(hint, sizeof(hint), "%s", Lang::Strings::BOOK_LAYOUT_BUSY);
     } else if (show_done) {
         std::snprintf(hint, sizeof(hint), "%s", Lang::Strings::BOOK_LAYOUT_DONE);
-    }
-
-    char prog[40] = "";
-    if ((mask & kBookReaderFooterProgress) != 0) {
-        const int cur = st.reader.session->BookCurrentPage() + 1;
-        const int total = std::max(1, st.reader.session->BookPageCount());
-        std::snprintf(prog, sizeof(prog), "%d.%d%%  %d/%s%d", pct_x10 / 10, pct_x10 % 10, cur,
-            st.reader.session->PageCountsEstimated() ? "~" : "", total);
     }
 
     char batt[12] = "";
@@ -162,31 +160,49 @@ void UpdateReadFooter() {
         }
     }
 
-    char suffix[96] = "";
-    AppendFooterPart(suffix, sizeof(suffix), tim);
-    AppendFooterPart(suffix, sizeof(suffix), prog);
-    AppendFooterPart(suffix, sizeof(suffix), batt);
-    AppendFooterPart(suffix, sizeof(suffix), hint);
-
-    if ((mask & kBookReaderFooterTitle) != 0) {
-        std::string title = st.reader.session->CurrentTocTitle();
-        if (title.empty()) {
-            title = Lang::Strings::BOOK_BODY;
-        }
-        const lv_coord_t suffix_w =
-            suffix[0] != '\0' ? Book_MeasureTextWidth(footer_font, suffix) + Book_MeasureTextWidth(footer_font, " · ")
-                              : 0;
-        const lv_coord_t title_budget = std::max<lv_coord_t>(0, footer_w - suffix_w);
-        title = TruncateTextToWidth(title, footer_font, title_budget);
-        if (suffix[0] != '\0') {
-            std::snprintf(buf, sizeof(buf), "%s · %s", title.c_str(), suffix);
+    // 章节放在状态栏下面。状态栏藏着时也留出同样的高度，免得它一出现就盖住章节。
+    const int status_h = st.reader.status_h > 0 ? st.reader.status_h : ScreenStatusBarHeight();
+    if (st.reader.title_label && lv_obj_is_valid(st.reader.title_label)) {
+        if ((mask & kBookReaderFooterTitle) != 0 &&
+            st.reader.read_chrome == BookUiState::ReadChrome::kReading) {
+            std::string title = st.reader.session->CurrentTocTitle();
+            if (title.empty()) title = Lang::Strings::BOOK_BODY;
+            lv_label_set_text(st.reader.title_label, title.c_str());
+            lv_obj_set_width(st.reader.title_label, std::max<lv_coord_t>(40, footer_w - UiSx(8)));
+            lv_obj_align(st.reader.title_label, LV_ALIGN_TOP_LEFT, UiSx(16), status_h + UiSy(4));
+            lv_obj_clear_flag(st.reader.title_label, LV_OBJ_FLAG_HIDDEN);
+            if (st.reader.status_bar && lv_obj_is_valid(st.reader.status_bar)) {
+                lv_obj_move_foreground(st.reader.status_bar);
+            }
         } else {
-            std::snprintf(buf, sizeof(buf), "%s", title.c_str());
+            lv_label_set_text(st.reader.title_label, "");
+            lv_obj_add_flag(st.reader.title_label, LV_OBJ_FLAG_HIDDEN);
         }
-    } else {
-        std::snprintf(buf, sizeof(buf), "%s", suffix);
     }
-    lv_label_set_text(st.reader.page_label, buf);
+    char page_no[16] = "";
+    char right[40] = "";
+    if ((mask & kBookReaderFooterProgress) != 0) {
+        std::snprintf(page_no, sizeof(page_no), "%d", st.reader.session->BookCurrentPage() + 1);
+        std::snprintf(right, sizeof(right), "%d%%", pct_x10 / 10);
+        if (batt[0] != '\0') {
+            std::strncat(right, "  ", sizeof(right) - std::strlen(right) - 1);
+            std::strncat(right, batt, sizeof(right) - std::strlen(right) - 1);
+        }
+    } else if (batt[0] != '\0') {
+        std::snprintf(right, sizeof(right), "%s", batt);
+    }
+    if (hint[0] != '\0') {
+        std::strncat(right, " ", sizeof(right) - std::strlen(right) - 1);
+        std::strncat(right, hint, sizeof(right) - std::strlen(right) - 1);
+    }
+    lv_label_set_text(st.reader.page_label, page_no);
+    if (st.reader.footer_left && lv_obj_is_valid(st.reader.footer_left)) {
+        lv_label_set_text(st.reader.footer_left, tim);
+    }
+    if (st.reader.footer_right && lv_obj_is_valid(st.reader.footer_right)) {
+        lv_label_set_text(st.reader.footer_right, right);
+    }
+    (void)footer_font;
 }
 
 void RenderTocList() {

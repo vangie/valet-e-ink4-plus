@@ -216,10 +216,11 @@ void ShowReadSettingsSheet(bool default_duration) {
     }
     if (ReaderPageImagesHint()) CancelPageImageLoad();
     if (default_duration) {
-        // A fresh reader tap starts at duration, never resurrecting an import subpanel.
+        // 点屏幕中间先出工具首页（问、目录、书签、排版），不直接进某一项。
         TtfPanelClose();
         ResetBookmarkSelection();
         st.settings.reader_tab = 4;
+        st.settings.reader_settings_page = 0;
     }
     if (st.settings.reader_tab == 1) StartReadFontScan();
     else CancelReadFontScan();
@@ -231,6 +232,7 @@ void ShowReadSettingsSheet(bool default_duration) {
     SetReadStatusCenterTitle(nullptr);
     SetReadStatusVisible(true);
     SetReadSettingsSheetVisible(true);
+    UpdateReadFooter();
 
     RebuildSettingsSheet();
 }

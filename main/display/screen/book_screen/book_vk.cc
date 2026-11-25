@@ -227,6 +227,11 @@ bool BookScreen::OnVkKey(const char* key_name) {
                 if (st.settings.reader_tab == 3 && st.settings.reader_settings_page != 0 &&
                     st.tap.tap_zone_ui == BookUiState::TapZoneUi::kClosed) {
                     BookLvAsync([](void*) { SelectReadingSheetTab(3); });
+                } else if (st.settings.reader_tab != 4 &&
+                           st.tap.tap_zone_ui == BookUiState::TapZoneUi::kClosed &&
+                           st.ttf.ttf_mode == BookUiState::TtfMode::kNone) {
+                    // 工具子页先回到问 / 目录 / 书签 / 排版，再按一次才收起。
+                    BookLvAsync([](void*) { SelectReadingSheetTab(4); });
                 } else BookLvAsync(AsyncHideReadChrome);
                 return true;
             }
@@ -258,6 +263,8 @@ bool BookScreen::OnVkKey(const char* key_name) {
                     BookLvAsync(AsyncTapZonesPanelClose);
                 } else if (st.settings.reader_tab == 3 && st.settings.reader_settings_page != 0) {
                     BookLvAsync([](void*) { SelectReadingSheetTab(3); });
+                } else if (st.settings.reader_tab != 4) {
+                    BookLvAsync([](void*) { SelectReadingSheetTab(4); });
                 } else {
                     BookLvAsync(AsyncHideReadChrome);
                 }

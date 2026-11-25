@@ -1,5 +1,6 @@
 #include "screen_frontlight.h"
 #include "book_screen/book_geom.h"
+#include "screen_common.h"
 #include "book_screen/reader/book_auto_turn.h"
 #include "book_screen/book_nav.h"
 #include "book_screen/settings/book_settings_sheet.h"
@@ -120,11 +121,18 @@ lv_area_t ReadContentArea() {
     const bool full = BookReaderPrefsBackground() == 3 && !page_images;
     const int left = (full ? (DisplayUiIsLandscape() ? DISPLAY_CONTENT_TOP_INSET : DISPLAY_CONTENT_LEFT_INSET) + DisplayUiOffsetX() : 0) + BookReaderPrefsMarginLeft() + (vertical &&
         BookReaderPrefsTextDirection() != kBookReaderTextRightToLeft ? extra_side : 0);
-    const int top = (full ? (DisplayUiIsLandscape() ? DISPLAY_CONTENT_LEFT_INSET : DISPLAY_CONTENT_TOP_INSET) + DisplayUiOffsetY() : 0) + BookReaderPrefsMarginTop();
+    const int chapter = BookReaderPrefsHideProgress() ||
+        (BookReaderPrefsFooterMask() & kBookReaderFooterTitle) == 0 ? 0
+        : Book_ItemFont()->line_height + UiSy(10);
+    // 状态栏在阅读时藏着，章节画在它下面，正文再从章节下面起。
+    const int status_h = Book_State().reader.status_h;
+    const int status_reserve = chapter == 0 ? 0
+        : (status_h > 0 ? status_h : ScreenStatusBarHeight());
+    const int top = (full ? (DisplayUiIsLandscape() ? DISPLAY_CONTENT_LEFT_INSET : DISPLAY_CONTENT_TOP_INSET) + DisplayUiOffsetY() : 0) + BookReaderPrefsMarginTop() + status_reserve + chapter;
     const int width = std::max<int>(40, ReaderLayoutWidth() - BookReaderPrefsMarginLeft() -
         BookReaderPrefsMarginRight() - extra_side);
     const int height = std::max<int>(40, ReaderLayoutHeight() -
-        (BookReaderPrefsHideProgress() ? 0 : ReaderFooterHeight()) - BookReaderPrefsMarginTop() - BookReaderPrefsMarginBottom());
+        (BookReaderPrefsHideProgress() ? 0 : ReaderFooterHeight()) - BookReaderPrefsMarginTop() - BookReaderPrefsMarginBottom() - status_reserve - chapter);
     return {left, top, left + width - 1, top + height - 1};
 }
 
