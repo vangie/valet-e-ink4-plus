@@ -30,7 +30,9 @@ panel.addEventListener("click", (e) => {
     if (x > 2 / 3) return void turnPage(1);
     if (state.float) return void v2CloseFloat("点书页中间");
     state.sheet = true;
-    log("点屏幕中间：弹出阅读卡片。");
+    if (isV2()) state.sheetTab = "home";
+    else if (typeof state.sheetTab !== "number") state.sheetTab = 3;
+    log(isV2() ? "点屏幕中间：打开工具面板。" : "点屏幕中间：弹出阅读卡片。");
     return render();
   }
 

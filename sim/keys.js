@@ -3,6 +3,7 @@ const LONG_MS = 500; // TOUCH_VK_LONG_MS、kBootLongPressMs
 const POWER_LONG_MS = 3000; // POWER_LONG_PRESS_MS
 
 function readingActive() {
+  // 工具面板开着时不翻页，免得面板盖着的时候页码自己变了。悬窗开着照样翻，悬窗跟着到那一页。
   return state.screen === "reader" && !state.sheet;
 }
 function asleep() {
@@ -55,7 +56,9 @@ function aiClick() {
   }
   if (state.screen === "reader") {
     state.sheet = !state.sheet;
-    log(state.sheet ? "短按 AI 唤醒：弹出阅读卡片。" : "短按 AI 唤醒：收起阅读卡片。");
+    if (state.sheet && isV2()) state.sheetTab = "home";
+    else if (state.sheet && typeof state.sheetTab !== "number") state.sheetTab = 3;
+    log(state.sheet ? (isV2() ? "短按 AI 唤醒：打开工具面板。" : "短按 AI 唤醒：弹出阅读卡片。") : (isV2() ? "短按 AI 唤醒：收起工具面板。" : "短按 AI 唤醒：收起阅读卡片。"));
     return render();
   }
   if (state.screen === "ai") return state.live ? interruptLive() : abortSpeaking();

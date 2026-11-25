@@ -213,11 +213,45 @@ body { font-family: "PingFang SC", "Avenir Next", "Helvetica Neue", sans-serif; 
 .v-solid { height: 32px; padding: 0 14px; border: 0; background: var(--ink); color: var(--paper); display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: 10.8px; font-weight: 600; }
 .v-solid .ic { width: 10px; height: 10px; }
 
-/* 正文 */
-.v-read .read-head { align-items: center; padding: 6px 14px 4px; min-height: 28px; box-sizing: border-box; }
-.v-read .read-foot { align-items: center; }
-.v-mark { width: 16px; height: 16px; padding: 0; border: 1px solid var(--ink); border-radius: 50%; background: none; color: var(--ink); font: 600 9px/1 "Songti SC", serif; }
+/* 正文：页眉只放章节（回次一行、回目一行），页码在页脚正中，像纸书。 */
+.v-read .read-head { align-items: flex-start; padding: 8px 18px 2px; min-height: 36px; box-sizing: border-box; }
+.v-read .read-foot { position: relative; align-items: center; justify-content: space-between; padding: 4px 18px 8px; min-height: 22px; }
+.v-read .read-foot b { position: absolute; left: 50%; transform: translateX(-50%); font: 500 10px/1 "Songti SC", "Source Han Serif SC", serif; letter-spacing: 1px; }
+.v-chap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.v-chap b { font: 600 11px/1.3 "Songti SC", "Source Han Serif SC", serif; letter-spacing: 1px; }
+.v-chap em { font-style: normal; font: 400 9px/1.3 "Songti SC", "Source Han Serif SC", serif; color: var(--g1); letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-read .read-body { padding: 6px 22px 2px; }
+.v-mark { width: 16px; height: 16px; margin-top: 1px; padding: 0; border: 1px solid var(--ink); border-radius: 50%; background: none; color: var(--ink); font: 600 9px/1 "Songti SC", serif; }
 .v-miss { padding: 0 0 1px; border: 0; border-bottom: 1px solid var(--ink); background: none; color: var(--ink); font-size: 9px; }
+/* 点屏幕中间：下方工具面板。首页四行（问、目录、书签、排版），点进去才是那一项，不再用页签表单。 */
+.v-tool { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; max-height: 72%; background: var(--paper); display: flex; flex-direction: column; }
+.v-tool::before { content: ""; position: absolute; left: 0; right: 0; top: -5px; height: 5px; background-image: radial-gradient(var(--ink) 0.55px, transparent 0.75px); background-size: 2px 2px; }
+.v-tool-head { flex: none; height: 32px; padding: 0 4px 0 8px; background: var(--ink); color: var(--paper); display: flex; align-items: center; gap: 4px; }
+.v-tool-head b { flex: 1; font-size: 11.5px; font-weight: 600; letter-spacing: 1px; }
+.v-tool-head button { width: 28px; height: 28px; padding: 0; border: 0; background: none; color: var(--paper); display: grid; place-items: center; }
+.v-tool-head .ic { width: 13px; height: 13px; }
+.v-tool-body { flex: 1; min-height: 0; overflow: hidden; padding: 2px 0 8px; }
+.v-tool-home button { width: 100%; height: 40px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--ink); background: none; display: flex; align-items: center; gap: 10px; text-align: left; }
+.v-tool-home button:last-child { border-bottom: 0; }
+.v-tool-home .ic { width: 16px; height: 16px; flex: none; }
+.v-tool-home .chev { width: 9px; height: 9px; margin-left: auto; }
+.v-tool-home span { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.v-tool-home b { font-size: 12px; font-weight: 600; }
+.v-tool-home em { font-style: normal; font-size: 9px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-tool-row { width: 100%; min-height: 36px; padding: 6px 14px; border: 0; border-bottom: 1px solid var(--ink); background: none; display: flex; align-items: baseline; gap: 10px; text-align: left; font-size: 11px; }
+.v-tool-row b { flex: none; font-weight: 600; }
+.v-tool-row span { color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-tool-row.on b::before { content: ""; display: inline-block; width: 6px; height: 9px; margin-right: 6px; background: var(--ink); clip-path: polygon(40% 0, 100% 0, 60% 100%, 0 100%); vertical-align: -1px; }
+.v-tool-empty { margin: 8px 14px; font-size: 10px; line-height: 1.6; color: var(--g1); }
+.v-tool-add { width: calc(100% - 28px); height: 30px; margin: 8px 14px 2px; border: 1.2px solid var(--ink); background: none; font-size: 11px; font-weight: 600; }
+.v-type { padding: 6px 14px 4px; display: flex; flex-direction: column; gap: 6px; }
+.v-type > label { font-size: 9px; color: var(--g1); }
+.v-type-size { display: flex; align-items: stretch; height: 28px; border: 1.2px solid var(--ink); }
+.v-type-size > button { width: 40px; border: 0; background: none; font-size: 11px; }
+.v-type-size > b { width: 36px; border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); display: grid; place-items: center; font: 600 12px "Avenir Next", sans-serif; }
+.v-type-size .v-seg { flex: 1; border: 0; }
+.v-type-size .v-seg button { height: auto; font-size: 9px; border-left: 1px solid var(--ink); }
+.v-type .v-pack { margin-top: 2px; }
 .panel.v2 .sheet { padding: 10px 12px 12px; background: var(--paper); border-top: 1.2px solid var(--ink); display: flex; flex-direction: column; gap: 6px; }
 .v-sheet-ai { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 2px; }
 .v-sheet-ai button { height: 32px; border: 1.2px solid var(--ink); background: none; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10.8px; font-weight: 600; }
@@ -316,8 +350,42 @@ div.v-row { box-sizing: border-box; }
 .v-old .about span { font-size: 9px; color: var(--g1); margin-top: 2px; }
 
 /* 其余应用：官方的结构，统一页头和线条 */
-.v-app { position: relative; flex: 1; min-height: 0; }
+.v-app { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .v-app > div { height: 100%; }
+
+/* 阅读首页：一屏放完，不滚动。进度条、本周、最近、书架。 */
+.v-readhome { padding-bottom: 8px; }
+.v-rh-now { flex: none; margin: 10px 12px 0; height: 64px; padding: 0 10px 0 8px; border: 1.2px solid var(--ink); background: none; display: flex; align-items: center; gap: 10px; text-align: left; }
+.rh-cover { box-sizing: border-box; border: 1px solid var(--ink); border-left-width: 3px; background: var(--paper); color: var(--ink); display: flex; align-items: center; justify-content: center; text-align: center; font: 600 11px/1.3 "Songti SC", "Source Han Serif SC", serif; }
+.v-rh-now .rh-cover { flex: none; width: 36px; height: 50px; }
+.v-rh-now > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.v-rh-now b { font-size: 13px; font-weight: 600; }
+.v-rh-now em { font-style: normal; font-size: 9px; color: var(--g1); }
+.v-rh-now .v-track { width: 100%; }
+.v-rh-pct { flex: none; font: 600 16px/1 "Avenir Next", sans-serif; }
+.v-rh-week { flex: none; margin: 10px 12px 0; display: grid; grid-template-columns: auto 1fr; grid-template-rows: 1fr auto; column-gap: 10px; height: 52px; }
+.v-rh-week > div:first-child { grid-row: 1 / 3; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+.v-rh-week b { font-size: 11px; font-weight: 600; }
+.v-rh-week span { font-size: 9px; color: var(--g1); }
+.v-rh-chart { display: flex; align-items: flex-end; gap: 4px; }
+.v-rh-chart i { flex: 1; background: var(--g2); min-height: 3px; }
+.v-rh-chart i.on { background: var(--ink); }
+.v-rh-days { display: flex; }
+.v-rh-days span { flex: 1; text-align: center; font-size: 8px; color: var(--g1); }
+.v-rh-stats { flex: none; margin: 8px 12px 0; display: grid; grid-template-columns: 1fr 1fr 1fr; text-align: center; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
+.v-rh-stats div { padding: 6px 0; border-left: 1px solid var(--ink); }
+.v-rh-stats div:first-child { border-left: 0; }
+.v-rh-stats b { display: block; font-size: 13px; }
+.v-rh-stats span { font-size: 8px; color: var(--g1); }
+.v-rh-h { flex: none; margin: 8px 12px 4px; font-size: 10px; font-weight: 600; }
+.v-rh-recent { flex: 1; min-height: 0; margin: 0 12px; display: flex; gap: 8px; }
+.v-rh-recent .rh-cover { flex: 1; height: auto; width: auto; font-size: 14px; }
+.v-rh-recent .rh-cover.empty { font: 10px "PingFang SC", sans-serif; font-weight: 400; color: var(--g1); background: none; border-style: dashed; border-left-width: 1px; }
+.v-rh-shelf { flex: none; margin: 8px 12px 0; height: 36px; padding: 0 10px; border: 0; background: var(--ink); color: var(--paper); display: flex; align-items: center; gap: 8px; text-align: left; }
+.v-rh-shelf .ic { width: 14px; height: 14px; }
+.v-rh-shelf b { font-size: 12px; font-weight: 600; }
+.v-rh-shelf span { flex: 1; font-size: 9px; opacity: .8; }
+.v-rh-shelf .chev { width: 9px; height: 9px; }
 .panel.v2 .seg { border: 1.2px solid var(--ink); }
 .panel.v2 .seg.pill { border-radius: 0; align-self: stretch; }
 .panel.v2 .seg.pill button { flex: 1; }

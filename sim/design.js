@@ -340,13 +340,23 @@ function v2SnapFloat() {
   const float = document.querySelector(".v-float"), body = document.querySelector(".v-read .read-body");
   if (!float || !body) return;
   const read = float.parentElement.getBoundingClientRect();
-  // 从选字进来：开在选中的字下面，不盖住问的那几个字；悬窗至少留屏高的 43%（设备上 1212 里的 520 像素），选得太靠下就盖住一部分
+  // 从选字进来：悬窗上沿落在选中文字下面最近的一行空隙，不盖住问的那几个字。
+  // 选得太靠下、剩下不到屏高的 43%（设备上 1212 里的 520 像素）时，才允许盖住一部分。
   const sel = [...body.querySelectorAll(".sel")].pop();
   if (v2.quote && sel) {
     const scale0 = read.height / float.parentElement.offsetHeight || 1;
-    const minH = read.height * 520 / 1212, below = sel.getBoundingClientRect().bottom + 4 * scale0;
-    if (below > read.top + read.height * 0.25) {
-      float.style.height = `${Math.round((read.bottom - Math.min(below, read.bottom - minH)) / scale0)}px`;
+    const minH = read.height * 520 / 1212;
+    const bottom = sel.getBoundingClientRect().bottom;
+    let edge = bottom + 4 * scale0;
+    const walker0 = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    const range0 = document.createRange();
+    for (let node = walker0.nextNode(); node; node = walker0.nextNode()) {
+      range0.selectNodeContents(node);
+      for (const r of range0.getClientRects()) if (r.top >= bottom - 1 && r.top < edge) edge = r.top;
+    }
+    if (read.bottom - edge < minH) edge = read.bottom - minH;
+    if (edge > read.top + read.height * 0.18) {
+      float.style.height = `${Math.round((read.bottom - edge) / scale0)}px`;
       return;
     }
   }
@@ -437,6 +447,12 @@ function openSetting(id) {
 const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "device", about: "device", proxy: "net", bt: "sound", pager: "read", library: "read" };
 // 返回 true = 这次返回已经在设置里往上走了一级。
 function v2Back() {
+  if (state.screen === "reader" && state.sheet && state.sheetTab !== "home") {
+    state.sheetTab = "home";
+    log("返回：回到工具首页。");
+    render();
+    return true;
+  }
   if (state.screen === "ai" && state.floatExpanded && stack[stack.length - 1] === "reader") {
     // 从悬窗点「全屏」出来的：回到书页，悬窗还在，通话不断
     v2LeaveAi();
@@ -684,26 +700,80 @@ function v2Ai() {
     <div class="v-body">${body}</div>${foot}</main>`;
 }
 
-// ── 正文：页面上不放按钮。问过的页有「注」，缺字形的页在页脚提示。
-function v2Reader() {
-  const agent = true;   // 官方云也拿得到这一页（悬窗、注都一样）；没连上的自建在 v2OpenFloat 里去连接
-  const note = v2.notes[state.page];
-  const marked = agent && note && note.a.length > 0;
+// ── 正文：像一页纸书。页眉只放章节，页码在页脚正中。页面上不放按钮。
+// 点屏幕中间打开工具面板：问、目录、书签、排版，一次只露一项。问过的页右上角有「注」。
+const V2_CHAPTERS = [
+  ["第一回", "宴桃园豪杰三结义"],
+  ["第二回", "张翼德怒鞭督邮"],
+  ["第三回", "议温明董卓叱丁原"],
+];
+function v2Chapter() {
+  return V2_CHAPTERS[Math.min(state.page, V2_CHAPTERS.length - 1)];
+}
+function v2SheetHome() {
+  const [hui, title] = v2Chapter();
+  const here = state.bookmarks.includes(state.page);
+  const items = [
+    ["ask", "mic", L("问这一页", "Ask this page"), L("带着这一页的正文", "This page goes with it")],
+    ["toc", "shelf", L("目录", "Contents"), `${hui}　${title}`],
+    ["marks", "book", L("书签", "Bookmarks"), here ? L("这一页夹着", "This page is marked") : L(`${state.bookmarks.length} 处`, `${state.bookmarks.length}`)],
+    ["type", "sentence", L("排版", "Type"), `${state.fontName} ${state.fontSize}`],
+  ];
+  if (callEntry()) items.splice(1, 0, ["talk", "wave", L("聊这一页", "Talk about it"), L("边读边说，不离开书", "Stay on the page")]);
+  return `<div class="v-tool-home">${items.map(([id, icon, name, sub]) =>
+    `<button data-tool="${id}">${ic(icon)}<span><b>${name}</b><em>${sub}</em></span>${ic("go", "chev")}</button>`).join("")}</div>`;
+}
+function v2SheetToc() {
+  return V2_CHAPTERS.map(([hui, title], i) =>
+    `<button class="v-tool-row${i === Math.min(state.page, V2_CHAPTERS.length - 1) ? " on" : ""}" data-toc="${i}"><b>${hui}</b><span>${title}</span></button>`).join("");
+}
+function v2SheetMarks() {
+  const here = state.bookmarks.includes(state.page);
+  const rows = state.bookmarks.length
+    ? [...state.bookmarks].sort((a, b) => a - b).map((p) => {
+      const i = state.bookmarks.indexOf(p);
+      const [hui] = V2_CHAPTERS[Math.min(p, V2_CHAPTERS.length - 1)];
+      return `<button class="v-tool-row" data-mark="${i}"><b>${L("第", "p.")} ${p + 1} ${L("页", "")}</b><span>${hui}${p === state.page ? L(" · 这一页", " · here") : ""}</span></button>`;
+    }).join("")
+    : `<p class="v-tool-empty">${L("还没有书签。夹上这一页，下次从首页接着读。", "None yet. Mark this page to resume from Home.")}</p>`;
+  return `${rows}<button class="v-tool-add" data-addmark>${here ? L("去掉这一页的书签", "Remove this bookmark") : L("夹上这一页", "Bookmark this page")}</button>`;
+}
+function v2SheetType() {
   const miss = missingGlyphs(state.page);
-  const body = v2ReadBody();
-  const tabs = sheetTabs().map((name, i) => `<span data-sheet="${i}" class="${state.sheetTab === i ? "on" : ""}">${name}</span>`).join("");
-  const pack = state.sheetTab === 1
-    ? `<button class="v-pack" data-setting="read"><span>${L("扩展字库", "Extended fonts")}：${state.fontpack ? L("已安装", "installed") : L(miss ? `未安装，这一页缺 ${miss} 个字` : "未安装", "not installed")}</span>${ic("go")}</button>` : "";
-  const sheet = state.sheet ? `<div class="sheet v-sheet">
-      <div class="v-sheet-ai">
-        <button class="solid" data-ask>${ic("mic")}${agent ? L("问这一页", "Ask this page") : `${L("问", "Ask ")}${PROVIDERS[state.provider]}`}</button>
-        ${callEntry() ? `<button data-live>${ic("wave")}${L("聊这一页", "Talk about it")}</button>` : ""}
-      </div>
-      <div class="tabs">${tabs}</div>${pack}${sheetBody()}</div>` : "";
+  const fonts = ["MiSans", "Source Han", "Song"].map((name) =>
+    `<button data-font="${name}" class="${state.fontName === name ? "on" : ""}">${name === "Song" ? L("宋体", "Song") : name}</button>`).join("");
+  const seg = (items, current, attr) => `<div class="v-seg">${items.map(([id, name]) =>
+    `<button ${attr}="${id}" class="${current === id ? "on" : ""}">${name}</button>`).join("")}</div>`;
+  const margins = [["narrow", L("窄", "Narrow")], ["standard", L("标准", "Std")], ["wide", L("宽", "Wide")], ["very", L("很宽", "Wider")]];
+  const gaps = [["compact", L("紧", "Tight")], ["standard", L("标准", "Std")], ["relaxed", L("松", "Loose")], ["very", L("很松", "Looser")]];
+  return `<div class="v-type">
+    <div class="v-type-size"><button data-size="-">A−</button><b>${state.fontSize}</b><button data-size="+">A+</button><div class="v-seg">${fonts}</div></div>
+    <label>${L("边距", "Margins")}</label>${seg(margins, state.margin, "data-margin")}
+    <label>${L("行距", "Line spacing")}</label>${seg(gaps, state.spacing, "data-spacing")}
+    <label>${L("段距", "Paragraphs")}</label>${seg(gaps, state.para, "data-para")}
+    <button class="v-pack" data-setting="read"><span>${L("扩展字库", "Extended fonts")}：${state.fontpack ? L("已安装", "installed") : L(miss ? `未安装，这一页缺 ${miss} 个字` : "未安装", "not installed")}</span>${ic("go")}</button>
+  </div>`;
+}
+function v2Sheet() {
+  const id = state.sheetTab;
+  const titles = { home: L("这一页", "This page"), toc: L("目录", "Contents"), marks: L("书签", "Bookmarks"), type: L("排版", "Type") };
+  const body = id === "toc" ? v2SheetToc() : id === "marks" ? v2SheetMarks() : id === "type" ? v2SheetType() : v2SheetHome();
+  const back = id === "home" ? "" : `<button data-tool="home" aria-label="${L("返回", "Back")}">${ic("back")}</button>`;
+  return `<div class="v-tool">
+    <div class="v-tool-head">${back}<b>${titles[id] || titles.home}</b><button data-sheet-shade aria-label="${L("收起", "Close")}">${ic("x")}</button></div>
+    <div class="v-tool-body">${body}</div></div>`;
+}
+function v2Reader() {
+  const note = v2.notes[state.page];
+  const marked = note && note.a.length > 0;
+  const miss = missingGlyphs(state.page);
+  const [hui, title] = v2Chapter();
+  const pct = Math.round(((state.page + 1) / pages.length) * 100);
+  const sheet = state.sheet ? v2Sheet() : "";
   return `<div class="read v-read">
-    <div class="read-head"><span>三国演义 · 第一回</span>${marked ? `<button class="v-mark" data-ask>${L("注", "Note")}</button>` : ""}</div>
-    <div class="read-body">${body}</div>
-    <div class="read-foot"><span>10:48</span>${miss ? `<button class="v-miss" data-fontfix>${L(`缺 ${miss} 个字`, `${miss} missing`)}</button>` : `<span>${state.battery}%</span>`}<span>${state.page + 1} / ${pages.length}</span></div>
+    <div class="read-head"><span class="v-chap"><b>${hui}</b><em>${title}</em></span>${marked ? `<button class="v-mark" data-ask>${L("注", "Note")}</button>` : ""}</div>
+    <div class="read-body">${v2ReadBody()}</div>
+    <div class="read-foot"><span>10:48</span><b>${state.page + 1}</b>${miss ? `<button class="v-miss" data-fontfix>${L(`缺 ${miss} 字`, `${miss} missing`)}</button>` : `<span>${pct}%</span>`}</div>
     ${state.sheet ? `<div class="v-shade" data-sheet-shade></div>` : ""}${sheet}${state.float ? v2Float() : ""}${v2.sel && !v2.drag ? v2SelPop() : ""}</div>`;
 }
 
@@ -913,7 +983,7 @@ function v2SettingsPane(id) {
         <em>${state.fontpack ? L("十万多个汉字，生僻字能显示", "100k+ characters available") : L("机内字库没有的字会画成方框", "Missing characters show as boxes")}</em></span></div>
       <p class="v-tip">${L("这不是屏的限制，是缺字形。把 extended-fonts.fontpack（约 255 MB）传到 SD 卡，再重新打开书。", "Not a screen limit. Copy extended-fonts.fontpack (about 255 MB) to the SD card.")}</p>
       <div class="v-two"><button class="v-line" data-go="transfer">${L("去传输页上传", "Open Transfer")}</button><button class="v-line dashed" data-fontpack>${state.fontpack ? L("假的：当作没装", "Fake: remove") : L("假的：当作已装好", "Fake: installed")}</button></div>
-      ${v2Fld(L("正文字号", "Text size"), `<div class="v-step"><button data-size="-">A−</button><b>${state.fontSize}</b><button data-size="+">A+</button></div>`, L("字体、边距、行距在正文里点屏幕中间改。", "Font, margins and spacing are in the reading card."))}
+      ${v2Fld(L("正文字号", "Text size"), `<div class="v-step"><button data-size="-">A−</button><b>${state.fontSize}</b><button data-size="+">A+</button></div>`, L("字体、边距、行距在正文里点屏幕中间，选「排版」。", "Font, margins and spacing: tap the middle of the page, then Type."))}
       ${v2BookAskField()}
       ${shakeOptions}
       <nav class="v-rows">${v2Row("library", "", L("书库订阅", "Libraries"), state.libs.length ? state.libs.map((id) => LIB_SOURCES[id].short).join("、") + L(" · 书和本机的放在一起", " · on the shelf") : L("没订阅。填 OPDS 链接就能搜书下载", "None. Add an OPDS link"))}${v2Row("pager", "", L("翻页器", "Page turner"), state.pagerOn ? "PageTurner-A · " + L("已连接", "connected") : L("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"))}</nav>`;
@@ -1076,7 +1146,38 @@ function v2Standby() {
     <p class="v-sb-hint">${ic("mic")}${L("长按 AI 唤醒键，醒来直接提问", "Hold the AI key to wake and ask")}</p></div>`;
 }
 
-// 其余应用沿用官方的结构，加上统一的页头。
+// 阅读应用首页：一屏放完。进度、本周、最近在读、进书架。不套官方那一页，免得状态栏画两次、底下被切掉。
+function v2ReadingHome() {
+  const pct = Math.round(((state.page + 1) / pages.length) * 100);
+  const days = t("days");
+  const bars = [18, 28, 12, 40, 22, 8, 16].map((h, i) =>
+    `<i style="height:${h}%" class="${i === 1 ? "on" : ""}"></i>`).join("");
+  return `${bar()}<main class="v-page v-readhome">${v2Head(L("阅读", "Reading"))}
+    <button class="v-rh-now" data-go="reader">
+      <i class="rh-cover">三国<br>演义</i>
+      <span><b>三国演义</b><em>${L("第一回 · 第", "Ch.1 · p.")} ${state.page + 1} ${L("页", "")}</em>
+        <span class="v-track"><i style="width:${pct}%"></i></span></span>
+      <b class="v-rh-pct">${pct}%</b></button>
+    <section class="v-rh-week">
+      <div><b>${L("本周", "This week")}</b><span>42.0 ${t("minutes")}</span></div>
+      <div class="v-rh-chart">${bars}</div>
+      <div class="v-rh-days">${days.map((d) => `<span>${d}</span>`).join("")}</div>
+    </section>
+    <section class="v-rh-stats">
+      <div><b>42.0m</b><span>${t("weekDur")}</span></div>
+      <div><b>3.5h</b><span>${t("totalDur")}</span></div>
+      <div><b>0${t("count")}</b><span>${t("finished")}</span></div>
+    </section>
+    <p class="v-rh-h">${t("recent")}</p>
+    <div class="v-rh-recent">
+      <button class="rh-cover" data-book="0">三国<br>演义</button>
+      <div class="rh-cover empty">${t("noRecent")}</div>
+    </div>
+    <button class="v-rh-shelf" data-go="shelf">${ic("shelf")}<b>${L("书架", "Shelf")}</b><span>${L("本机和订的书库", "On device and libraries")}</span>${ic("go", "chev")}</button>
+  </main>`;
+}
+
+// 其余应用沿用官方的结构，加上统一的页头。阅读首页自己画，不套官方那一页。
 function v2Screen() {
   const s = state.screen;
   if (s === "home") return v2Home();
@@ -1084,7 +1185,8 @@ function v2Screen() {
   if (s === "reader") return v2Reader();
   if (s === "settings") return v2Settings();
   if (s === "shelf") return v2Shelf();
-  const html = { detail, wallpaper, wall, tasks, transfer, store, shelf, book, buddy, wifi, pager }[s]();
+  if (s === "detail") return v2ReadingHome();
+  const html = { wallpaper, wall, tasks, transfer, store, shelf, book, buddy, wifi, pager }[s]();
   return `${bar()}<main class="v-page">${v2Head(names()[s])}<div class="v-app">${html.replace(/^<div class="bar">[\s\S]*?<\/div>/, "")}</div></main>`;
 }
 
@@ -1240,8 +1342,16 @@ panel.addEventListener("click", (e) => {
   }
   if (hit("[data-fontfix]")) {
     state.sheet = true;
-    state.sheetTab = 1;
-    log("点了页脚的缺字提示：打开阅读卡片的字体页。");
+    state.sheetTab = "type";
+    log("点了页脚的缺字提示：打开排版。");
+    return render();
+  }
+  if ((el = hit("[data-tool]"))) {
+    const id = el.dataset.tool;
+    if (id === "ask") return v2Ask();
+    if (id === "talk") return v2OpenFloat(true);
+    state.sheetTab = id;
+    log(id === "home" ? "回到工具首页。" : `打开${{ toc: "目录", marks: "书签", type: "排版" }[id]}。`);
     return render();
   }
   if ((el = hit("[data-pager-auto]"))) { state.pagerAuto = el.dataset.pagerAuto === "on"; return render(); }

@@ -14,8 +14,13 @@ function menuClick() {
   }
   if (state.screen === "reader" && state.float) return void v2CloseFloat("菜单");
   if (state.screen === "reader" && state.sheet) {
+    if (isV2() && state.sheetTab !== "home") {
+      state.sheetTab = "home";
+      log("菜单：回到工具首页。");
+      return render();
+    }
     state.sheet = false;
-    log("菜单：收起阅读卡片。");
+    log(isV2() ? "菜单：收起工具面板。" : "菜单：收起阅读卡片。");
     return render();
   }
   if (state.screen === "reader") log("菜单：离开正文，回书的详情。");

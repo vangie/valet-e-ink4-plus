@@ -43,7 +43,7 @@ const state = {
   sheet: false,
   float: false,         // 新设计：正文页下方的问答悬窗开着
   floatExpanded: false, // 从悬窗展开到完整助手页，返回时回到悬窗
-  sheetTab: 3,
+  sheetTab: "home",   // 新设计的工具面板：home | toc | marks | type。原始设计仍用数字页签，点页签时写回数字。
   homePage: 0,
   // 设置页：list = 分类列表，其他值 = 具体分类 ID
   settingsScreen: "list",
