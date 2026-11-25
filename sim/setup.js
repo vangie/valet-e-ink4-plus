@@ -62,9 +62,10 @@ const SetupPage = (() => {
       .map(([v, name]) => `<button data-sw-view="${v}" class="${S.view === v ? "is-on" : ""}">${name}</button>`).join("");
     el.classList.toggle("phone", S.view === "phone");
     const frame = el.querySelector(".sw-frame");
-    if (!frame.getAttribute("src")) frame.src = "valet_setup.html#sim";
+    if (!frame.getAttribute("src")) frame.src = S.hash ? `valet_setup.html?to=${S.hash}#sim` : "valet_setup.html#sim";
   }
-  function open() {
+  function open(hash = "") {
+    S.hash = hash;
     mount();
     S.open = true;
     el.hidden = false;
@@ -95,7 +96,37 @@ const SetupPage = (() => {
   // ── 设备的 /api/assistants（假的）
   let apiNote = "", apiPaired = true;
   const reply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  // ── 设备的 /api/libraries（假的）：书库订阅，和设置里「书库订阅」是同一份 state.libs。
+  // 真机上订阅时设备会先打开链接：书斋带 Accept: application/json 能拿到名字和家人，其余按 OPDS 读标题。
+  async function libraries(opts) {
+    await wait(opts.method === "POST" ? 900 : 120);
+    if (!opts.method || opts.method === "GET") {
+      return reply({ items: state.libs.map((id) => LIB_SOURCES[id]).map((s) => ({ id: s.id, name: s.short, member: s.rich ? "杜万" : "", url: s.url, rich: !!s.rich })) });
+    }
+    const d = JSON.parse(opts.body || "{}");
+    if (d.action === "remove") {
+      state.libs = state.libs.filter((x) => x !== d.id);
+      log(`配置页：移除书库「${LIB_SOURCES[d.id]?.short || d.id}」。`);
+      render();
+      return reply({ ok: true });
+    }
+    if (d.action !== "add") return reply({ error: "设备不认识这个操作" }, 400);
+    let id;
+    try { const u = new URL(d.url); id = /gutenberg/.test(u.host) ? "gutenberg" : /\/opds\/[a-z0-9]{6}$/i.test(u.pathname) ? "shuzhai" : ""; } catch { id = ""; }
+    if (!id) return reply({ error: "设备打开了这个链接，但不是 OPDS 书库。检查一下是不是复制全了。" }, 400);
+    if (state.libs.includes(id)) return reply({ error: `已经订过「${LIB_SOURCES[id].short}」了` }, 400);
+    state.libs.push(id);
+    log(`配置页：订阅「${LIB_SOURCES[id].name}」。`);
+    render();
+    return reply({ ok: true, id, name: LIB_SOURCES[id].short });
+  }
+  function repaintLibraries() {
+    const page = el?.querySelector(".sw-frame")?.contentWindow;
+    if (page && typeof page.libLoad === "function") page.libLoad().catch(() => {});
+  }
+
   window.ValetSetupApi = async (url, opts = {}) => {
+    if (url === "/api/libraries") return libraries(opts);
     await wait(120);
     if (!opts.method || opts.method === "GET") {
       return reply({ active: state.activeAssistant || "", saving: false, note: apiNote, paired: apiPaired, transport: "passport-v1",
@@ -132,5 +163,5 @@ const SetupPage = (() => {
     return reply({ ok: true });
   };
 
-  return { open, close, reset, isOpen: () => S.open, repaintList, qr, deviceUrl };
+  return { open, close, reset, isOpen: () => S.open, repaintList, repaintLibraries, qr, deviceUrl };
 })();

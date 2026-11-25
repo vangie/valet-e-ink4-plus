@@ -134,12 +134,13 @@ function v2Shelf() {
 
 // 设置 → 阅读与字库 → 书库订阅
 function libSettingsPane() {
-  const rows = libOn().map((s) => `<div class="v-row"><span><b>${esc(s.name)}</b><em>${esc(s.url)}</em></span>
+  const rows = libOn().map((s) => `<div class="v-row"><span><b>${esc(s.name)}</b><em>${esc(new URL(s.url).host)}${s.rich ? " · 杜万" : ""}</em></span>
       <small class="v-lok">${s.rich ? L("带进度", "Syncs progress") : "OPDS"}</small><button class="v-line" data-lib-remove="${s.id}">${L("移除", "Remove")}</button></div>`).join("");
   const add = state.libAdding
     ? `<div class="v-fld"><label>${L("订阅链接", "Link")}</label><div class="v-inputs one"><input data-lib-url placeholder="https://…/opds/…"></div>
         <div class="v-two"><button class="v-line" data-lib-add-cancel>${L("取消", "Cancel")}</button><button class="v-solid" data-lib-add-save>${L("订阅", "Subscribe")}</button></div></div>`
-    : `<button class="v-line" data-lib-add>${L("填一条订阅链接", "Add a link")}</button>`;
+    : `<div class="v-two"><button class="v-line" data-lib-phone>${L("在手机上填", "From your phone")}</button><button class="v-line" data-lib-add>${L("在这里打", "Type it here")}</button></div>
+      <p class="v-tip">${L("链接很长，用手机或电脑粘贴更省事：同一个 Wi-Fi 下扫码打开配置页，在「书库订阅」里粘贴。", "Long links are easier to paste from a phone.")}</p>`;
   const fake = state.libs.includes("gutenberg") ? "" : `<button class="v-line dashed" data-lib-fake="gutenberg">${L("假的：再订一个古登堡（看多个书库）", "Fake: add Gutenberg")}</button>`;
   return `${rows ? `<nav class="v-rows">${rows}</nav>` : `<div class="v-card bad">${ic("x")}<span><b>${L("还没有订阅书库", "No library yet")}</b><em>${L("订了以后，书库里的书和本机的书放在一个书架上", "Subscribed books join the shelf")}</em></span></div>`}
     <p class="v-tip">${L("填 OPDS 链接，可以订好几个。书库的书和本机的书放在一个书架上，封面角上斜贴着来自哪个书库；搜书时一起搜。书斋这类书库还会同步在读、想读和读到哪里。", "Add OPDS links. Their books join the shelf, tagged on the corner.")}</p>
@@ -207,6 +208,12 @@ panel.addEventListener("click", (e) => {
   }
   if ((el = hit("[data-lib-remove]"))) {
     state.libs = state.libs.filter((x) => x !== el.dataset.libRemove);
+    SetupPage.repaintLibraries();
+    return render();
+  }
+  if (hit("[data-lib-phone]")) {
+    log("书库订阅：设备显示配置页的二维码（和添加助理是同一个页面），手机打开后直接到「书库订阅」。");
+    SetupPage.open("library");
     return render();
   }
   if (hit("[data-lib-add]")) { state.libAdding = true; render(); const i = panel.querySelector("[data-lib-url]"); if (i) i.focus(); return; }
