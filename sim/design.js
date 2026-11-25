@@ -70,6 +70,7 @@ const V2_ICONS = {
   sunOff: '<circle cx="12" cy="12" r="3.6"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M4 4l16 16"/>',
   sun: '<circle cx="12" cy="12" r="3.6"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>',
   device: '<rect x="6.5" y="2.5" width="11" height="19" rx="2"/><path d="M10 18h4"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/>',
   shelf: '<path d="M5 4v15.5M9.5 4v15.5M13.5 5.5l4.5 14M3 20h18"/>',
   buddy: '<path d="M4 4.5h16v11.5h-9l-4.5 4v-4H4z"/><path d="M8.5 10.3h.01M12 10.3h.01M15.5 10.3h.01"/>',
   store: '<path d="M5 8.5h14l-1 12H6zM9 8.5V7a3 3 0 0 1 6 0v1.5"/>',
@@ -433,7 +434,7 @@ function openSetting(id) {
   v2.direct = id;
   render();
 }
-const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "device", about: "device", proxy: "net", bt: "sound", pager: "read" };
+const V2_PARENT = { power: "device", storage: "device", lang: "device", diag: "device", about: "device", proxy: "net", bt: "sound", pager: "read", library: "read" };
 // 返回 true = 这次返回已经在设置里往上走了一级。
 function v2Back() {
   if (state.screen === "ai" && state.floatExpanded && stack[stack.length - 1] === "reader") {
@@ -448,6 +449,7 @@ function v2Back() {
     render();
     return true;
   }
+  if (state.screen === "shelf" && state.libBook) { state.libBook = null; render(); return true; }
   if (state.screen !== "settings") return false;
   // 和设备一样：协议或加密方式的弹出列表开着时，返回键先关掉列表，还留在代理页。
   if (state.settingsScreen === "proxy" && state.proxyPicker) {
@@ -904,6 +906,7 @@ function v2SettingsPane(id) {
       ${v2Fld(L("待机时屏上放什么", "Standby shows"), v2Seg([["classic", L("时钟和待办", "Clock & to-dos")], ["wallpaper", L("壁纸", "Wallpaper")]], state.standbyStyle, "data-standby"), state.standbyStyle === "wallpaper" ? L("放「壁纸」里选的待机壁纸。", "Shows the standby wallpaper chosen in Wallpaper.") : L("时间、日期、天气和今天的待办。", "Time, date, weather and today's to-dos."))}
       ${v2Fld(L("应用页样式", "App grid style"), v2Seg(themes, state.theme === "pixel" ? "slash" : state.theme, "data-theme"))}`;
   }
+  if (id === "library") return libSettingsPane();
   if (id === "read") {
     const shakeOptions = shakeSettings(v2Seg, v2Fld);
     return `<div class="v-card${state.fontpack ? "" : " bad"}">${ic(state.fontpack ? "check" : "x")}<span><b>${L("扩展字库", "Extended fonts")} · ${state.fontpack ? L("已安装", "installed") : L("未安装", "not installed")}</b>
@@ -913,7 +916,7 @@ function v2SettingsPane(id) {
       ${v2Fld(L("正文字号", "Text size"), `<div class="v-step"><button data-size="-">A−</button><b>${state.fontSize}</b><button data-size="+">A+</button></div>`, L("字体、边距、行距在正文里点屏幕中间改。", "Font, margins and spacing are in the reading card."))}
       ${v2BookAskField()}
       ${shakeOptions}
-      <nav class="v-rows">${v2Row("pager", "", L("翻页器", "Page turner"), state.pagerOn ? "PageTurner-A · " + L("已连接", "connected") : L("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"))}</nav>`;
+      <nav class="v-rows">${v2Row("library", "", L("书库订阅", "Libraries"), state.libs.length ? state.libs.map((id) => LIB_SOURCES[id].short).join("、") + L(" · 书和本机的放在一起", " · on the shelf") : L("没订阅。填 OPDS 链接就能搜书下载", "None. Add an OPDS link"))}${v2Row("pager", "", L("翻页器", "Page turner"), state.pagerOn ? "PageTurner-A · " + L("已连接", "connected") : L("正文里加 / 减音量键也能翻页", "Volume keys also turn pages"))}</nav>`;
   }
   if (id === "sound") {
     const hapt = state.haptic === "off" ? "off" : state.hapticLevel;
@@ -1054,7 +1057,7 @@ function v2Settings() {
     read: L("阅读与字库", "Reading & fonts"), sound: L("声音与蓝牙", "Sound & Bluetooth"), device: L("设备", "Device"),
     power: L("电池与省电", "Battery & power"), storage: L("存储与 U 盘", "Storage & USB"), lang: L("语言", "Language"),
     diag: L("诊断", "Diagnostics"), about: L("关于", "About"), proxy: L("代理", "Proxy"),
-    bt: L("蓝牙", "Bluetooth"), pager: L("翻页器", "Page turner"),
+    bt: L("蓝牙", "Bluetooth"), pager: L("翻页器", "Page turner"), library: L("书库订阅", "Libraries"),
   };
   const body = id === "list" ? v2SettingsHome() : v2SettingsPane(id);
   const picker = id === "proxy" && proxyPasswordOnly() && (state.proxyPicker === "proto" || (state.proxyPicker === "cipher" && state.proxyKind === "ss")) ? proxyPicker() : "";
@@ -1080,6 +1083,7 @@ function v2Screen() {
   if (s === "ai") return v2Ai();
   if (s === "reader") return v2Reader();
   if (s === "settings") return v2Settings();
+  if (s === "shelf") return v2Shelf();
   const html = { detail, wallpaper, wall, tasks, transfer, store, shelf, book, buddy, wifi, pager }[s]();
   return `${bar()}<main class="v-page">${v2Head(names()[s])}<div class="v-app">${html.replace(/^<div class="bar">[\s\S]*?<\/div>/, "")}</div></main>`;
 }

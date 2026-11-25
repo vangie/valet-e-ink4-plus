@@ -596,3 +596,53 @@ div.v-row { box-sizing: border-box; }
 .v-hdl::after { content: ""; position: absolute; left: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
 .v-hdl.s::after { top: 2px; }
 .v-hdl.e::after { bottom: 2px; }
+
+/* 书架 · 书库（OPDS 订阅） */
+.v-lib { gap: 8px; }
+.v-lsearch { flex: none; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border: 1.2px solid var(--ink); }
+.v-lsearch .ic { width: 12px; height: 12px; flex: none; }
+.v-lsearch input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--ink); font-size: 10.8px; }
+.v-lsearch button { border: 0; background: none; font-size: 9px; text-decoration: underline; padding: 4px 2px; }
+.v-lhint { margin: 0; flex: none; font-size: 9px; color: var(--g1); }
+.v-lsec { flex: none; }
+.v-lsec h4 { margin: 2px 0 5px; padding-top: 6px; border-top: 1.2px solid var(--ink); font-size: 10.8px; font-weight: 600; }
+.v-lcovers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.v-lcovers button { min-width: 0; padding: 0; border: 0; background: none; text-align: left; display: flex; flex-direction: column; gap: 2px; }
+.v-lcovers span { font-size: 9px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-lcovers em { font-style: normal; font-size: 8px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-lcover { position: relative; height: 72px; box-sizing: border-box; padding: 7px 5px 5px 9px; border: 1.2px solid var(--ink); display: flex; flex-direction: column; justify-content: space-between; font-style: normal; overflow: hidden; }
+.v-lcover::before { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: var(--ink); }
+.v-lcover b { font: 600 10.8px "Songti SC", serif; line-height: 1.25; word-break: break-all; }
+.v-lcover em { font-style: normal; font-size: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-lcover.sm { width: 30px; height: 42px; flex: none; padding: 4px 2px 2px 6px; }
+.v-lcover.sm b { font-size: 7px; }
+.v-lcover.sm em { display: none; }
+.v-lcover.big { width: 74px; height: 104px; flex: none; }
+.v-lcover.big b { font-size: 13px; }
+.v-lrows { flex: none; display: flex; flex-direction: column; border-top: 1.2px solid var(--ink); }
+.v-lrow { width: 100%; min-height: 52px; padding: 5px 2px; border: 0; border-bottom: 1px solid var(--ink); background: none; display: flex; align-items: center; gap: 8px; text-align: left; }
+.v-lrow > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.v-lrow b { font-size: 11.5px; font-weight: 600; }
+.v-lrow em { font-style: normal; font-size: 9px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-lrow small, .v-lok { flex: none; font-size: 8px; padding: 2px 4px; border: 1px solid var(--ink); }
+.v-lbook { display: flex; flex-direction: column; gap: 9px; }
+.v-lbook-top { display: flex; gap: 11px; }
+.v-lbook h3 { margin: 2px 0 4px; font: 600 15px "Songti SC", serif; }
+.v-lbook-top p { margin: 0 0 4px; font-size: 10.8px; }
+.v-lbook .v-lmeta { font-size: 9px; color: var(--g1); }
+.v-lbook .v-lmeta b { color: var(--ink); font-weight: 600; }
+.v-ldesc { margin: 0; padding-top: 8px; border-top: 1.2px solid var(--ink); font-size: 10.8px; line-height: 1.6; }
+.v-lacts { display: flex; flex-direction: column; gap: 6px; }
+.v-lacts .v-solid, .v-lacts .v-line { width: 100%; height: 34px; }
+.v-lacts .v-solid[disabled] { background: var(--paper); color: var(--ink); border: 1.2px dashed var(--ink); }
+.v-lacts .v-line.on { border-style: dashed; }
+.v-inputs.one { grid-template-columns: 1fr; margin-bottom: 6px; }
+.v-lbar { flex: none; display: flex; align-items: center; justify-content: space-between; font-size: 9px; color: var(--g1); }
+.panel.v2 .seg.tiny.v-lview button { padding: 3px 9px; }
+/* 书库的书：封面右上角斜贴来源；没下载的封面是虚线框 */
+.v-lcover.away { border-style: dashed; }
+.v-lcover.away::before { background: none; border-left: 1px dashed var(--ink); }
+.v-ltag { position: absolute; top: 9px; right: -21px; width: 66px; transform: rotate(45deg); background: var(--ink); color: var(--paper); font-style: normal; font-size: 6.5px; font-weight: 600; line-height: 10px; text-align: center; white-space: nowrap; pointer-events: none; }
+.v-lcover.tagged b { padding-right: 17px; }
+.v-lrow.tagged { position: relative; overflow: hidden; }
+.v-lrow.tagged > small { margin-right: 18px; }
