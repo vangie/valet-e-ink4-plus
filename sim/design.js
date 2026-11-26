@@ -467,6 +467,10 @@ function v2Back() {
     render();
     return true;
   }
+  if (state.screen === "shelf" && state.libOpds) {
+    if (state.libOpdsBrowse !== null) { state.libOpdsBrowse = null; render(); return true; }
+    state.libOpds = false; render(); return true;
+  }
   if (state.screen === "shelf" && state.libBook) { state.libBook = null; render(); return true; }
   if (state.screen !== "settings") return false;
   // 和设备一样：协议或加密方式的弹出列表开着时，返回键先关掉列表，还留在代理页。

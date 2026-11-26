@@ -42,6 +42,9 @@ Object.assign(state, {
   libConvert: {},         // 正在转 EPUB：id → true
   libTake: {},            // 书斋正在从上游收这本：id → true
   libAdding: false,       // 设置里正在填新订阅
+  libOpds: false,         // 是否在看书库浏览页（固件 kScreenOpds）
+  libOpdsBrowse: null,    // 当前书库浏览层：{title, entries:[{title,nav,files,size}], page}
+  libOpdsQuery: "",       // 书库搜索框里的词
 });
 
 function libOn() { return state.libs.map((id) => LIB_SOURCES[id]); }
@@ -115,12 +118,14 @@ function libDetail(b) {
 
 
 function v2Shelf() {
+  if (state.libOpds) return v2OpdsScreen();
   if (state.libBook) {
     const b = LIB_BOOKS.find((x) => x.id === state.libBook);
     return `${bar()}<main class="v-page">${v2Head(esc(b.title), LIB_SOURCES[b.lib].short)}<div class="v-pane v-lib">${libDetail(b)}</div></main>`;
   }
   const q = state.libQuery;
   const all = shelfItems(q);
+  const libBtn = state.libs.length ? `<button class="v-ltag-btn" data-opds="1">${L("书库", "Libraries")}</button>` : "";
   const search = `<label class="v-lsearch">${ic("search")}<input data-lib-q value="${esc(q)}" placeholder="${L("书名、作者或拼音首字母", "Title or author")}">${q ? `<button data-lib-clear>${L("清空", "Clear")}</button>` : ""}</label>`;
   const view = `<div class="seg tiny v-lview"><button data-shelf="cover" class="${state.shelfView === "cover" ? "on" : ""}">${t("covers")}</button><button data-shelf="list" class="${state.shelfView === "list" ? "on" : ""}">${t("list")}</button></div>`;
   const count = q.trim() ? L(`找到 ${all.length} 本`, `${all.length} found`) : L(`${all.length} 本`, `${all.length} books`);
@@ -129,10 +134,73 @@ function v2Shelf() {
       ? `<div class="v-lcovers">${all.map((b) => `<button ${b.attr}>${libCover(b)}<span>${esc(b.title)}</span><em>${b.note}</em></button>`).join("")}</div>`
       : `<div class="v-lrows">${all.map((b) => `<button class="v-lrow${b.src ? " tagged" : ""}" ${b.attr}>${libCover(b, " sm")}<span><b>${esc(b.title)}</b><em>${esc(b.author)} · ${b.fmt} · ${b.size}</em></span><small>${b.note}</small>${libTag(b)}</button>`).join("")}</div>`;
   const none = state.libs.length ? "" : `<button class="v-line dashed" data-setting="library">${L("订一个书库，书库里的书也会出现在这里", "Subscribe to a library to see its books here")}</button>`;
-  return `${bar()}<main class="v-page">${v2Head(L("书架", "Shelf"))}<div class="v-pane v-lib">${search}<div class="v-lbar"><span>${count}</span>${view}</div>${body}${none}</div></main>`;
+  const head = `<div class="v-lhead-row"><span class="v-lhead-title">${L("我的书架", "My Shelf")}</span>${libBtn}<div class="v-lview-wrap">${view}</div></div>`;
+  return `${bar()}<main class="v-page">${v2Head("")}<div class="v-pane v-lib">${head}${search}<div class="v-lbar"><span>${count}</span></div>${body}${none}</div></main>`;
 }
 
-// 设置 → 阅读与字库 → 书库订阅
+// ── 书库浏览页（对应固件 kScreenOpds）──────────────────────────────────────
+const OPDS_NAV = [
+  { title: L("字母排序书籍", "By title"), nav: "letter" },
+  { title: L("热门书籍", "Popular"), nav: "hot" },
+  { title: L("最高评分书籍", "Top rated"), nav: "rated" },
+  { title: L("最近添加的书籍", "Recently added"), nav: "new" },
+  { title: L("随机书籍", "Random"), nav: "discover" },
+  { title: L("已读书籍", "Read"), nav: "readbooks" },
+  { title: L("未读书籍", "Unread"), nav: "unreadbooks" },
+  { title: L("作者", "Authors"), nav: "author" },
+  { title: L("出版社", "Publishers"), nav: "publisher" },
+  { title: L("分类", "Categories"), nav: "category" },
+  { title: L("丛书", "Series"), nav: "series" },
+  { title: L("语言", "Languages"), nav: "language" },
+  { title: L("书架列表", "Shelves"), nav: "shelfindex" },
+];
+const OPDS_BOOKS = LIB_BOOKS.filter((b) => !b.via);
+
+function opdsEntries(nav) {
+  if (!nav) return OPDS_NAV.map((e) => ({ title: e.title, nav: e.nav, files: [] }));
+  if (nav === "new" || nav === "hot" || nav === "rated" || nav === "readbooks" || nav === "unreadbooks" || nav === "discover")
+    return OPDS_BOOKS.map((b) => ({ title: b.title, author: b.author, fmt: b.fmt, size: b.size, id: b.id, files: [{}] }));
+  if (nav === "author") return [...new Set(OPDS_BOOKS.map((b) => b.author))].map((a) => ({ title: a, nav: "author:" + a, files: [] }));
+  if (nav.startsWith("author:")) return OPDS_BOOKS.filter((b) => b.author === nav.slice(7)).map((b) => ({ title: b.title, author: b.author, fmt: b.fmt, size: b.size, id: b.id, files: [{}] }));
+  return OPDS_BOOKS.map((b) => ({ title: b.title, author: b.author, fmt: b.fmt, size: b.size, id: b.id, files: [{}] }));
+}
+
+function opdsNavTitle(nav) {
+  if (!nav) return L("书库", "Library");
+  const e = OPDS_NAV.find((x) => x.nav === nav);
+  if (e) return e.title;
+  if (nav.startsWith("author:")) return nav.slice(7);
+  if (nav === "search") return L(`搜「${state.libOpdsQuery}」`, `Search "${state.libOpdsQuery}"`);
+  return nav;
+}
+
+function opdsSearchEntries(q) {
+  const k = q.trim().toLowerCase();
+  if (!k) return [];
+  return OPDS_BOOKS.filter((b) => b.title.toLowerCase().includes(k) || b.author.toLowerCase().includes(k) || (b.py && b.py.includes(k)))
+    .map((b) => ({ title: b.title, author: b.author, fmt: b.fmt, size: b.size, id: b.id, files: [{}] }));
+}
+
+function v2OpdsScreen() {
+  const nav = state.libOpdsBrowse;
+  const title = opdsNavTitle(nav);
+  const entries = nav === "search" ? opdsSearchEntries(state.libOpdsQuery) : opdsEntries(nav);
+  const rows = entries.map((e, i) => {
+    const book = e.files && e.files.length;
+    const lib = e.id ? LIB_BOOKS.find((b) => b.id === e.id) : null;
+    const got = lib && state.libGot[lib.id] === true;
+    const tail = !book ? "›" : got ? L("在本机", "Here") : "";
+    const meta = book ? `${e.author ? esc(e.author) + " · " : ""}${e.fmt || ""} · ${e.size || ""}` : "";
+    return `<button class="v-opds-row" data-opds-entry="${i}"><span><b>${esc(e.title)}</b>${meta ? `<em>${meta}</em>` : ""}</span>${tail ? `<small>${tail}</small>` : ""}</button>`;
+  });
+  const q = state.libOpdsQuery;
+  const searchBtn = `<button class="v-ltag-btn" data-opds-search="1">${L("搜书", "Search")}</button>`;
+  const searchBar = `<div class="v-lhead-row"><b>${esc(title)}</b>${searchBtn}</div>`;
+  const body = rows.length ? `<div class="v-opds-list">${rows.join("")}</div>`
+    : `<p class="v-lhint">${L("正在连书库…", "Connecting…")}</p>`;
+  const pg = entries.length ? `<div class="v-lbar"><span>${L(`${entries.length} 项`, `${entries.length} items`)}</span></div>` : "";
+  return `${bar()}<main class="v-page">${v2Head("")}<div class="v-pane v-lib">${searchBar}${pg}${body}</div></main>`;
+}
 function libSettingsPane() {
   const rows = libOn().map((s) => `<div class="v-row"><span><b>${esc(s.name)}</b><em>${esc(new URL(s.url).host)}${s.rich ? " · 杜万" : ""}</em></span>
       <small class="v-lok">${s.rich ? L("带进度", "Syncs progress") : "OPDS"}</small><button class="v-line" data-lib-remove="${s.id}">${L("移除", "Remove")}</button></div>`).join("");
@@ -186,6 +254,32 @@ panel.addEventListener("click", (e) => {
   const hit = (sel) => e.target.closest(sel);
   let el;
   if (hit("[data-lib-clear]")) { state.libQuery = ""; return render(); }
+  // 书架 → 书库浏览页
+  if (hit("[data-opds]")) { state.libOpds = true; state.libOpdsBrowse = null; state.libOpdsQuery = ""; flash(); return render(); }
+  // 书库浏览页内部
+  if (hit("[data-opds-search]")) {
+    const q = window.prompt(L("搜书（书名/作者/拼音首字母）", "Search (title/author)")) || "";
+    if (!q.trim()) return;
+    state.libOpdsQuery = q.trim();
+    state.libOpdsBrowse = "search";
+    flash();
+    return render();
+  }
+  if ((el = hit("[data-opds-entry]"))) {
+    const idx = Number(el.dataset.opdsEntry);
+    const entries = state.libOpdsBrowse === "search" ? opdsSearchEntries(state.libOpdsQuery) : opdsEntries(state.libOpdsBrowse);
+    const e = entries[idx];
+    if (!e) return;
+    if (e.files && e.files.length && e.id) {
+      const b = LIB_BOOKS.find((x) => x.id === e.id);
+      if (b) { state.libOpds = false; state.libBook = b.id; flash(); return render(); }
+    } else if (e.nav) {
+      state.libOpdsBrowse = e.nav;
+      flash();
+      return render();
+    }
+    return;
+  }
   if ((el = hit("[data-lib-book]"))) { state.libBook = Number(el.dataset.libBook); flash(); return render(); }
   if ((el = hit("[data-lib-get]"))) return libDownload(Number(el.dataset.libGet));
   if ((el = hit("[data-lib-wish]"))) {

@@ -667,7 +667,17 @@ div.v-row { box-sizing: border-box; }
 
 /* 书架 · 书库（OPDS 订阅） */
 .v-lib { gap: 8px; }
-.v-lsearch { flex: none; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 6px; border: 1.2px solid var(--ink); }
+.v-lhead-row { flex: none; display: flex; align-items: center; gap: 8px; padding-bottom: 6px; }
+.v-lhead-row .v-lhead-title { flex: 1; font-size: 14px; font-weight: 700; }
+.v-lhead-row .v-lview-wrap { flex: none; }
+.v-ltag-btn { flex: none; border: 1.5px solid var(--ink); border-radius: 4px; padding: 3px 10px; font-size: 10px; background: none; }
+.v-opds-list { display: flex; flex-direction: column; border-top: 1.5px solid var(--ink); }
+.v-opds-row { width: 100%; min-height: 52px; padding: 5px 2px; border: 0; border-bottom: 1.5px solid var(--ink); background: none; display: flex; align-items: center; gap: 8px; text-align: left; }
+.v-opds-row > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.v-opds-row b { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-opds-row em { font-style: normal; font-size: 9px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-opds-row small { flex: none; font-size: 10px; }
+
 .v-lsearch .ic { width: 12px; height: 12px; flex: none; }
 .v-lsearch input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--ink); font-size: 10.8px; }
 .v-lsearch button { border: 0; background: none; font-size: 9px; text-decoration: underline; padding: 4px 2px; }
