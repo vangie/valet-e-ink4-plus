@@ -1,3 +1,4 @@
+#include "reader_sync.h"
 #include "book_screen/shelf/book_shelf_ops.h"
 #pragma GCC optimize("O1")
 
@@ -215,6 +216,7 @@ static void AsyncOpenDone(void* user_data) {
     RenderReaderPage();
     if (show_settings) ShowReadSettingsSheet(false);
     BeginReadingTimeTracking();
+    valet::sync::PullOnOpen(st.reader.session->Info().path, st.reader.session->ReadingProgressX10());
     delete msg;
 }
 

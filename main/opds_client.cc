@@ -127,7 +127,8 @@ void ParseEntry(const std::string& xml, const std::string& base, Entry& entry, s
     if (author_at != std::string::npos) {
         entry.author = CleanText(StripTags(Inner(xml, "<name>", "</name>", author_at, xml.size())), kMaxAuthor);
     }
-    entry.summary = CleanText(StripTags(InnerTag(xml, "<content", "</content>")), kMaxSummary);
+    // 先解 HTML 实体（&amp; 等），再去标签，最后清理空白
+    entry.summary = CleanText(StripTags(reader::DecodeHtmlEntities(InnerTag(xml, "<content", "</content>"))), kMaxSummary);
 
     // 链：封面、缩略图、下载、下一页、搜索模板
     size_t pos = 0;

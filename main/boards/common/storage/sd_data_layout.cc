@@ -15,7 +15,7 @@
 
 namespace sd_data {
 static const char* TAG = "SdLayout";
-static const char* const kSuffixes[] = {".pos", ".pos.tmp", ".bmk", ".bmk.tmp", ".cpg", ".idx", ".a2l8", ".a2i1"};
+static const char* const kSuffixes[] = {".pos", ".pos.tmp", ".bmk", ".bmk.tmp", ".sync", ".cpg", ".idx", ".a2l8", ".a2i1"};
 
 static bool Exists(const std::string& path, bool* ok = nullptr) {
     struct stat st{};
@@ -80,7 +80,8 @@ static std::string LegacyBookPath(const char* book, const char* suffix) {
 }
 
 static const char* BookRoot(const char* suffix) {
-    return !std::strncmp(suffix, ".pos", 4) || !std::strncmp(suffix, ".bmk", 4) ? SD_PATH_BOOK_STATE : SD_PATH_BOOK_CACHE;
+    return !std::strncmp(suffix, ".pos", 4) || !std::strncmp(suffix, ".bmk", 4) || !std::strncmp(suffix, ".sync", 5)
+               ? SD_PATH_BOOK_STATE : SD_PATH_BOOK_CACHE;
 }
 
 static std::string StoredPath(const char* root, const std::string& key, const char* suffix, bool sharded = true) {

@@ -1,6 +1,7 @@
 #include "screen_frontlight.h"
 #include "book_screen/book_geom.h"
 #include "screen_common.h"
+#include "reader_sync.h"
 #include "book_screen/reader/book_auto_turn.h"
 #include "book_screen/book_nav.h"
 #include "book_screen/settings/book_settings_sheet.h"
@@ -211,6 +212,25 @@ void StopReadTimeCheckpointTimer() {
     st.reader.read_time_ckpt_timer = nullptr;
 }
 
+// 有书斋进度地址的书：把当前位置交给同步（和上次一样就不发）
+static void PushReadingPosition() {
+    auto& st = Book_State();
+    if (st.reader.opening.load() || !st.reader.session || !st.reader.session->IsOpen()) return;
+    auto& session = *st.reader.session;
+    valet::sync::Position pos;
+    pos.x10 = std::max(0, session.ReadingProgressX10());
+    const auto format = session.Info().format;
+    if (format == reader::BookFormat::kEpub) {
+        pos.spine = session.SourceChapterIndex();
+        const int pages = std::max(1, session.PageCount());
+        pos.spine_x1000 = static_cast<int>(static_cast<int64_t>(session.CurrentPage()) * 1000 / pages);
+        pos.format = "epub";
+    } else {
+        pos.format = format == reader::BookFormat::kTxt ? "txt" : "other";
+    }
+    valet::sync::Push(session.Info().path, pos);
+}
+
 void OnReadTimeCheckpoint(lv_timer_t* /*t*/) {
     auto& st = Book_State();
     // 打开中 / session 已关：跳过；不删 timer（AsyncOpenDone 会重建）
@@ -218,6 +238,7 @@ void OnReadTimeCheckpoint(lv_timer_t* /*t*/) {
         return;
     }
     const bool ok = st.reader.session->SaveProgress();
+    PushReadingPosition();
     if (st.reader.read_chrome == BookUiState::ReadChrome::kSettings && st.settings.reader_tab == 4 &&
         !ScreenFrontlightIsVisible() && !TouchUiFingerIsDown() && !TouchUiHasPendingEdges()) {
         RequestSettingsSheetPaint();
@@ -263,6 +284,7 @@ void BeginReadingTimeTracking() {
 // 停止检查点和阅读墙钟；退出快照由 RetireReaderSession 提交，待机由暂停入口提交。
 void EndReadingTimeTracking() {
     StopReadTimeCheckpointTimer();
+    PushReadingPosition();
     auto& st = Book_State();
     st.reader.reading_paused_by_standby = false;
     if (!st.reader.opening.load() && st.reader.session && st.reader.session->IsOpen()) {

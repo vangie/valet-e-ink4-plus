@@ -14,6 +14,7 @@
 #include "haptic_feedback.h"
 #include "library_sources.h"
 #include "opds_fetch.h"
+#include "reader_sync.h"
 #include "reader/book_library.h"
 #include "reader/download_gate.h"
 #include "reader/file_size.h"
@@ -454,6 +455,7 @@ void DownloadTask(void* arg) {
     auto* job = static_cast<DownloadJob*>(arg);
     std::string err;
     const bool ok = reader::DownloadCloudBook(job->task, err, DownloadProgress, job, &s_gate);
+    if (ok) valet::sync::Remember(job->task.LocalPath(), valet::sync::ProgressUrlFromDownload(job->task.download_url));
     ESP_LOGI(TAG, "download ok=%d size=%llu err=[%s]", ok ? 1 : 0, static_cast<unsigned long long>(job->task.file_size), err.c_str());
     auto* msg = new DownloadMsg{job->gen, 100, true, ok, err, job->task.LocalPath(), job->task.title};
     delete job;
@@ -468,7 +470,11 @@ void OnActionClicked(lv_event_t*) {
     if (entry.Best() == nullptr) return;
     auto task = TaskFor(entry);
     if (task.LocalPath().empty()) return;
-    if (task.IsDownloaded()) { OpenBook(task.LocalPath(), task.title); return; }
+    if (task.IsDownloaded()) {
+        valet::sync::HintBeforeOpen(task.LocalPath(), valet::sync::ProgressUrlFromDownload(task.download_url));
+        OpenBook(task.LocalPath(), task.title);
+        return;
+    }
     auto* job = new DownloadJob{s_gen, std::move(task)};
     s_gate.Reset();
     s_downloading = true;
