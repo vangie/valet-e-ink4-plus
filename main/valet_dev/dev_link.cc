@@ -3,6 +3,7 @@
 #include <esp_wifi.h>
 #include "ssid_manager.h"
 #include "valet_book_tools.h"
+#include "valet_setup/server.h"
 #include "SdCardManager.hpp"
 #include "dev_link.h"
 
@@ -286,6 +287,12 @@ void Screenshot(uint32_t id) {
     heap_caps_free(out);
 }
 
+// 配置页开着的地址（含访问码）。只编进测试版：给本机的测试脚本取地址用，输出里不打印访问码。
+void SetupUrl(uint32_t id) {
+    const auto status = valet::GetSetupStatus();
+    Reply(id, true, ",\"running\":%s,\"url\":\"%s\"", status.running ? "true" : "false", status.url.c_str());
+}
+
 void Info(uint32_t id) {
     const auto stats = EpdGetStats();
     char screen[40] = "?";
@@ -329,6 +336,7 @@ void ValetDevLinkHandle(const char* json) {
     bool replied = false;
     int x1, y1, x2, y2, ms;
     if (!strcmp(cmd, "info")) { Info(id); replied = true; }
+    else if (!strcmp(cmd, "setupurl")) { SetupUrl(id); replied = true; }
     else if (!strcmp(cmd, "shot")) { Screenshot(id); replied = true; }
     else if (!strcmp(cmd, "sdlog")) { SdLog(id); replied = true; }
     else if (!strcmp(cmd, "tap") || !strcmp(cmd, "swipe")) {

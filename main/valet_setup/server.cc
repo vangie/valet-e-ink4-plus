@@ -1,6 +1,7 @@
 #include "server.h"
 #include "pairing.h"
 #include "assistant_profiles.h"
+#include "library_sources.h"
 #include "protocols/valet_protocol.h"
 #include "application.h"
 #include "power_policy.h"
@@ -19,6 +20,7 @@
 #include <memory>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 
 extern const uint8_t setup_page_start[] asm("_binary_valet_setup_html_gz_start");
 extern const uint8_t setup_page_end[] asm("_binary_valet_setup_html_gz_end");
@@ -223,6 +225,77 @@ esp_err_t Mutate(httpd_req_t* req) {
     return Reply(req, "202 Accepted", "{\"saving\":true}");
 }
 }
+// ---- 书库订阅（OPDS）：配置页的「书库订阅」卡片 ----
+esp_err_t Libraries(httpd_req_t* req) {
+    uint32_t generation;
+    if (!Authorized(req, generation)) return Reply(req, "403 Forbidden", "{\"error\":\"配置已关闭或过期\"}");
+    Json root(cJSON_CreateObject(), cJSON_Delete);
+    if (!root) return JsonReply(req, nullptr);
+    auto* items = cJSON_AddArrayToObject(root.get(), "items");
+    if (!items) return JsonReply(req, nullptr);
+    for (const auto& item : LoadLibrarySources()) {
+        auto* entry = cJSON_CreateObject();
+        if (!entry) return JsonReply(req, nullptr);
+        cJSON_AddItemToArray(items, entry);
+        cJSON_AddStringToObject(entry, "id", item.id.c_str());
+        cJSON_AddStringToObject(entry, "name", item.name.c_str());
+        cJSON_AddStringToObject(entry, "url", item.url.c_str());
+        if (!item.member.empty()) cJSON_AddStringToObject(entry, "member", item.member.c_str());
+        cJSON_AddBoolToObject(entry, "rich", item.rich);
+    }
+    return JsonReply(req, root.get());
+}
+esp_err_t LibrariesMutate(httpd_req_t* req) {
+    uint32_t generation;
+    if (!Authorized(req, generation)) return Reply(req, "403 Forbidden", "{\"error\":\"配置已关闭或过期\"}");
+    if (req->content_len <= 0 || req->content_len > 1024) return Reply(req, "413 Content Too Large", "{\"error\":\"请求过长\"}");
+    std::string body(req->content_len, '\0');
+    size_t received = 0;
+    while (received < body.size()) {
+        int n = httpd_req_recv(req, body.data() + received, body.size() - received);
+        if (n <= 0) return Reply(req, "400 Bad Request", "{\"error\":\"没有收到完整请求，请重试\"}");
+        received += n;
+    }
+    Json root(cJSON_ParseWithOpts(body.c_str(), nullptr, true), cJSON_Delete);
+    if (!root || body.find('\0') != std::string::npos) return Reply(req, "400 Bad Request", "{\"error\":\"JSON 格式错误\"}");
+    const std::string action = String(root.get(), "action");
+    auto items = LoadLibrarySources();
+    if (action == "add") {
+        std::string url = String(root.get(), "url");
+        while (!url.empty() && (url.back() == ' ' || url.back() == '\t')) url.pop_back();
+        while (!url.empty() && (url.front() == ' ' || url.front() == '\t')) url.erase(0, 1);
+        if (!LibraryUrlValid(url)) return Reply(req, "400 Bad Request", "{\"error\":\"不是书库链接：要以 http:// 或 https:// 开头\"}");
+        for (const auto& item : items) {
+            if (item.url != url) continue;
+            Json ok(cJSON_CreateObject(), cJSON_Delete);
+            if (!ok) return JsonReply(req, nullptr);
+            cJSON_AddStringToObject(ok.get(), "name", item.name.c_str());
+            return JsonReply(req, ok.get());
+        }
+        if (items.size() >= kMaxLibraries) return Reply(req, "409 Conflict", "{\"error\":\"最多订阅 8 个书库\"}");
+        LibrarySource item;
+        item.id = NewLibraryId();
+        item.url = url;
+        item.name = LibraryNameFromUrl(url);
+        item.rich = LibraryRichUrl(url);
+        items.push_back(item);
+        if (!SaveLibrarySources(items)) return Reply(req, "500 Internal Server Error", "{\"error\":\"存储空间不足，没能保存\"}");
+        Json ok(cJSON_CreateObject(), cJSON_Delete);
+        if (!ok) return JsonReply(req, nullptr);
+        cJSON_AddStringToObject(ok.get(), "name", item.name.c_str());
+        return JsonReply(req, ok.get());
+    }
+    if (action == "remove") {
+        const std::string id = String(root.get(), "id");
+        const auto before = items.size();
+        items.erase(std::remove_if(items.begin(), items.end(), [&id](const LibrarySource& item) { return item.id == id; }), items.end());
+        if (items.size() == before) return Reply(req, "404 Not Found", "{\"error\":\"没有这个书库\"}");
+        if (!SaveLibrarySources(items)) return Reply(req, "500 Internal Server Error", "{\"error\":\"存储空间不足，没能保存\"}");
+        return Reply(req, "200 OK", "{\"ok\":true}");
+    }
+    return Reply(req, "400 Bad Request", "{\"error\":\"未知操作\"}");
+}
+
 SetupStatus GetSetupStatus() {
     std::lock_guard<std::mutex> lock(s_mutex);
     auto result = s_status;
@@ -276,7 +349,7 @@ static bool StartSetupServerLocked() {
     }
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 8080; config.ctrl_port = 32769;
-    config.stack_size = 8192; config.max_uri_handlers = 3;
+    config.stack_size = 8192; config.max_uri_handlers = 5;
     config.max_open_sockets = 2; config.recv_wait_timeout = 5; config.send_wait_timeout = 5;
     const esp_err_t started = httpd_start(&s_server, &config);
     if (started != ESP_OK) {
@@ -291,6 +364,8 @@ static bool StartSetupServerLocked() {
         {.uri = "/setup", .method = HTTP_GET, .handler = Page},
         {.uri = "/api/assistants", .method = HTTP_GET, .handler = Profiles},
         {.uri = "/api/assistants", .method = HTTP_POST, .handler = Mutate},
+        {.uri = "/api/libraries", .method = HTTP_GET, .handler = Libraries},
+        {.uri = "/api/libraries", .method = HTTP_POST, .handler = LibrariesMutate},
     };
     for (const auto& route : routes) {
         const esp_err_t registered = httpd_register_uri_handler(s_server, &route);
