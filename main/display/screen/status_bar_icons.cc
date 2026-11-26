@@ -67,7 +67,9 @@ void DrawNetwork(lv_event_t* e) {
         x += net->header.w + kProxyGap;
     }
     if (std::strchr(text, kStatusProxyMark)) {
-        const auto* shield = Icon(VALET_ICON_SB_PROXY);
+        // 网络睡下时扇形是网点，盾牌也跟着灰掉：不然看着像代理还在生效
+        const bool asleep = StartsWith(text, FONT_AWESOME_WIFI_STANDBY);
+        const auto* shield = Icon(asleep ? VALET_ICON_SB_PROXY_SLEEP : VALET_ICON_SB_PROXY);
         DrawIcon(layer, shield, x, mid - int(shield->header.h) / 2, lv_color_black());
     }
 }

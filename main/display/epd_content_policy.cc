@@ -96,7 +96,11 @@ void Blend(lv_draw_task_t* task,const lv_draw_sw_blend_dsc_t* dsc) {
     const auto role=ContentRole(base->obj);
     const bool gray=task->type==LV_DRAW_TASK_TYPE_LAYER || GrayRole(role);
     const bool darken=gray && task->type==LV_DRAW_TASK_TYPE_IMAGE &&
-        role!=EpdContentRole::ReaderAntialias && role!=EpdContentRole::Shelf && role!=EpdContentRole::GrayPanel;
+        role!=EpdContentRole::ReaderAntialias && role!=EpdContentRole::Shelf && role!=EpdContentRole::GrayPanel &&
+        // 封面不压暗：深色底的封面（如《水浒传》）压暗后整块变黑
+        role!=EpdContentRole::Cover;
+    // 封面单独走一条提亮曲线：暗部提亮、128 以上原样，深色封面才看得出人物和书名
+    const bool lift=gray && task->type==LV_DRAW_TASK_TYPE_IMAGE && role==EpdContentRole::Cover;
     const bool label=task->type==LV_DRAW_TASK_TYPE_LABEL;
     lv_area_t relative=area; lv_area_move(&relative,-layer->buf_area.x1,-layer->buf_area.y1);
     const int width=lv_area_get_width(&area),height=lv_area_get_height(&area);
@@ -126,7 +130,7 @@ void Blend(lv_draw_task_t* task,const lv_draw_sw_blend_dsc_t* dsc) {
         fill.opa=LV_OPA_COVER;fill.relative_area=relative;
         lv_draw_sw_blend_color_to_l8(&fill);return;
     }
-    if(dsc->src_buf && (gray || argb) && !darken) {
+    if(dsc->src_buf && (gray || argb) && !darken && !lift) {
         lv_draw_sw_blend_image_dsc_t image{};
         image.dest_buf=dest; image.dest_w=width; image.dest_h=height; image.dest_stride=dest_stride;
         image.opa=!argb && task->type==LV_DRAW_TASK_TYPE_LAYER ? static_cast<lv_opa_t>(LV_OPA_COVER) : dsc->opa; image.blend_mode=dsc->blend_mode;
@@ -148,7 +152,7 @@ void Blend(lv_draw_task_t* task,const lv_draw_sw_blend_dsc_t* dsc) {
     for(int y=0;y<height;++y) {
         for(int x=0;x<width;++x) {
             const unsigned alpha=mask ? mask[size_t(y)*mask_stride+x] : 255;
-            mask_row[x]=darken ? alpha : (alpha>(label ? 0u : 127u) ? 255 : 0);
+            mask_row[x]=(darken || lift) ? alpha : (alpha>(label ? 0u : 127u) ? 255 : 0);
         }
         if(!source) {
             lv_draw_sw_blend_fill_dsc_t fill{};
@@ -189,13 +193,15 @@ void Blend(lv_draw_task_t* task,const lv_draw_sw_blend_dsc_t* dsc) {
                 default: LV_LOG_WARN("Unsupported L8 source format"); break;
             }
             // 图片只转换本次绘制源像素，原图、透明度和蒙版保持不变。
-            row[x*2]=darken ? reader::DarkenImagePixel(lum) : (lum>16 ? 255 : 0);
-            row[x*2+1]=darken ? alpha : (alpha>127 ? 255 : 0);
+            row[x*2]=darken ? reader::DarkenImagePixel(lum) : lift ? reader::LiftCoverPixel(lum)
+                     : (lum>16 ? 255 : 0);
+            row[x*2+1]=(darken || lift) ? alpha : (alpha>127 ? 255 : 0);
         }
         lv_draw_sw_blend_image_dsc_t image{};
         image.dest_buf=dest+size_t(y)*dest_stride; image.dest_w=width; image.dest_h=1;
-        image.dest_stride=dest_stride; image.opa=darken ? dsc->opa : static_cast<lv_opa_t>(LV_OPA_COVER);
-        image.blend_mode=darken ? dsc->blend_mode : LV_BLEND_MODE_NORMAL;
+        image.dest_stride=dest_stride;
+        image.opa=(darken || lift) ? dsc->opa : static_cast<lv_opa_t>(LV_OPA_COVER);
+        image.blend_mode=(darken || lift) ? dsc->blend_mode : LV_BLEND_MODE_NORMAL;
         image.src_buf=row.data(); image.src_stride=width*2; image.src_color_format=LV_COLOR_FORMAT_AL88;
         image.mask_buf=mask ? mask_row.data() : nullptr; image.mask_stride=width;
         if(argb) lv_draw_sw_blend_image_to_argb8888(&image);

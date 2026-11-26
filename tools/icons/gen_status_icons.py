@@ -36,7 +36,7 @@ FONT_BOLD = os.path.join(ROOT, "tools", "ttf-fonts", "MiSans", "MiSans-Bold.ttf"
 NAMES = [
     "SB_WIFI_0", "SB_WIFI_1", "SB_WIFI_2", "SB_WIFI_3",
     "SB_CELL_0", "SB_CELL_1", "SB_CELL_2", "SB_CELL_3", "SB_CELL_4",
-    "SB_PLANE", "SB_PROXY", "SB_MUTE", "SB_BOLT",
+    "SB_PLANE", "SB_PROXY", "SB_PROXY_SLEEP", "SB_MUTE", "SB_BOLT",
     "DIGIT_0", "DIGIT_1", "DIGIT_2", "DIGIT_3", "DIGIT_4",
     "DIGIT_5", "DIGIT_6", "DIGIT_7", "DIGIT_8", "DIGIT_9",
     "Q_WIFI", "Q_CELL", "Q_PROXY",
@@ -142,6 +142,8 @@ def own_icons():
     for i, a in enumerate(levels(cell, (0, 0, 19.59, 12), SB_H / 12, 4)): out[f"SB_CELL_{i}"] = a
     out["SB_PLANE"] = line_icon("plane", (5, 3.5, 16.5, 17.4), SB_H - 3, 3)
     out["SB_PROXY"] = line_icon("proxy", (3, 1.6, 18, 20.7), SB_H, 2.8)
+    # 网络睡下时盾牌跟灰扇形一样用网点，不要实心黑
+    out["SB_PROXY_SLEEP"] = checker(out["SB_PROXY"])
     out["SB_MUTE"] = line_icon("mute", (3, 4.5, 19.5, 15), SB_H - 4, 2.8)
     out["SB_BOLT"] = crop(render('<path fill="#000" d="M3.9 0 .2 6.2h2.6L2.3 11 6.2 4.6H3.6z"/>', (0, 0, 6.4, 11), round(6.4 * BOLT_H / 11), BOLT_H))
     out["Q_WIFI"] = crop(render(fill_black("".join(wifi)), (0, 0, 21.31, 15.07), round(21.31 * TILE_H / 15.07), TILE_H))
@@ -183,6 +185,7 @@ def local_icons():
     out["SB_PLANE"] = crop(render(whole(data["plane"]), pb, round(pb[2] * k), SB_H))
     xb = box(data["proxy"])
     out["SB_PROXY"] = crop(render(whole(data["proxy"]), xb, round(xb[2] * k_sb), round(xb[3] * k_sb)))
+    out["SB_PROXY_SLEEP"] = checker(out["SB_PROXY"])
 
     def row(name, k=ROW_K):
         v = data[name]

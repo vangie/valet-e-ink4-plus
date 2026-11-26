@@ -632,7 +632,7 @@ div.v-row { box-sizing: border-box; }
 .q-level .q-rowic .erase { fill: var(--paper); }
 .sbi .erase, .qi .erase { fill: var(--paper); }
 /* Wi-Fi 省电睡下：扇形变灰（真机上是 50% 格点，黑白屏也能看出灰） */
-.sb .sb-wifi.asleep .sbi { opacity: .35; }
+.sb .sb-wifi.asleep .sbi, .sb .sb-proxy.asleep .sbi { opacity: .35; }
 
 /* 选字：选中的字反显（深灰底白字），底下卡片列出几个现成的问题 */
 .v-read .read-body [data-ch].sel { background: #4a4a48; color: var(--paper); box-shadow: 1px 0 0 #4a4a48, -1px 0 0 #4a4a48; }   /* 影子补上字间的细缝 */

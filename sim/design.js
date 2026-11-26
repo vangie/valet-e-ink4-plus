@@ -138,7 +138,9 @@ function v2BatteryOutlined(n) {
     <b style="left:${pct(cx, o.total)};top:${pct(cy, BATT.h)};width:${pct(cw, o.total)};height:${pct(ch, BATT.h)}">${n}${bolt}</b></i>`;
 }
 function v2Bar(center) {
-  const proxy = proxyInForce() ? `<i class="sb-proxy" aria-label="${L("在走代理", "Proxy in use")}">${sbIcon("proxy")}</i>` : "";
+  // 网络睡下时盾牌跟扇形一起灰掉，和设备一样
+  const asleep = state.link !== "4G" && state.wifiAsleep && !(!state.wifiNearby && state.linkMode === "wifi");
+  const proxy = proxyInForce() ? `<i class="sb-proxy${asleep ? " asleep" : ""}" aria-label="${L("在走代理", "Proxy in use")}">${sbIcon("proxy")}</i>` : "";
   const mute = state.volume === 0 ? `<i class="sb-mute">${sbIcon("mute")}</i>` : "";
   return `<div class="bar sb" data-quick-open><span class="sb-left">${v2NetGlyph()}${proxy}</span><span class="c">${center}</span><span class="right">${mute}${v2Battery()}</span></div>`;
 }
