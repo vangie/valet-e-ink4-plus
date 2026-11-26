@@ -270,6 +270,60 @@ void SaveTask(void* arg) {
     delete job;
     vTaskDeleteWithCaps(nullptr);
 }
+
+// ── 想读 ──────────────────────────────────────────────────────────────────
+// 从 progress URL 推出 wish URL：…/progress → …/wish
+static std::string WishUrl(const std::string& progress_url) {
+    const std::string suffix = "/progress";
+    if (progress_url.size() <= suffix.size()) return {};
+    if (progress_url.compare(progress_url.size() - suffix.size(), suffix.size(), suffix) != 0) return {};
+    return progress_url.substr(0, progress_url.size() - suffix.size()) + "/wish";
+}
+
+struct WishJob {
+    std::string progress_url;
+    bool on;
+    std::function<void(bool, bool)> callback;
+};
+
+void WishTask(void* arg) {
+    auto* job = static_cast<WishJob*>(arg);
+    const std::string url = WishUrl(job->progress_url);
+    cJSON* body = cJSON_CreateObject();
+    bool ok = false;
+    bool new_wish = job->on;
+    if (body != nullptr && !url.empty()) {
+        cJSON_AddBoolToObject(body, "on", job->on ? cJSON_True : cJSON_False);
+        char* text = cJSON_PrintUnformatted(body);
+        cJSON_Delete(body);
+        if (text != nullptr) {
+            std::string response;
+            const int status = Request("POST", url, text, response);
+            cJSON_free(text);
+            ok = (status >= 200 && status < 300);
+            if (ok) {
+                if (cJSON* root = cJSON_Parse(response.c_str())) {
+                    const cJSON* w = cJSON_GetObjectItemCaseSensitive(root, "wish");
+                    if (cJSON_IsBool(w)) new_wish = cJSON_IsTrue(w);
+                    cJSON_Delete(root);
+                }
+            }
+            ESP_LOGI(TAG, "wish book=%s on=%d status=%d", BookIdForLog(job->progress_url).c_str(), job->on ? 1 : 0, status);
+        }
+    } else {
+        if (body) cJSON_Delete(body);
+    }
+    // 回调要在 LVGL 任务执行
+    struct Cb { std::function<void(bool,bool)> fn; bool ok; bool wish; };
+    auto* cb = new Cb{std::move(job->callback), ok, new_wish};
+    if (!ScreenLvAsync([](void* p) {
+            auto* c = static_cast<Cb*>(p);
+            c->fn(c->ok, c->wish);
+            delete c;
+        }, cb)) delete cb;
+    delete job;
+    vTaskDeleteWithCaps(nullptr);
+}
 } // namespace
 
 std::string ProgressUrlFromDownload(const std::string& download_url) {
@@ -345,6 +399,16 @@ void Push(const std::string& book_path, const Position& pos) {
     if (s_push_running) return;
     s_push_running = true;
     if (!StartTask(PushTask, "sync_push", nullptr)) s_push_running = false;
+}
+
+void ToggleWish(const std::string& progress_url, bool on,
+                std::function<void(bool ok, bool new_wish)> callback) {
+    if (progress_url.empty()) { callback(false, on); return; }
+    auto* job = new WishJob{progress_url, on, std::move(callback)};
+    if (!StartTask(WishTask, "sync_wish", job)) {
+        job->callback(false, on);
+        delete job;
+    }
 }
 
 } // namespace valet::sync

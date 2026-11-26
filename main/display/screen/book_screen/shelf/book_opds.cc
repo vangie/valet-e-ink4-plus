@@ -77,6 +77,8 @@ std::string s_error;
 uint32_t s_gen = 0;                  // 每次换页面内容加一；后台结果代次不符就丢
 int s_detail = -1;                   // 详情里的那本（当前层 entries 下标）
 bool s_downloading = false;
+bool s_wish = false;              // 当前详情里那本是否「想读」
+bool s_wish_pending = false;       // wish 请求进行中
 int s_download_pct = 0;
 DownloadGate s_gate;
 // 每个书库的搜索模板和名字（拉过一次根目录就记下）
@@ -546,6 +548,51 @@ void OpenDetail(int index) {
     lv_obj_set_style_text_color(s_ui.action_text, lv_color_white(), 0);
     lv_obj_center(s_ui.action_text);
     UpdateAction();
+
+    // 「想读」按钮：只在有进度地址（带短码的书库）时显示
+    const std::string progress_url = valet::sync::ProgressUrlFromDownload(entry.files.empty() ? "" : entry.files.front().url);
+    if (!progress_url.empty()) {
+        s_wish = false;
+        s_wish_pending = false;
+        auto* wish_btn = lv_obj_create(body);
+        lv_obj_remove_style_all(wish_btn);
+        lv_obj_set_size(wish_btn, lv_pct(100), 72);
+        lv_obj_set_style_border_width(wish_btn, 2, 0);
+        lv_obj_set_style_border_color(wish_btn, lv_color_black(), 0);
+        lv_obj_set_style_radius(wish_btn, 6, 0);
+        lv_obj_add_flag(wish_btn, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(wish_btn);
+        // 把进度地址复制到 user_data；detail 关闭时 object 被删就跟着释放
+        auto* url_copy = new std::string(progress_url);
+        lv_obj_set_user_data(wish_btn, url_copy);
+        lv_obj_add_event_cb(wish_btn, [](lv_event_t* e) {
+            delete static_cast<std::string*>(lv_obj_get_user_data(lv_event_get_target_obj(e)));
+        }, LV_EVENT_DELETE, nullptr);
+        // 点击
+        lv_obj_add_event_cb(wish_btn, [](lv_event_t* e) {
+            if (s_wish_pending) return;
+            lv_obj_t* btn = lv_event_get_target_obj(e);
+            auto* url = static_cast<std::string*>(lv_obj_get_user_data(btn));
+            if (url == nullptr || url->empty()) return;
+            s_wish_pending = true;
+            lv_obj_t* lbl = lv_obj_get_child(btn, 0);
+            if (lbl) lv_label_set_text(lbl, std::strcmp(Lang::Current(), "zh-CN") == 0 ? "…" : "…");
+            valet::sync::ToggleWish(*url, !s_wish, [btn](bool ok, bool new_wish) {
+                s_wish_pending = false;
+                if (ok) s_wish = new_wish;
+                if (lv_obj_is_valid(btn)) {
+                    lv_obj_t* lbl = lv_obj_get_child(btn, 0);
+                    if (lbl) {
+                        const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+                        lv_label_set_text(lbl, s_wish ? (zh ? "✓ 已加入想读" : "✓ In wish list")
+                                                      : (zh ? "加到想读" : "Add to wish list"));
+                    }
+                }
+            });
+        }, LV_EVENT_CLICKED, nullptr);
+        auto* wish_lbl = AddLabel(wish_btn, Text("加到想读", "Add to wish list"), Small());
+        lv_obj_center(wish_lbl);
+    }
 }
 // ── 搜索 ──────────────────────────────────────────────────────────────────
 void CloseEditor() {

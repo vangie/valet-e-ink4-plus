@@ -296,9 +296,9 @@ void SetupUrl(uint32_t id) {
 
 // 测试用：直接订一个书库（url 为空 = 清空所有订阅）。只编进测试版。
 void LibAdd(uint32_t id, const char* url) {
+    // 测试用：替换整个订阅列表（不追加），每次测试都从干净状态开始
     std::vector<valet::LibrarySource> items;
     if (url != nullptr && url[0]) {
-        items = valet::LoadLibrarySources();
         if (!valet::LibraryUrlValid(url)) { Reply(id, false, ",\"code\":\"BAD_URL\""); return; }
         valet::LibrarySource item;
         item.id = valet::NewLibraryId();

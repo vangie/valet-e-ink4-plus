@@ -31,6 +31,8 @@ struct Entry {
     std::string thumbnail;// 缩略图绝对地址（可能为空）
     std::string nav;      // 没有下载格式时：点进去的下一级目录（绝对地址）
     std::string library;  // 来自哪个书库（订了多个时列表里标出来）
+    bool wish = false;    // 服务端「想读」（通过 /api/u/<key>/books?status=wish 时填）
+    float progress = 0;  // 服务端进度 0–1（书单里带回来的；打开时用 pull 再刷新）
     std::vector<Acquisition> files;
     // 设备能直接打开的最好格式；没有就是 nullptr
     const Acquisition* Best() const;
