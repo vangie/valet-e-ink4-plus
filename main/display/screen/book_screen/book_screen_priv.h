@@ -119,7 +119,8 @@ struct BookUiState {
         lv_obj_t* page_label = nullptr;
         lv_obj_t* footer_left = nullptr;   // 页脚左侧：时间
         lv_obj_t* footer_right = nullptr;  // 页脚右侧：进度
-        lv_obj_t* title_label = nullptr;   // 页眉：章节，不和页码挤在一行
+        lv_obj_t* title_label = nullptr;   // 页眉第二行：回目名
+        lv_obj_t* title_num = nullptr;     // 页眉第一行：章号（第十一回）
         lv_obj_t* open_bar = nullptr;
         lv_obj_t* open_pct_lbl = nullptr;
 
@@ -304,6 +305,8 @@ lv_coord_t ReaderFooterHeight();
 void ApplyReaderPageGeometry(ReaderGeomMode mode);
 /** @brief 方向切换后重设顶栏/底栏/设置卡尺寸（横屏卡可滚） */
 void ApplyReaderChromeSize();
+/** @brief 页眉占几行：整条标题一行放得下就是 1，放不下才拆成 2；标题关掉时是 0 */
+int ReaderHeaderLineCount();
 
 /** @brief 封面外框内可用边长 */
 inline int CoverFrameInner(lv_coord_t outer) {

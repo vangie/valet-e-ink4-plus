@@ -741,6 +741,15 @@ lv_obj_t* CreateReaderScreen(const reader::BookInfo& info) {
     lv_obj_add_flag(chapter, LV_OBJ_FLAG_HIDDEN);
     Book_DisableScroll(chapter);
     st.reader.title_label = chapter;
+    // 页眉第一行：章号。回目名太长，两行分开才看得清。
+    lv_obj_t* chapter_num = lv_label_create(scr);
+    lv_obj_set_style_text_font(chapter_num, Book_ItemFont(), 0);
+    lv_obj_set_style_text_color(chapter_num, lv_color_black(), 0);
+    lv_label_set_long_mode(chapter_num, LV_LABEL_LONG_DOT);
+    lv_label_set_text(chapter_num, "");
+    lv_obj_add_flag(chapter_num, LV_OBJ_FLAG_HIDDEN);
+    Book_DisableScroll(chapter_num);
+    st.reader.title_num = chapter_num;
 
     // 建屏时固定层叠顺序：正文、底栏、设置、状态栏；尺寸与显隐不再调整层级。
     lv_obj_move_foreground(sheet);

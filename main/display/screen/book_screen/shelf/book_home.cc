@@ -101,19 +101,7 @@ void RenderReadingHome() {
     const lv_coord_t cont_w = content_w * 49 / 100;
     const lv_coord_t stats_w = content_w - kHomeGap - cont_w;
 
-    lv_obj_t* cont = lv_obj_create(dash);
-    lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, cont_w, dash_h);
-    lv_obj_set_style_bg_color(cont, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(cont, kHomeCardRadius, 0);
-    lv_obj_set_style_pad_all(cont, kContPad, 0);
-    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(cont, LV_OBJ_FLAG_CLICKABLE);
-    Book_DisableScroll(cont);
-
+    // 进度文字（「已阅读 13%」）和进度条比例
     char prog_txt[32];
     int bar_pct = 0;
     if (stats.continue_progress_x10 >= 0) {
@@ -128,105 +116,93 @@ void RenderReadingHome() {
         std::snprintf(prog_txt, sizeof(prog_txt), "%s", Lang::Strings::BOOK_NO_CONTINUE);
     }
 
-    // 百分比 + 进度条成组贴顶，避免 SPACE_BETWEEN 把条甩到中间
-    lv_obj_t* top_block = lv_obj_create(cont);
-    lv_obj_remove_style_all(top_block);
-    lv_obj_set_width(top_block, cont_w - kContPad * 2);
-    lv_obj_set_height(top_block, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(top_block, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(top_block, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(top_block, kHomeStatsGap, 0);
-    lv_obj_clear_flag(top_block, LV_OBJ_FLAG_CLICKABLE);
-    Book_DisableScroll(top_block);
+    // 「正在读」一行：小封面 + 书名 + 进度 + 进度条。设计稿是一行式，不再用黑卡加按钮。
+    lv_obj_t* cont = lv_obj_create(dash);
+    lv_obj_remove_style_all(cont);
+    lv_obj_set_size(cont, cont_w, dash_h);
+    lv_obj_set_style_bg_color(cont, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(cont, kHomeCardRadius, 0);
+    lv_obj_set_style_border_width(cont, 3, 0);
+    lv_obj_set_style_border_color(cont, lv_color_black(), 0);
+    lv_obj_set_style_pad_all(cont, kContPad, 0);
+    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(cont, 12, 0);
+    Book_DisableScroll(cont);
+    if (stats.continue_index >= 0) {
+        lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(cont);
+        lv_obj_add_event_cb(cont, OnContinueReadingClicked, LV_EVENT_CLICKED,
+                            reinterpret_cast<void*>(static_cast<intptr_t>(stats.continue_index)));
+    } else {
+        lv_obj_clear_flag(cont, LV_OBJ_FLAG_CLICKABLE);
+    }
 
-    lv_obj_t* cont_sub = lv_label_create(top_block);
+    // 左边小封面（同一套封面缓存，异步填图）
+    if (stats.continue_index >= 0 &&
+        stats.continue_index < static_cast<int>(st.shelf.books.size())) {
+        const lv_coord_t cov_h = dash_h - 2 * kContPad;
+        const lv_coord_t cov_w = std::max<lv_coord_t>(UiSx(28), std::min<lv_coord_t>(cov_h * 5 / 7, cont_w * 28 / 100));
+        CreateBookCoverCell(cont, st.shelf.books[static_cast<size_t>(stats.continue_index)],
+                            stats.continue_index, cov_w, cov_h, st.shelf.recent_covers, false, 0,
+                            false);
+    }
+
+    // 右边：书名、进度、进度条
+    lv_obj_t* info = lv_obj_create(cont);
+    lv_obj_remove_style_all(info);
+    lv_obj_set_flex_grow(info, 1);
+    lv_obj_set_height(info, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(info, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(info, UiSy(6), 0);
+    lv_obj_clear_flag(info, LV_OBJ_FLAG_CLICKABLE);
+    Book_DisableScroll(info);
+
+    const char* cont_title = Lang::Strings::BOOK_SHELF_TITLE;
+    if (stats.continue_index >= 0 &&
+        stats.continue_index < static_cast<int>(st.shelf.books.size()) &&
+        !st.shelf.books[static_cast<size_t>(stats.continue_index)].title.empty()) {
+        cont_title = st.shelf.books[static_cast<size_t>(stats.continue_index)].title.c_str();
+    }
+    lv_obj_t* cont_name = lv_label_create(info);
+    lv_label_set_text(cont_name, cont_title);
+    lv_obj_set_style_text_font(cont_name, list_f, 0);
+    lv_obj_set_style_text_color(cont_name, lv_color_black(), 0);
+    lv_label_set_long_mode(cont_name, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(cont_name, LV_SIZE_CONTENT);
+    lv_obj_clear_flag(cont_name, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t* cont_sub = lv_label_create(info);
     lv_label_set_text(cont_sub, prog_txt);
-    lv_obj_set_style_text_font(cont_sub, list_f, 0);
-    lv_obj_set_style_text_color(cont_sub, lv_color_white(), 0);
-    lv_obj_set_width(cont_sub, cont_w - kContPad * 2);
+    lv_obj_set_style_text_font(cont_sub, item_f, 0);
+    lv_obj_set_style_text_color(cont_sub, lv_color_black(), 0);
     lv_obj_clear_flag(cont_sub, LV_OBJ_FLAG_CLICKABLE);
 
-    const lv_coord_t bar_w = cont_w - kContPad * 2;
-    lv_obj_t* bar_wrap = lv_obj_create(top_block);
-    lv_obj_remove_style_all(bar_wrap);
-    lv_obj_set_size(bar_wrap, bar_w, std::max(kHomeProgBarH, kHomeThumbW));
-    lv_obj_set_style_bg_opa(bar_wrap, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_layout(bar_wrap, LV_LAYOUT_NONE, 0);
-    lv_obj_clear_flag(bar_wrap, LV_OBJ_FLAG_CLICKABLE);
-    Book_DisableScroll(bar_wrap);
-
-    lv_obj_t* bar_track = lv_obj_create(bar_wrap);
+    // 进度条：细线，黑底填到已读比例（设计稿里页脚的小进度条）
+    constexpr lv_coord_t kRowBarH = 8;
+    lv_obj_t* bar_track = lv_obj_create(info);
     lv_obj_remove_style_all(bar_track);
-    lv_obj_set_size(bar_track, bar_w, kHomeProgBarH);
-    lv_obj_align(bar_track, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_width(bar_track, LV_PCT(100));
+    lv_obj_set_height(bar_track, kRowBarH);
     lv_obj_set_style_bg_color(bar_track, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(bar_track, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(bar_track, kHomeProgBarH / 2, 0);
+    lv_obj_set_style_radius(bar_track, kRowBarH / 2, 0);
+    lv_obj_set_style_border_width(bar_track, 2, 0);
+    lv_obj_set_style_border_color(bar_track, lv_color_black(), 0);
     lv_obj_set_style_clip_corner(bar_track, true, 0);
     lv_obj_clear_flag(bar_track, LV_OBJ_FLAG_CLICKABLE);
     Book_DisableScroll(bar_track);
-
-    // 白底轨道 + 黑色已读；内缩留白缝，避免黑填与卡面黑底糊边
-    constexpr lv_coord_t kBarInset = 2;
     if (bar_pct > 0) {
-        const lv_coord_t inner_h = kHomeProgBarH - 2 * kBarInset;
-        lv_coord_t fg_w =
-            static_cast<lv_coord_t>((bar_w - 2 * kBarInset) * bar_pct / 100);
-        if (fg_w < inner_h) {
-            fg_w = inner_h;
-        }
-        if (fg_w > bar_w - 2 * kBarInset) {
-            fg_w = bar_w - 2 * kBarInset;
-        }
         lv_obj_t* bar_fg = lv_obj_create(bar_track);
         lv_obj_remove_style_all(bar_fg);
-        lv_obj_set_size(bar_fg, fg_w, inner_h);
-        lv_obj_set_pos(bar_fg, kBarInset, kBarInset);
+        lv_obj_set_size(bar_fg, LV_PCT(bar_pct), LV_PCT(100));
         lv_obj_set_style_bg_color(bar_fg, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(bar_fg, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(bar_fg, inner_h / 2, 0);
         lv_obj_clear_flag(bar_fg, LV_OBJ_FLAG_CLICKABLE);
         Book_DisableScroll(bar_fg);
     }
-
-    lv_obj_t* thumb = lv_obj_create(bar_wrap);
-    lv_obj_remove_style_all(thumb);
-    lv_obj_set_size(thumb, kHomeThumbW, kHomeThumbW);
-    lv_obj_set_style_bg_color(thumb, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(thumb, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(thumb, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(thumb, 2, 0);
-    lv_obj_set_style_border_color(thumb, lv_color_black(), 0);
-    lv_coord_t thumb_x = 0;
-    if (bar_pct > 0) {
-        thumb_x = static_cast<lv_coord_t>((bar_w - kHomeThumbW) * bar_pct / 100);
-    }
-    lv_obj_set_pos(thumb, thumb_x, (std::max(kHomeProgBarH, kHomeThumbW) - kHomeThumbW) / 2);
-    lv_obj_clear_flag(thumb, LV_OBJ_FLAG_CLICKABLE);
-    Book_DisableScroll(thumb);
-
-    lv_obj_t* cont_btn = lv_obj_create(cont);
-    lv_obj_remove_style_all(cont_btn);
-    lv_obj_set_size(cont_btn, bar_w, kContBtnH);
-    lv_obj_set_style_bg_color(cont_btn, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(cont_btn, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(cont_btn, 8, 0);
-    Book_DisableScroll(cont_btn);
-    if (stats.continue_index >= 0) {
-        lv_obj_add_flag(cont_btn, LV_OBJ_FLAG_CLICKABLE);
-        HapticAttachClick(cont_btn);
-        lv_obj_add_event_cb(cont_btn, OnContinueReadingClicked, LV_EVENT_CLICKED,
-                            reinterpret_cast<void*>(static_cast<intptr_t>(stats.continue_index)));
-    } else {
-        lv_obj_clear_flag(cont_btn, LV_OBJ_FLAG_CLICKABLE);
-    }
-    lv_obj_t* cont_btn_lbl = lv_label_create(cont_btn);
-    lv_label_set_text(cont_btn_lbl, Lang::Strings::BOOK_CONTINUE);
-    lv_obj_set_style_text_font(cont_btn_lbl, list_f, 0);
-    lv_obj_set_style_text_color(cont_btn_lbl, lv_color_black(), 0);
-    lv_obj_center(cont_btn_lbl);
-    lv_obj_clear_flag(cont_btn_lbl, LV_OBJ_FLAG_CLICKABLE);
 
     const auto week_stats = reader::book_home_snapshot::LoadWeekStats();
     constexpr uint32_t kDaySeconds = 24u * 60u * 60u;

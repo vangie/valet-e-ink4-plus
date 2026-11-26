@@ -121,13 +121,11 @@ lv_area_t ReadContentArea() {
     const bool full = BookReaderPrefsBackground() == 3 && !page_images;
     const int left = (full ? (DisplayUiIsLandscape() ? DISPLAY_CONTENT_TOP_INSET : DISPLAY_CONTENT_LEFT_INSET) + DisplayUiOffsetX() : 0) + BookReaderPrefsMarginLeft() + (vertical &&
         BookReaderPrefsTextDirection() != kBookReaderTextRightToLeft ? extra_side : 0);
-    const int chapter = BookReaderPrefsHideProgress() ||
-        (BookReaderPrefsFooterMask() & kBookReaderFooterTitle) == 0 ? 0
-        : Book_ItemFont()->line_height + UiSy(10);
-    // 状态栏在阅读时藏着，章节画在它下面，正文再从章节下面起。
-    const int status_h = Book_State().reader.status_h;
-    const int status_reserve = chapter == 0 ? 0
-        : (status_h > 0 ? status_h : ScreenStatusBarHeight());
+    // 页眉按实际行数让位：一行放得下就是一行，超宽才两行
+    const int header_lines = ReaderHeaderLineCount();
+    const int chapter = header_lines == 0 ? 0 : Book_ItemFont()->line_height * header_lines + UiSy(10);
+    // 阅读时状态栏是藏起来的（沉浸阅读），这一段高度不再让出来，否则顶上会空一条。
+    const int status_reserve = 0;
     const int top = (full ? (DisplayUiIsLandscape() ? DISPLAY_CONTENT_LEFT_INSET : DISPLAY_CONTENT_TOP_INSET) + DisplayUiOffsetY() : 0) + BookReaderPrefsMarginTop() + status_reserve + chapter;
     const int width = std::max<int>(40, ReaderLayoutWidth() - BookReaderPrefsMarginLeft() -
         BookReaderPrefsMarginRight() - extra_side);

@@ -90,6 +90,23 @@ void StopFooterClockTimer() {
     }
 }
 
+int ReaderHeaderLineCount() {
+    auto& st = Book_State();
+    if (BookReaderPrefsHideProgress() || (BookReaderPrefsFooterMask() & kBookReaderFooterTitle) == 0) {
+        return 0;
+    }
+    if (!st.reader.session || !st.reader.session->IsOpen()) {
+        return 1;
+    }
+    std::string title = st.reader.session->CurrentTocTitle();
+    if (title.empty()) {
+        return 1;
+    }
+    // 一行放得下就别拆两行，免得白占一行正文
+    const lv_coord_t avail = LV_HOR_RES - UiSx(32);
+    return Book_MeasureTextWidth(Book_ItemFont(), title.c_str()) <= avail ? 1 : 2;
+}
+
 void UpdateReadFooter() {
     auto& st = Book_State();
     if (st.reader.standby_paused) return;
@@ -153,7 +170,8 @@ void UpdateReadFooter() {
     }
 
     char tim[8] = "";
-    if ((mask & kBookReaderFooterTime) != 0) {
+    // 页脚左边一直放时间（设计稿的三段：时间、页码、进度）；「隐藏时间」开关只管要不要省电刷新
+    if (true) {
         const std::time_t now = std::time(nullptr);
         if (struct tm* tm = std::localtime(&now)) {
             std::strftime(tim, sizeof(tim), "%H:%M", tm);
@@ -161,22 +179,79 @@ void UpdateReadFooter() {
     }
 
     // 章节放在状态栏下面。状态栏藏着时也留出同样的高度，免得它一出现就盖住章节。
-    const int status_h = st.reader.status_h > 0 ? st.reader.status_h : ScreenStatusBarHeight();
+    // 阅读时状态栏藏着，页眉直接贴顶，不再空出状态栏那一行
+    const int status_h = 0;
+    // 页眉两行：上面「第十一回」，下面回目名。回目名常常很长，一行放不下。
+    auto hide_title = [&] {
+        for (lv_obj_t* l : {st.reader.title_num, st.reader.title_label}) {
+            if (l != nullptr && lv_obj_is_valid(l)) {
+                lv_label_set_text(l, "");
+                lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    };
     if (st.reader.title_label && lv_obj_is_valid(st.reader.title_label)) {
         if ((mask & kBookReaderFooterTitle) != 0 &&
             st.reader.read_chrome == BookUiState::ReadChrome::kReading) {
             std::string title = st.reader.session->CurrentTocTitle();
             if (title.empty()) title = Lang::Strings::BOOK_BODY;
-            lv_label_set_text(st.reader.title_label, title.c_str());
+            // 第一个空格前是章号（「第十一回」），后面是回目名
+            // 按完整的分隔串找（半角空格或全角空格 U+3000），不能按单个字节：
+            // 全角空格的 UTF-8 字节会出现在别的汉字里（比如「一」），按字节找会把「第十一回」切开。
+            std::string head = title, body;
+            {
+                static const char* const kSeps[] = {" ", "\u3000"};
+                size_t cut = std::string::npos, sep_len = 0;
+                for (const char* sep : kSeps) {
+                    const size_t at = title.find(sep);
+                    if (at != std::string::npos && at < cut) { cut = at; sep_len = std::strlen(sep); }
+                }
+                // 只拆「第…回 / 第…章」这类中文章号；英文和别的标题整行放第二行
+                const bool numbered = title.compare(0, std::strlen("第"), "第") == 0;
+                if (numbered && cut != std::string::npos && cut > 0) {
+                    size_t rest = cut + sep_len;
+                    for (bool more = true; more && rest < title.size();) {
+                        more = false;
+                        for (const char* sep : kSeps) {
+                            if (title.compare(rest, std::strlen(sep), sep) == 0) { rest += std::strlen(sep); more = true; }
+                        }
+                    }
+                    if (rest < title.size()) { head = title.substr(0, cut); body = title.substr(rest); }
+                }
+            }
+            const lv_coord_t line_h = std::max<lv_coord_t>(1, Book_ItemFont()->line_height);
+            const lv_coord_t top = status_h + UiSy(4);
+            // 一行放得下就整条放一行；只有超宽才拆成章号 + 回目两行
+            if (ReaderHeaderLineCount() <= 1) {
+                if (st.reader.title_num && lv_obj_is_valid(st.reader.title_num)) {
+                    lv_label_set_text(st.reader.title_num, "");
+                    lv_obj_add_flag(st.reader.title_num, LV_OBJ_FLAG_HIDDEN);
+                }
+                lv_label_set_text(st.reader.title_label, title.c_str());
+                lv_obj_set_width(st.reader.title_label, std::max<lv_coord_t>(40, footer_w - UiSx(8)));
+                lv_obj_align(st.reader.title_label, LV_ALIGN_TOP_LEFT, UiSx(16), top);
+                lv_obj_clear_flag(st.reader.title_label, LV_OBJ_FLAG_HIDDEN);
+                if (st.reader.status_bar && lv_obj_is_valid(st.reader.status_bar)) {
+                    lv_obj_move_foreground(st.reader.status_bar);
+                }
+                return;
+            }
+            if (st.reader.title_num && lv_obj_is_valid(st.reader.title_num)) {
+                lv_label_set_text(st.reader.title_num, body.empty() ? "" : head.c_str());
+                lv_obj_set_width(st.reader.title_num, std::max<lv_coord_t>(40, footer_w - UiSx(8)));
+                lv_obj_align(st.reader.title_num, LV_ALIGN_TOP_LEFT, UiSx(16), top);
+                if (body.empty()) lv_obj_add_flag(st.reader.title_num, LV_OBJ_FLAG_HIDDEN);
+                else lv_obj_clear_flag(st.reader.title_num, LV_OBJ_FLAG_HIDDEN);
+            }
+            lv_label_set_text(st.reader.title_label, body.empty() ? head.c_str() : body.c_str());
             lv_obj_set_width(st.reader.title_label, std::max<lv_coord_t>(40, footer_w - UiSx(8)));
-            lv_obj_align(st.reader.title_label, LV_ALIGN_TOP_LEFT, UiSx(16), status_h + UiSy(4));
+            lv_obj_align(st.reader.title_label, LV_ALIGN_TOP_LEFT, UiSx(16), body.empty() ? top : top + line_h);
             lv_obj_clear_flag(st.reader.title_label, LV_OBJ_FLAG_HIDDEN);
             if (st.reader.status_bar && lv_obj_is_valid(st.reader.status_bar)) {
                 lv_obj_move_foreground(st.reader.status_bar);
             }
         } else {
-            lv_label_set_text(st.reader.title_label, "");
-            lv_obj_add_flag(st.reader.title_label, LV_OBJ_FLAG_HIDDEN);
+            hide_title();
         }
     }
     char page_no[16] = "";
