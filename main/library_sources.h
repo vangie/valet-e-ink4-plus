@@ -25,7 +25,7 @@ bool SaveLibrarySources(const std::vector<LibrarySource>& items);
 bool LibraryUrlValid(const std::string& url);
 /** @brief 从链接推出显示名（主机名；书斋这类带短码的仍用主机名） */
 std::string LibraryNameFromUrl(const std::string& url);
-/** @brief 这条链接是不是带进度的订阅（书斋）：路径里有 /opds/<短码> 或 /api/valet/ */
+/** @brief 这条链接是不是带进度的订阅（书斋）：路径里有 /opds/<短码> 或 /api/u/<短码> */
 bool LibraryRichUrl(const std::string& url);
 /** @brief 新的订阅 id（随机） */
 std::string NewLibraryId();

@@ -2,6 +2,7 @@
 #include "epd_content_policy.h"
 #include "epd_refresh.h"
 #include "book_screen/shelf/book_bookshelf.h"
+#include "book_screen/shelf/book_opds.h"
 #include "book_screen/book_screen_priv.h"
 #include "book_screen/cover/book_cover_cell.h"
 #include "book_screen/cover/book_cover_geometry.h"
@@ -270,6 +271,28 @@ lv_obj_t* CreateBookshelfScreen() {
     lv_obj_set_flex_grow(title_lbl, 1);
     lv_obj_clear_flag(title_lbl, LV_OBJ_FLAG_CLICKABLE);
     st.shelf.shelf_title_lbl = title_lbl;
+
+    // 订了书库：标题行多一个「书库」，进去浏览、搜书、下载
+    if (OpdsHasLibraries()) {
+        lv_obj_t* lib = lv_obj_create(header);
+        lv_obj_remove_style_all(lib);
+        lv_obj_set_size(lib, LV_SIZE_CONTENT, kShelfViewToggleH);
+        lv_obj_set_style_pad_hor(lib, UiSx(10), 0);
+        lv_obj_set_style_margin_right(lib, UiSx(8), 0);
+        lv_obj_set_style_border_width(lib, 2, 0);
+        lv_obj_set_style_border_color(lib, lv_color_black(), 0);
+        lv_obj_set_style_radius(lib, 4, 0);
+        Book_DisableScroll(lib);
+        lv_obj_add_flag(lib, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(lib);
+        lv_obj_add_event_cb(lib, OnShelfLibraryClicked, LV_EVENT_CLICKED, nullptr);
+        lv_obj_t* lib_lbl = lv_label_create(lib);
+        lv_label_set_text(lib_lbl, std::strcmp(Lang::Current(), "zh-CN") == 0 ? "书库" : "Libraries");
+        lv_obj_set_style_text_font(lib_lbl, Book_ItemFont(), 0);
+        lv_obj_set_style_text_color(lib_lbl, lv_color_black(), 0);
+        lv_obj_center(lib_lbl);
+        lv_obj_clear_flag(lib_lbl, LV_OBJ_FLAG_CLICKABLE);
+    }
 
     lv_obj_t* toggle = lv_obj_create(header);
     lv_obj_remove_style_all(toggle);

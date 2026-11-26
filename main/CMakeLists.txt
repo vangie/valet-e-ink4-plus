@@ -159,6 +159,8 @@ idf_component_register(
         "valet_book_tools.cc"
         "assistant_profiles_model.cc"
         "library_sources.cc"
+        "opds_client.cc"
+        "opds_fetch.cc"
         "valet_setup/pairing.cc"
         "valet_setup/server.cc"
         "valet_crypto/monocypher.c"

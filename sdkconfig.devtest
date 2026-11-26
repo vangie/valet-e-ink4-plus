@@ -11,3 +11,8 @@ CONFIG_VALET_DEV_LINK=y
 # CONFIG_LOG_DEFAULT_LEVEL_WARN is not set
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_ESP_ERR_TO_NAME_LOOKUP=y
+
+# Log v2 stores tags and formats once: keeps the test image inside the 5 MB app
+# partition with Info logs on (release keeps v1 at Warn level).
+# CONFIG_LOG_VERSION_1 is not set
+CONFIG_LOG_VERSION_2=y

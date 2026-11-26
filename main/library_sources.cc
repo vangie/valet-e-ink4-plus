@@ -127,8 +127,8 @@ std::string LibraryNameFromUrl(const std::string& url) {
 }
 
 bool LibraryRichUrl(const std::string& url) {
-    // 书斋：/opds/<短码>，或者 /api/valet/u/<短码>/
-    return url.find("/api/valet/") != std::string::npos ||
+    // 书斋：/opds/<短码>，或者 /api/u/<短码>/
+    return url.find("/api/u/") != std::string::npos ||
            (url.find("/opds/") != std::string::npos && url.find("/opds/", url.find("/opds/") + 6) == std::string::npos);
 }
 
