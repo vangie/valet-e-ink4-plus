@@ -255,6 +255,24 @@ IngestResult Assistant_IngestA2uiMessage(cJSON* msg, FlowList& out) {
         out[before] = std::move(out.back());
         out.pop_back();
     }
+    // 过滤百问回显的内部 MCP 工具调用行（如 "% self_reader_get_current_page"），连同已落盘历史回放一并剔除。
+    for (size_t i = out.size(); i > before; --i) {
+        const auto& item = out[i - 1];
+        bool internal_echo = (item.text.find("self_reader_") != std::string::npos ||
+                              item.text.find("self.reader.") != std::string::npos ||
+                              item.text.find("% self_") != std::string::npos);
+        for (const auto& sp : item.spans) {
+            if (sp.text.find("self_reader_") != std::string::npos ||
+                sp.text.find("self.reader.") != std::string::npos ||
+                sp.text.find("% self_") != std::string::npos) {
+                internal_echo = true;
+                break;
+            }
+        }
+        if (internal_echo) {
+            out.erase(out.begin() + static_cast<std::ptrdiff_t>(i - 1));
+        }
+    }
     return out.size() > before ? IngestResult::kAppended : IngestResult::kNone;
 }
 

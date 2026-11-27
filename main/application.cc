@@ -65,6 +65,17 @@
 
 namespace {
 // 去掉回显里跟在问题后面的「选中了哪几个字」那句说明。百问回显的是一段界面 JSON：只改里面的文字，不能按字节截断。
+// 另外，百问在调用 MCP 工具（如 self.reader.get_current_page）时，也会通过 stt 消息下发形如
+// "% self_reader_get_current_page" 的内部工具调用回显，这类消息属于系统内部工具动作，不应作为“用户：”气泡展示。
+bool IsInternalToolEcho(const std::string& raw) {
+    if (raw.find("self_reader_") != std::string::npos ||
+        raw.find("self.reader.") != std::string::npos) {
+        return true;
+    }
+    const auto pct = raw.find("% self_");
+    return pct != std::string::npos;
+}
+
 std::string WithoutQuoteNote(const char* raw) {
     std::string out = raw ? raw : "";
     const auto cut = [](std::string& text) {
@@ -639,18 +650,22 @@ void Application::EnsureProtocolReady() {
             if (cJSON_IsString(text)) {
                 // 官方云把文字提问整句回显：跟在问题后面的「选中了哪几个字」那句说明只发给它，不显示（见 ReadingQuoteNote）
                 std::string shown = WithoutQuoteNote(text->valuestring);
-                auto after = [this, display, current_session, message = std::move(shown)]() {
-                    if (!current_session()) return;
-                    if (!pre_shown_text_question_.empty() &&
-                        (message == pre_shown_text_question_ || message.find(pre_shown_text_question_) != std::string::npos)) {
+                if (IsInternalToolEcho(shown)) {
+                    ESP_LOGI(TAG, "skip internal tool echo in stt");
+                } else {
+                    auto after = [this, display, current_session, message = std::move(shown)]() {
+                        if (!current_session()) return;
+                        if (!pre_shown_text_question_.empty() &&
+                            (message == pre_shown_text_question_ || message.find(pre_shown_text_question_) != std::string::npos)) {
+                            pre_shown_text_question_.clear();
+                            return;
+                        }
                         pre_shown_text_question_.clear();
-                        return;
-                    }
-                    pre_shown_text_question_.clear();
-                    display->SetChatMessage("user", message.c_str());
-                };
-                if (chat_cloud::IsYunxin()) { QueueYunxinTextBoundary(std::move(after)); }
-                else { Schedule(std::move(after)); }
+                        display->SetChatMessage("user", message.c_str());
+                    };
+                    if (chat_cloud::IsYunxin()) { QueueYunxinTextBoundary(std::move(after)); }
+                    else { Schedule(std::move(after)); }
+                }
             }
         } else if (strcmp(type->valuestring, "vision") == 0) {
             const auto* state = cJSON_GetObjectItem(root, "state");
