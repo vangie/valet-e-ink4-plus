@@ -158,7 +158,7 @@ void Assistant_ShowIdleHint() {
 void Assistant_BuildIdleHint(lv_obj_t* host) {
     const bool en = IsEnglish();
     const bool custom = chat_cloud::IsCustom();
-    const bool book = custom && valet::SelectedReadingContext().Valid();
+    const bool book = valet::SelectedReadingContext().Valid();
     lv_obj_update_layout(host);
     const int width = lv_obj_get_width(host);
     const int height = lv_obj_get_height(host);

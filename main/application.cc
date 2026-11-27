@@ -639,8 +639,14 @@ void Application::EnsureProtocolReady() {
             if (cJSON_IsString(text)) {
                 // 官方云把文字提问整句回显：跟在问题后面的「选中了哪几个字」那句说明只发给它，不显示（见 ReadingQuoteNote）
                 std::string shown = WithoutQuoteNote(text->valuestring);
-                auto after = [display, current_session, message = std::move(shown)]() {
+                auto after = [this, display, current_session, message = std::move(shown)]() {
                     if (!current_session()) return;
+                    if (!pre_shown_text_question_.empty() &&
+                        (message == pre_shown_text_question_ || message.find(pre_shown_text_question_) != std::string::npos)) {
+                        pre_shown_text_question_.clear();
+                        return;
+                    }
+                    pre_shown_text_question_.clear();
                     display->SetChatMessage("user", message.c_str());
                 };
                 if (chat_cloud::IsYunxin()) { QueueYunxinTextBoundary(std::move(after)); }
@@ -771,12 +777,23 @@ void Application::UseProviderOnTask(chat_cloud::Provider to) {
     // 激活与配置按新的云服务重新来；旧的激活码不再显示
     ClearActivationCode();
     chat_activation_pending_ = false;
-    chat_config_ready_ = chat_cloud::IsCustom() && chat_cloud::Available();
-    activation_kick_.store(true, std::memory_order_release);
+    bool has_cached_endpoint = false;
+    if (!chat_cloud::IsCustom() && chat_cloud::Available() && !YunxinBinding::Enabled()) {
+        if (chat_cloud::IsYunxin()) {
+            has_cached_endpoint = !chat_cloud::YunxinWebsocketUrl(SystemInfo::GetMacAddress()).empty();
+        } else {
+            Settings ws(chat_cloud::WebsocketNamespace());
+            Settings mqtt(chat_cloud::MqttNamespace());
+            has_cached_endpoint = !ws.GetString("url").empty() || !mqtt.GetString("endpoint").empty();
+        }
+    }
+    chat_config_ready_ = (chat_cloud::IsCustom() && chat_cloud::Available()) || has_cached_endpoint;
+    if (!chat_config_ready_) activation_kick_.store(true, std::memory_order_release);
     if (device_state_ == kDeviceStateIdle) ApplyIdleStatusBar();
 }
 
 void Application::TeardownProtocol() {
+    McpServer::GetInstance().ResetSession();
     if (yunxin_text_timer_handle_ != nullptr) { esp_timer_stop(yunxin_text_timer_handle_); }
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->CloseAudioChannel();
@@ -1163,6 +1180,8 @@ void Application::StopXiaozhiVoiceOnTask() {
     ++baiwen_question_turn_;
     baiwen_image_id_.clear();
     baiwen_stop_waiting_ = false;
+    pending_text_question_.clear();
+    pre_shown_text_question_.clear();
     // 覆盖音频释放到协议关闭之间的收尾阶段，待机任务不能在此期间进入浅睡。
     PowerNeedHold closing(PowerNeed::ForegroundNetwork);
 
@@ -1776,6 +1795,10 @@ bool Application::AskValetText(const std::string& question) try {
     return Schedule([this, question]() {
         pending_text_question_ = question;
         pending_text_attempts_ = 0;
+        if (AssistantScreen::IsActive() && !StandbyScreen::IsActive() && !question.empty()) {
+            pre_shown_text_question_ = question;
+            Board::GetInstance().GetDisplay()->SetChatMessage("user", question.c_str());
+        }
         TryPendingTextQuestion();
     });
 } catch (const std::bad_alloc&) {
@@ -1819,6 +1842,9 @@ void Application::TryPendingTextQuestion() {
         }
     }
     if (!still_needed()) return give_up();
+    if (!chat_cloud::IsCustom() && !McpServer::GetInstance().IsToolsListSent() && pending_text_attempts_ < 6) {
+        return retry();
+    }
     const std::string question = std::move(pending_text_question_);
     pending_text_question_.clear();
     if (device_state_ == kDeviceStateSpeaking && audio_running_) audio_service_.ResetDecoder();

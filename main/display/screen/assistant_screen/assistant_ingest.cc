@@ -418,7 +418,8 @@ void AssistantScreen::AddMessage(const char* role, const char* content) {
         FinishYunxinSpeech();
     }
     if (chat_cloud::IsCustom()) ShowLiveReply(nullptr, true);   // 新消息之后，通话回答不能再原地替换
-    if (!is_a2ui && (chat_cloud::UsesXiaozhiProtocol() || chat_cloud::IsCustom()) && role != nullptr &&
+    if (!is_a2ui && (chat_cloud::UsesXiaozhiProtocol() || chat_cloud::IsCustom() ||
+                     (role != nullptr && std::strcmp(role, "user") == 0)) && role != nullptr &&
         (std::strcmp(role, "user") == 0 || std::strcmp(role, "assistant") == 0)) {
         // Standard Xiaozhi STT/TTS text must enter the same pagination/history path.
         // Build JSON structurally so quotes, newlines and JSON-looking speech stay text.

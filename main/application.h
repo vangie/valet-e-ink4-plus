@@ -192,6 +192,7 @@ private:
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     esp_timer_handle_t yunxin_text_timer_handle_ = nullptr;
     std::string pending_text_question_;          // 等协议建好再发的文字提问（AskValetText）
+    std::string pre_shown_text_question_;        // 已在面板先行显示气泡的文字提问，避免回显重复
     int pending_text_attempts_ = 0;
     esp_timer_handle_t text_question_timer_ = nullptr;
     void TryPendingTextQuestion();

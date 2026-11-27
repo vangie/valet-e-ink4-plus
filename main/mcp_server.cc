@@ -4,6 +4,7 @@
  */
 
 #include "mcp_server.h"
+#include "valet_book_tools.h"
 #include "valet_reading_context.h"
 #include "sdkconfig.h"
 #include <esp_log.h>
@@ -93,20 +94,71 @@ void McpServer::AddCommonTools() {
     }
 
     // 官方云（百问）问书里的事：服务器需要时来取正在读的这一页和选中的字（2026-11-24 实测百问会调）
-    AddTool("self.reader.get_current_page",
+    const std::string page_base_desc =
         "Returns the text of the book page the user is reading right now, plus the words the user selected on it (if any). "
         "Call this first whenever the user asks about \"this page\", \"this sentence\", \"this word\" or the book they are reading.\n"
-        "返回用户正在读的这一页书的正文，以及用户在这一页上选中的字。用户问「这一页」「这句」「这个词」或正在读的书时，先调用它。",
+        "返回用户正在读的这一页书的正文（含前后跨页补全段落），以及用户在这一页上选中的字。用户问「这一页」「这句」「这个词」或正在读的书时，先调用它。";
+    auto* page_tool = new McpTool("self.reader.get_current_page",
+        page_base_desc,
         PropertyList(),
         [](const PropertyList&) -> ReturnValue {
-            const auto page = valet::LatestReadingPage();
+            const auto selected = valet::SelectedReadingContext();
+            const auto latest = valet::LatestReadingPage();
+            const auto& page = (selected.Valid() && (!latest.Valid() || (selected.book_id == latest.book_id && selected.page == latest.page)))
+                ? selected : latest;
             const auto quote = valet::CurrentReadingQuote();
-            ESP_LOGI(TAG, "self.reader.get_current_page: page %d, %u bytes", page.page, unsigned(page.text.size()));
+            ESP_LOGI(TAG, "self.reader.get_current_page: page %d, %u bytes (expanded=%d)",
+                     page.page, unsigned(page.text.size()), page.expanded ? 1 : 0);
             if (!page.Valid()) return std::string("用户现在没有打开书。The user has no book open.");
             std::string out = "《" + page.title + "》" + page.chapter + "，第 " + std::to_string(page.page) + " 页：\n" + page.text;
-            if (quote.Valid()) out += "\n\n用户选中了：「" + quote.text + "」，所在句子：「" + quote.sentence + "」";
+            if (quote.Valid()) {
+                out += "\n\n用户选中了：「" + quote.text + "」";
+                if (!quote.sentence.empty() && quote.sentence != quote.text) out += "，所在句子：「" + quote.sentence + "」";
+            }
             return out;
         });
+    page_tool->set_dynamic_description([page_base_desc]() {
+        const auto selected = valet::SelectedReadingContext();
+        if (!selected.Valid()) return page_base_desc;
+        const auto clip = [](const std::string& s, size_t max) {
+            if (s.size() <= max) return s;
+            while (max && (static_cast<unsigned char>(s[max]) & 0xc0) == 0x80) --max;
+            return s.substr(0, max) + "…";
+        };
+        const auto quote = valet::CurrentReadingQuote();
+        std::string desc = page_base_desc + "\n【重要：用户当前正在书页内提问】当前正在读《" + clip(selected.title, 120) +
+                           "》" + clip(selected.chapter, 120) + "，第 " + std::to_string(selected.page) + " 页";
+        if (quote.Valid()) {
+            desc += "；并且用户在这一页上选中了：「" + clip(quote.text, 240) + "」";
+            if (!quote.sentence.empty() && quote.sentence != quote.text)
+                desc += "（所在句子：「" + clip(quote.sentence, 360) + "」）";
+        }
+        desc += "。\n【当前页正文上下文】：\n" + clip(selected.text, 2400) +
+                "\n（用户在阅读时的任何提问、解释请求或追问都基于以上书页正文与选中文字；若用户翻了页可再次调用此工具更新，若需查全书其他章节请调用 self.reader.search_book / self.reader.read_book。）";
+        return desc;
+    });
+    AddTool(page_tool);
+
+    AddTool("self.reader.search_book",
+        "Search the currently open book for a keyword or phrase and return matching paragraph excerpts with position tags (like c15.p32).\n"
+        "在当前打开的整本书（或已读部分）中搜索关键词，返回命中段落摘录和位置编号（如 c15.p32）。当当前页不足以回答书中前后文人物、情节问题时调用。",
+        PropertyList({
+            Property("query", kPropertyTypeString),
+            Property("scope", kPropertyTypeString, std::string("all")),
+            Property("fromChapter", kPropertyTypeInteger, 0, 0, 5000),
+            Property("limit", kPropertyTypeInteger, 5, 1, 8),
+        }),
+        [](const PropertyList&) -> ReturnValue { return true; });
+
+    AddTool("self.reader.read_book",
+        "Read paragraphs around a specific position (like \"c15.p32\" from search_book, or \"current\" for the current page's chapter) in the open book.\n"
+        "按位置编号（如 search_book 返回的 \"c15.p32\"，或 \"current\"）读取当前打开书籍中该处前后的连续段落原文。",
+        PropertyList({
+            Property("at", kPropertyTypeString, std::string("current")),
+            Property("before", kPropertyTypeInteger, 2, 0, 10),
+            Property("after", kPropertyTypeInteger, 12, 0, 25),
+        }),
+        [](const PropertyList&) -> ReturnValue { return true; });
 
 #if 0 // S31：MCP 屏幕主题/截图工具暂关（无 LvglThemeManager / Snapshot）
 #ifdef HAVE_LVGL
@@ -391,6 +443,7 @@ void McpServer::ParseMessage(const cJSON* json) {
     }
     
     if (method_str == "initialize") {
+        tools_list_sent_.store(false, std::memory_order_release);
         ParseCapabilities(cJSON_GetObjectItem(params, "capabilities"));
         auto app_desc = esp_app_get_description();
         std::string message = "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"" BOARD_NAME "\",\"version\":\"";
@@ -507,6 +560,7 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
     }
     
     ReplyResult(id, json);
+    if (next_cursor.empty()) tools_list_sent_.store(true, std::memory_order_release);
 }
 
 void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments) {
@@ -548,6 +602,49 @@ void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* to
     } catch (const std::exception& e) {
         ESP_LOGE(TAG, "tools/call: %s", e.what());
         ReplyError(id, e.what());
+        return;
+    }
+
+    if (tool_name == "self.reader.search_book" || tool_name == "self.reader.read_book") {
+        const auto source = valet::LatestBookSource();
+        if (source.path.empty()) {
+            ReplyError(id, "No book is currently open on the device.");
+            return;
+        }
+        std::unique_ptr<cJSON, decltype(&cJSON_Delete)> req(cJSON_CreateObject(), cJSON_Delete);
+        const bool is_search = tool_name == "self.reader.search_book";
+        cJSON_AddStringToObject(req.get(), "op", is_search ? "search" : "read");
+        if (is_search) {
+            cJSON_AddStringToObject(req.get(), "query", arguments["query"].value<std::string>().c_str());
+            cJSON_AddStringToObject(req.get(), "scope", arguments["scope"].value<std::string>().c_str());
+            cJSON_AddNumberToObject(req.get(), "fromChapter", arguments["fromChapter"].value<int>());
+            cJSON_AddNumberToObject(req.get(), "limit", arguments["limit"].value<int>());
+        } else {
+            cJSON_AddStringToObject(req.get(), "at", arguments["at"].value<std::string>().c_str());
+            cJSON_AddNumberToObject(req.get(), "before", arguments["before"].value<int>());
+            cJSON_AddNumberToObject(req.get(), "after", arguments["after"].value<int>());
+        }
+        const bool started = valet::StartBookToolRequest(source, req.get(), [this, id](cJSON* result) {
+            char* text_str = cJSON_PrintUnformatted(result);
+            cJSON_Delete(result);
+            cJSON* mcp_res = cJSON_CreateObject();
+            cJSON* content = cJSON_CreateArray();
+            cJSON* item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "type", "text");
+            cJSON_AddStringToObject(item, "text", text_str ? text_str : "{}");
+            if (text_str) cJSON_free(text_str);
+            cJSON_AddItemToArray(content, item);
+            cJSON_AddItemToObject(mcp_res, "content", content);
+            cJSON_AddBoolToObject(mcp_res, "isError", false);
+            char* payload_str = cJSON_PrintUnformatted(mcp_res);
+            std::string payload = payload_str ? payload_str : "{}";
+            if (payload_str) cJSON_free(payload_str);
+            cJSON_Delete(mcp_res);
+            Application::GetInstance().Schedule([this, id, payload = std::move(payload)]() {
+                ReplyResult(id, payload);
+            });
+        });
+        if (!started) ReplyError(id, "Device is still working on the previous book request.");
         return;
     }
 

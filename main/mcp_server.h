@@ -209,6 +209,7 @@ class McpTool {
 private:
     std::string name_;
     std::string description_;
+    std::function<std::string()> dynamic_description_;
     PropertyList properties_;
     std::function<ReturnValue(const PropertyList&)> callback_;
     bool user_only_ = false;
@@ -224,6 +225,7 @@ public:
         callback_(callback) {}
 
     void set_user_only(bool user_only) { user_only_ = user_only; }
+    void set_dynamic_description(std::function<std::string()> fn) { dynamic_description_ = std::move(fn); }
     inline const std::string& name() const { return name_; }
     inline const std::string& description() const { return description_; }
     inline const PropertyList& properties() const { return properties_; }
@@ -231,10 +233,11 @@ public:
 
     std::string to_json() const {
         std::vector<std::string> required = properties_.GetRequired();
+        const std::string desc = dynamic_description_ ? dynamic_description_() : description_;
         
         cJSON *json = cJSON_CreateObject();
         cJSON_AddStringToObject(json, "name", name_.c_str());
-        cJSON_AddStringToObject(json, "description", description_.c_str());
+        cJSON_AddStringToObject(json, "description", desc.c_str());
         
         cJSON *input_schema = cJSON_CreateObject();
         cJSON_AddStringToObject(input_schema, "type", "object");
@@ -325,6 +328,8 @@ public:
     void AddUserOnlyTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
     void ParseMessage(const cJSON* json);
     void ParseMessage(const std::string& message);
+    bool IsToolsListSent() const { return tools_list_sent_.load(std::memory_order_acquire); }
+    void ResetSession() { tools_list_sent_.store(false, std::memory_order_release); }
 
 private:
     McpServer();
@@ -339,6 +344,7 @@ private:
     void DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments);
 
     std::vector<McpTool*> tools_;
+    std::atomic<bool> tools_list_sent_{false};
 };
 
 #endif // MCP_SERVER_H
