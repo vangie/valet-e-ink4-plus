@@ -231,11 +231,10 @@ void LvAdapterEpdiy_TouchReadCb(lv_indev_t* indev, lv_indev_data_t* data) {
         origin = {static_cast<int32_t>(start_x), static_cast<int32_t>(start_y)};
         start_screen = lv_screen_active();
         close_panel = ScreenFrontlightIsVisible();
-        if (close_panel && ScreenFrontlightOwnsDrag(origin.x, origin.y)) {
+        if ((close_panel && ScreenFrontlightOwnsDrag(origin.x, origin.y)) ||
+            (!close_panel && PageOwnsVerticalDrag(origin))) {
             tracking = false;
             ignore_until_release = true;
-        } else if (!close_panel && PageOwnsVerticalDrag(origin)) {
-            tracking = false;
         }
     }
     if (tracking && !consumed) {
