@@ -109,11 +109,15 @@ lv_obj_t* Box(lv_obj_t* parent, int x, int y, int w, int h, lv_event_cb_t click 
     }
     return box;
 }
-lv_obj_t* Label(lv_obj_t* parent, const char* text, const lv_font_t* font, bool white = false) {
+lv_obj_t* Label(lv_obj_t* parent, const char* text, const lv_font_t* font, bool white = false, int width = 0) {
     auto* label = lv_label_create(parent);
     lv_label_set_text(label, text);
     lv_obj_set_style_text_font(label, font, 0);
     lv_obj_set_style_text_color(label, white ? lv_color_white() : lv_color_black(), 0);
+    if (width > 0) {
+        lv_obj_set_size(label, width, lv_font_get_line_height(font));
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    }
     lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
     return label;
 }
@@ -348,7 +352,7 @@ void BuildPair(lv_obj_t* root) {
         }
         lv_obj_align(title, LV_ALIGN_BOTTOM_RIGHT, -32, -70);
         if (kind == kChoiceRead) {
-            lv_obj_set_width(note, 240);
+            lv_obj_set_size(note, 240, lv_font_get_line_height(Small()));
             lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
             lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_RIGHT, 0);
         }
@@ -391,9 +395,7 @@ void BuildWho(lv_obj_t* root) {
     lv_obj_set_style_border_color(dot, lv_color_black(), 0);
     lv_obj_set_style_bg_color(dot, ready ? lv_color_black() : lv_color_white(), 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-    auto* label = Label(row, who.c_str(), Small());
-    lv_obj_set_width(label, kWidth - 90);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    auto* label = Label(row, who.c_str(), Small(), false, kWidth - 90);
     lv_obj_align(label, LV_ALIGN_LEFT_MID, 38, 0);
     lv_obj_align(Chevron(row, 24), LV_ALIGN_RIGHT_MID, 0, 0);
 }
@@ -478,13 +480,9 @@ void BuildBook(lv_obj_t* root) {
     lv_obj_set_style_border_color(card, lv_color_black(), 0);
     lv_obj_add_event_cb(card, DrawBookCard, LV_EVENT_DRAW_MAIN, nullptr);
     const std::string title = path.empty() ? Text("还没有在读的书", "Nothing open yet") : BookTitle(path);
-    s.book_title = Label(card, title.c_str(), Strong());
-    lv_obj_set_width(s.book_title, 268);
-    lv_label_set_long_mode(s.book_title, LV_LABEL_LONG_DOT);
+    s.book_title = Label(card, title.c_str(), Strong(), false, 268);
     lv_obj_set_pos(s.book_title, 138, 30);
-    s.book_sub = Label(card, path.empty() ? Text("去书架挑一本", "Pick one from the shelf") : "", Small());
-    lv_obj_set_width(s.book_sub, 268);
-    lv_label_set_long_mode(s.book_sub, LV_LABEL_LONG_DOT);
+    s.book_sub = Label(card, path.empty() ? Text("去书架挑一本", "Pick one from the shelf") : "", Small(), false, 268);
     lv_obj_set_pos(s.book_sub, 138, 84);
     auto* track = Box(card, 138, 134, 240, 14);
     lv_obj_set_style_border_width(track, 2, 0);
@@ -550,9 +548,7 @@ void BuildTodo(lv_obj_t* root) {
     lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
     s.todo_count = Label(badge, "0", Small(), true);
     lv_obj_center(s.todo_count);
-    s.todo_text = Label(row, "", Body());
-    lv_obj_set_width(s.todo_text, 360);
-    lv_label_set_long_mode(s.todo_text, LV_LABEL_LONG_DOT);
+    s.todo_text = Label(row, "", Body(), false, 360);
     lv_obj_align(s.todo_text, LV_ALIGN_LEFT_MID, 70, -2);
     s.todo_more = Label(row, "", Small());
     lv_obj_align(s.todo_more, LV_ALIGN_RIGHT_MID, -44, -2);
@@ -582,9 +578,7 @@ void BuildTodoList(lv_obj_t* root) {
         lv_obj_align(box, LV_ALIGN_LEFT_MID, 4, 0);
         lv_obj_set_style_border_width(box, 2, 0);
         lv_obj_set_style_border_color(box, lv_color_black(), 0);
-        s.todo_labels[i] = Label(row, "", Body());
-        lv_obj_set_width(s.todo_labels[i], kWidth - 50);
-        lv_label_set_long_mode(s.todo_labels[i], LV_LABEL_LONG_DOT);
+        s.todo_labels[i] = Label(row, "", Body(), false, kWidth - 50);
         lv_obj_align(s.todo_labels[i], LV_ALIGN_LEFT_MID, 42, 0);
         s.todo_rows[i] = row;
     }
@@ -639,9 +633,7 @@ void DrawShelfIcon(lv_event_t* e) {
     Line(layer, x(30), y(200), x(210), y(200), 5, white, true);
 }
 void BuildAppName(lv_obj_t* cell, const AppEntry& entry, int style) {
-    auto* name = Label(cell, Home_AppLabel(entry), Small());
-    lv_obj_set_width(name, kCellW - 24);
-    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    auto* name = Label(cell, Home_AppLabel(entry), Small(), false, kCellW - 24);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
     if (style == HomeScreen::kCardStyleGray) {
         // Text on a dot pattern is unreadable; give the name a plain backing.
