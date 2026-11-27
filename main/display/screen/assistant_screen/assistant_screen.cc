@@ -108,9 +108,10 @@ struct PanelState {
     lv_obj_t* shadow = nullptr;
     lv_obj_t* head_bar = nullptr;
     lv_obj_t* sub = nullptr;
+    lv_obj_t* tts_btn = nullptr;
+    lv_obj_t* tts_icon = nullptr;
     lv_obj_t* full_btn = nullptr;
     lv_obj_t* full_icon = nullptr;
-    lv_obj_t* full_label = nullptr;
     lv_obj_t* mask = nullptr;
     lv_obj_t* container = nullptr;
     lv_obj_t* page_hit = nullptr;
@@ -496,7 +497,7 @@ void ValetLine(lv_layer_t* layer, int x1, int y1, int x2, int y2, int width, boo
     lv_draw_line(layer, &line);
 }
 // Icons on the design's 24-unit grid; the UI font pack has no symbol glyphs.
-enum ValetIcon : intptr_t { kIconBack, kIconPrev, kIconNext, kIconCamera, kIconWave, kIconMic, kIconMicOff, kIconEnd, kIconExpand, kIconShrink, kIconWhite = 0x100 };
+enum ValetIcon : intptr_t { kIconBack, kIconPrev, kIconNext, kIconCamera, kIconWave, kIconMic, kIconMicOff, kIconEnd, kIconExpand, kIconShrink, kIconSpeaker, kIconSpeakerMute, kIconWhite = 0x100 };
 void DrawValetIcon(lv_event_t* e) {
     auto* layer = lv_event_get_layer(e);
     lv_area_t a;
@@ -536,12 +537,30 @@ void DrawValetIcon(lv_event_t* e) {
             break;
         case kIconEnd: L(60, 60, 180, 180); L(180, 60, 60, 180); break;
         case kIconExpand:
-            L(135, 45, 195, 45); L(195, 45, 195, 105); L(195, 45, 132, 108);
-            L(105, 195, 45, 195); L(45, 195, 45, 135); L(45, 195, 108, 132);
+            // 四个方向向外伸展的四角箭头
+            L(40, 40, 92, 40); L(40, 40, 40, 92); L(40, 40, 96, 96);
+            L(200, 40, 148, 40); L(200, 40, 200, 92); L(200, 40, 144, 96);
+            L(40, 200, 92, 200); L(40, 200, 40, 148); L(40, 200, 96, 144);
+            L(200, 200, 148, 200); L(200, 200, 200, 148); L(200, 200, 144, 144);
             break;
         case kIconShrink:
-            L(132, 48, 132, 108); L(132, 108, 192, 108); L(195, 45, 132, 108);
-            L(48, 132, 108, 132); L(108, 132, 108, 192); L(45, 195, 108, 132);
+            // 对角线向内收缩的箭头
+            L(44, 96, 96, 96); L(96, 44, 96, 96); L(36, 36, 96, 96);
+            L(196, 96, 144, 96); L(144, 44, 144, 96); L(204, 36, 144, 96);
+            L(44, 144, 96, 144); L(96, 196, 96, 144); L(36, 204, 96, 144);
+            L(196, 144, 144, 144); L(144, 196, 144, 144); L(204, 204, 144, 144);
+            break;
+        case kIconSpeaker:
+        case kIconSpeakerMute:
+            L(36, 90, 36, 150); L(36, 90, 72, 90); L(36, 150, 72, 150);
+            L(72, 90, 122, 46); L(72, 150, 122, 194); L(122, 46, 122, 194);
+            if ((data & 0xFF) == kIconSpeaker) {
+                Arc(126, 120, 36, 315, 45);
+                Arc(126, 120, 68, 315, 45);
+            } else {
+                L(152, 94, 204, 146);
+                L(204, 94, 152, 146);
+            }
             break;
     }
 }
@@ -830,33 +849,46 @@ void BuildPanelHead(lv_obj_t* scr, bool live) {
     lv_label_set_text(sub, PanelSubtitle().c_str());
     lv_obj_set_style_text_font(sub, ValetSmall(), 0);
     lv_obj_set_style_text_color(sub, lv_color_white(), 0);
-    lv_obj_set_width(sub, LV_HOR_RES - kValetSide - 236 - lv_obj_get_width(title) - 24);
+    const int right_buttons_w = live ? 160 : 236;
+    lv_obj_set_width(sub, LV_HOR_RES - kValetSide - right_buttons_w - lv_obj_get_width(title) - 24);
     lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
     lv_obj_set_height(sub, ValetSmall()->line_height);   // 只占一行：放不下就以「…」收尾，不折行
     lv_obj_align(sub, LV_ALIGN_LEFT_MID, kValetSide + lv_obj_get_width(title) + 24, 2);
     s_panel.sub = sub;
-    // 右边：放大/缩小按钮（在阅读页上原地拉满全屏或缩回半屏）和 ✕（直接收起回到当前书页）
-    auto* full = ValetBox(bar, LV_HOR_RES - 236, 0, 136, kPanelBarH);
-    lv_obj_set_flex_flow(full, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(full, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(full, 8, 0);
+    // 右边纯图标按钮：静音切换（持久化到 NVS）、四角全屏伸展 / 对角半屏收缩、✕ 关闭
+    if (!live) {
+        auto* tts = ValetBox(bar, LV_HOR_RES - 236, 0, 76, kPanelBarH);
+        lv_obj_add_flag(tts, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(tts);
+        auto* tts_icon = ValetIconBox(tts, (chat_cloud::LocalTtsEnabled() ? kIconSpeaker : kIconSpeakerMute) | kIconWhite, 32);
+        lv_obj_center(tts_icon);
+        lv_obj_clear_flag(tts_icon, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(tts, [](lv_event_t*) {
+            const bool next = !chat_cloud::LocalTtsEnabled();
+            chat_cloud::SetLocalTtsImmediate(next);
+            if (s_panel.tts_icon && lv_obj_is_valid(s_panel.tts_icon)) {
+                lv_obj_remove_event_cb(s_panel.tts_icon, DrawValetIcon);
+                lv_obj_add_event_cb(s_panel.tts_icon, DrawValetIcon, LV_EVENT_DRAW_MAIN,
+                                    reinterpret_cast<void*>((next ? kIconSpeaker : kIconSpeakerMute) | kIconWhite));
+                lv_obj_invalidate(s_panel.tts_icon);
+            }
+            Application::GetInstance().Schedule([next]() { Application::GetInstance().SetLocalChatTtsEnabled(next); });
+        }, LV_EVENT_CLICKED, nullptr);
+        s_panel.tts_btn = tts;
+        s_panel.tts_icon = tts_icon;
+    }
+    auto* full = ValetBox(bar, LV_HOR_RES - 160, 0, 76, kPanelBarH);
     lv_obj_add_flag(full, LV_OBJ_FLAG_CLICKABLE);
     HapticAttachClick(full);
-    auto* full_icon = ValetIconBox(full, (s_panel.full ? kIconShrink : kIconExpand) | kIconWhite, 28);
+    auto* full_icon = ValetIconBox(full, (s_panel.full ? kIconShrink : kIconExpand) | kIconWhite, 30);
+    lv_obj_center(full_icon);
     lv_obj_clear_flag(full_icon, LV_OBJ_FLAG_CLICKABLE);
-    auto* full_label = lv_label_create(full);
-    lv_label_set_text(full_label, s_panel.full ? ValetText("半屏", "Half") : ValetText("全屏", "Full"));
-    lv_obj_set_style_text_font(full_label, ValetSmall(), 0);
-    lv_obj_set_style_text_color(full_label, lv_color_white(), 0);
-    lv_obj_set_style_text_decor(full_label, LV_TEXT_DECOR_UNDERLINE, 0);
-    lv_obj_clear_flag(full_label, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(full, [](lv_event_t*) {
         if (!ScreenLvAsync([](void*) { AssistantScreen::PanelFullScreen(); })) ScreenShowToast(ValetText("操作繁忙，请重试", "Busy. Try again."));
     }, LV_EVENT_CLICKED, nullptr);
     s_panel.full_btn = full;
     s_panel.full_icon = full_icon;
-    s_panel.full_label = full_label;
-    auto* close = ValetBox(bar, LV_HOR_RES - 100, 0, 100, kPanelBarH);
+    auto* close = ValetBox(bar, LV_HOR_RES - 84, 0, 84, kPanelBarH);
     lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
     HapticAttachClick(close);
     lv_obj_center(ValetIconBox(close, kIconEnd | kIconWhite, 30));
@@ -960,9 +992,6 @@ void AssistantScreen::PanelFullScreen() {
     }
     if (s_panel.head_bar && lv_obj_is_valid(s_panel.head_bar)) {
         lv_obj_set_pos(s_panel.head_bar, 0, s_panel.full ? 0 : kPanelShadowH);
-    }
-    if (s_panel.full_label && lv_obj_is_valid(s_panel.full_label)) {
-        lv_label_set_text(s_panel.full_label, s_panel.full ? ValetText("半屏", "Half") : ValetText("全屏", "Full"));
     }
     if (s_panel.full_icon && lv_obj_is_valid(s_panel.full_icon)) {
         lv_obj_remove_event_cb(s_panel.full_icon, DrawValetIcon);

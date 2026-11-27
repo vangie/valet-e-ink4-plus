@@ -50,6 +50,7 @@ public:
     void SendStartListening(ListeningMode mode) override;
     void SendStopListening() override;
     void SendAbortSpeaking(AbortReason reason) override;
+    void CancelSpeechPlayback();
     void SendMcpMessage(const std::string&) override {}
 private:
     bool SendText(const std::string&) override;

@@ -2407,11 +2407,15 @@ void Application::SetDeviceState(DeviceState state) {
 
 void Application::SetLocalChatTtsEnabled(bool enabled) {
     chat_cloud::SaveLocalTtsEnabled(enabled);
-    if (chat_cloud::IsCustom() && !ValetProtocol::Live() && !enabled && protocol_) protocol_->SendAbortSpeaking(kAbortReasonNone);
-    if ((chat_cloud::UsesXiaozhiProtocol() || (chat_cloud::IsCustom() && !ValetProtocol::Live())) && !enabled && audio_running_) {
-        audio_service_.ResetDecoder();
-        if (device_state_ == kDeviceStateSpeaking) {
-            SetDeviceState(kDeviceStateIdle);
+    if (!enabled) {
+        if (chat_cloud::IsCustom() && !ValetProtocol::Live() && protocol_) {
+            static_cast<ValetProtocol*>(protocol_.get())->CancelSpeechPlayback();
+        }
+        if ((!chat_cloud::IsCustom() || !ValetProtocol::Live()) && audio_running_) {
+            audio_service_.ResetDecoder();
+            if (device_state_ == kDeviceStateSpeaking) {
+                SetDeviceState(kDeviceStateIdle);
+            }
         }
     }
 }

@@ -25,6 +25,12 @@ inline std::atomic<Provider> active{kDefaultProvider};   // 正在用的；换�
 inline std::atomic<bool> local_tts{true};
 }  // namespace detail
 
+inline const char* TtsKey(Provider provider) {
+    return provider == Provider::Custom ? "agent_tts"
+         : provider == Provider::Yunxin ? "yx_tts"
+         : provider == Provider::Xiaozhi ? "xz_tts" : "bw_tts";
+}
+
 // Call once on the internal-RAM startup task, before UI/network workers exist.
 // NVS reads also disable Flash caches; never lazily load from a UI accessor.
 inline void InitializeFromNvs() {
@@ -35,7 +41,7 @@ inline void InitializeFromNvs() {
         ? static_cast<Provider>(stored) : kDefaultProvider;
     detail::active.store(provider, std::memory_order_release);
     detail::saved.store(provider, std::memory_order_release);
-    detail::local_tts.store(settings.GetBool(provider == Provider::Custom ? "agent_tts" : provider == Provider::Yunxin ? "yx_tts" : "xz_tts", true), std::memory_order_release);
+    detail::local_tts.store(settings.GetBool(TtsKey(provider), true), std::memory_order_release);
     const int book = settings.GetInt("book_ask", 0);
     detail::book_ask.store(book >= 0 && book <= 2 ? static_cast<BookAsk>(book) : BookAsk::Follow, std::memory_order_release);
 }
@@ -44,7 +50,7 @@ inline void InitializeFromNvs() {
 // 只在应用的内部 RAM 任务上调（读 NVS），且旧的对话通道已经拆掉之后。
 inline void ActivateProvider(Provider provider) {
     Settings settings("chat_cloud");
-    detail::local_tts.store(settings.GetBool(provider == Provider::Custom ? "agent_tts" : provider == Provider::Yunxin ? "yx_tts" : "xz_tts", true), std::memory_order_release);
+    detail::local_tts.store(settings.GetBool(TtsKey(provider), detail::local_tts.load(std::memory_order_acquire)), std::memory_order_release);
     detail::active.store(provider, std::memory_order_release);
 }
 
@@ -114,13 +120,17 @@ inline bool SaveCustomConfig(const custom_chat::Config& config) {
     return profiles.Upsert(profile) && valet::SaveAssistantProfiles(profiles);
 }
 inline bool LocalTtsEnabled() { return detail::local_tts.load(std::memory_order_acquire); }
-inline bool SpeechPlaybackEnabled() { return IsCustom() ? true : !UsesXiaozhiProtocol() || LocalTtsEnabled(); }
+inline void SetLocalTtsImmediate(bool enabled) { detail::local_tts.store(enabled, std::memory_order_release); }
+inline bool SpeechPlaybackEnabled() { return LocalTtsEnabled(); }
 
-// Internal-RAM task only, just like SaveProvider. Baiwen's preference stays remote.
+// Internal-RAM task only, just like SaveProvider.
 inline void SaveLocalTtsEnabled(bool enabled) {
     {
         Settings settings("chat_cloud", true);
-        settings.SetBool(IsCustom() ? "agent_tts" : IsYunxin() ? "yx_tts" : "xz_tts", enabled);
+        settings.SetBool("bw_tts", enabled);
+        settings.SetBool("agent_tts", enabled);
+        settings.SetBool("yx_tts", enabled);
+        settings.SetBool("xz_tts", enabled);
     }
     detail::local_tts.store(enabled, std::memory_order_release);
 }

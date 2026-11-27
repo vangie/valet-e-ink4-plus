@@ -785,6 +785,17 @@ void ValetProtocol::CreateCall() {
     cJSON_AddStringToObject(params, "sessionKey", session_id_.c_str());
     Send(root);
 }
+void ValetProtocol::CancelSpeechPlayback() {
+    std::lock_guard<std::recursive_mutex> lock(state_mutex_);
+    if (session_live_) return;
+    marks_.clear(); audio_done_ = false; output_started_ = false;
+    Application::GetInstance().GetAudioService().ResetDecoder(); ResyncPlayback();
+    if (speech_active_) {
+        Send(valet::wire::Request("valet-speech-cancel", "valet.speech.cancel"));
+        speech_active_ = false;
+        Event("tts", "stop");
+    }
+}
 void ValetProtocol::SendAbortSpeaking(AbortReason) {
     std::lock_guard<std::recursive_mutex> lock(state_mutex_);
     marks_.clear(); audio_done_ = false; output_started_ = false; tool_call_.clear(); tool_queue_.clear();
