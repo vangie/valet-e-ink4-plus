@@ -35,7 +35,7 @@ function callEntry() {
   return hereProvider() === "agent" && agentReady();
 }
 function onBook() {
-  return state.sessionType === "book" && (state.float || state.provider === "agent");
+  return state.sessionType === "book" && (state.float || state.provider === "agent" || bookProvider() === "baiwen");
 }
 // 当前这一场。带书时每一页各有一条「注」，不带书是单独一场。
 function nowTalk() {
@@ -76,6 +76,8 @@ const V2_ICONS = {
   store: '<path d="M5 8.5h14l-1 12H6zM9 8.5V7a3 3 0 0 1 6 0v1.5"/>',
   sentence: '<path d="M4 6h16M4 12h16M4 18h9"/><path d="M17 16v4h3"/>',
   quest: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6M12 17.2h.01"/>',
+  expand: '<path d="M4 9V4h5M4 4l5.5 5.5M20 9V4h-5M20 4l-5.5 5.5M4 15v5h5M4 20l5.5-5.5M20 15v5h-5M20 20l-5.5-5.5"/>',
+  shrink: '<path d="M4 4l5.5 5.5M9.5 4.5v5h-5M20 4l-5.5 5.5M14.5 4.5v5h5M4 20l5.5-5.5M9.5 19.5v-5h-5M20 20l-5.5-5.5M14.5 19.5v-5h5"/>',
 };
 function ic(name, cls = "") {
   return `<svg class="ic${cls ? " " + cls : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${V2_ICONS[name]}</svg>`;
@@ -302,7 +304,6 @@ function v2SwitchSubject(type) {
 // ── 悬窗：在正文页下方问这一页、聊这一页，书页不动，不用切出去。
 // 回答太长、要看以前的问答、要随口问或拍照时点「全屏」去完整助手页，同一场对话；从那里返回又回到悬窗。
 function v2OpenFloat(live) {
-  // 官方云拿不到正在读的这一页，照旧进完整的百问页；还没连上自己的助手也去完整页（那里有「去连接」）
   // 书里提问用自己的助理但还没连上：去完整页（那里有「去连接」）。用官方云时悬窗照样开，只是没有通话。
   const agent = bookProvider() === "agent";
   if (agent && !agentReady()) return live ? v2GoLive() : go("ai");
@@ -312,6 +313,7 @@ function v2OpenFloat(live) {
   state.sheet = false;
   state.float = true;
   if (!was) {
+    state.floatExpanded = false;
     v2FloatFollowPage();
     state.liveMuted = false;
     log(`在第 ${state.page + 1} 页下方打开悬窗${live ? "，接通" : ""}。书页不动。${state.answered ? "这一页问过，那条注接着显示。" : ""}`);
@@ -332,15 +334,20 @@ function v2CloseFloat(why) {
   nowTalk().p = state.answerPage;
   stopSession();
   state.float = false;
+  state.floatExpanded = false;
   v2.quote = null;
   log(`${why}：收起悬窗，接着读第 ${state.page + 1} 页。${state.answered ? "这一页的注留着。" : ""}`);
   render();
   return true;
 }
-// 悬窗上沿落在两行之间：在 3/4 高附近找书页上一行的下沿，不让悬窗切过半行字。
+// 悬窗上沿落在两行之间：在 3/4 高附近找书页上一行的下沿，不让悬窗切过半行字；全屏时原地拉满整屏。
 function v2SnapFloat() {
   const float = document.querySelector(".v-float"), body = document.querySelector(".v-read .read-body");
   if (!float || !body) return;
+  if (state.floatExpanded) {
+    float.style.height = "100%";
+    return;
+  }
   const read = float.parentElement.getBoundingClientRect();
   // 从选字进来：悬窗上沿落在选中文字下面最近的一行空隙，不盖住问的那几个字。
   // 选得太靠下、剩下不到屏高的 43%（设备上 1212 里的 520 像素）时，才允许盖住一部分。
@@ -381,21 +388,26 @@ function v2SnapFloatSoon() {
   requestAnimationFrame(v2SnapFloat);          // 排版落定后再量一次
   document.fonts?.ready.then(v2SnapFloat);     // 宋体加载完行高会变
 }
-function v2ExpandFloat() {
-  nowTalk().p = state.answerPage;
-  const live = state.live, muted = state.liveMuted;
-  state.float = false;
-  go("ai");                 // 同一场：这一页的注、正在进行的通话都带过去
-  state.liveMuted = muted;
-  state.floatExpanded = true;
-  log(`全屏：换到完整的助手页。${live ? "通话没断。" : ""}返回会回到第 ${state.page + 1} 页的悬窗。`);
+function v2ExpandFloat(forceFull) {
+  const next = typeof forceFull === "boolean" ? forceFull : !state.floatExpanded;
+  state.floatExpanded = next;
+  log(next ? `放大全屏：原地展开看全部内容，底层第 ${state.page + 1} 页不卸载。` : `缩回半屏：露出上方第 ${state.page + 1} 页正文。`);
+  render();
+}
+function v2ToggleTts() {
+  state.tts = !state.tts;
+  if (!state.tts && state.speaking && !state.live) {
+    cancel("reply");
+    state.speaking = false;
+  }
+  log(state.tts ? "回答出声：已开启（保持生效）。" : "回答静音：已关闭朗读（保持生效，下次查词/提问也不出声）。");
   render();
 }
 function v2FloatBody(s) {
   if (state.live) return v2LiveBody();
   if (state.listening) return `<div class="v-listen">${ic("mic")}<b>${L("在听", "Listening")}</b><span>${L("松开就发出去", "Release to send")}</span></div>`;
   if (s.a.length) {
-    const long = s.a.length > 2
+    const long = !state.floatExpanded && s.a.length > 2
       ? `<button class="v-float-more" data-float-expand>${L("回答较长 · 全屏看全部", "Long answer · full screen")}${ic("go")}</button>` : "";
     return `${v2Answer(s)}${long}`;
   }
@@ -417,9 +429,9 @@ function v2Float() {
       <button class="tolive" data-mode="ask">${ic("x")}${L("挂断", "End")}</button></div>`
     : `<div class="v-talk${state.listening ? " rec" : ""}"><i></i><span data-hold>${state.listening ? L("松开发送", "Release to send") : L("按住说话", "Hold to talk")}</span>
       ${callEntry() ? `<button class="tolive" data-live>${ic("wave")}${L("通话", "Call")}</button>` : ""}</div>`;
-  return `<div class="v-float">
+  return `<div class="v-float${state.floatExpanded ? " is-full" : ""}">
     <div class="v-float-head"><b>${state.live ? L("聊这一页", "Talking about it") : v2.quote ? L("问 AI", "Ask AI") : L("问这一页", "Ask this page")}</b><span>${v2.quote && !state.live ? `「${glyphs(esc([...v2.quote.text].length > 6 ? [...v2.quote.text].slice(0, 6).join("") + "…" : v2.quote.text))}」` : L(`第 ${state.page + 1} 页`, `p.${state.page + 1}`)} · ${esc(hereProvider() === "agent" ? v2Who() : `${PROVIDERS[hereProvider()]}AI`)}</span>
-      <button class="v-txt" data-float-expand>${L("全屏", "Full screen")}</button><button class="v-float-x" data-float-close aria-label="${L("收起", "Close")}">${ic("x")}</button></div>
+      <button class="v-float-x" data-float-tts aria-label="${state.tts ? L("静音", "Mute") : L("开启朗读", "Unmute")}">${ic(state.tts ? "speaker" : "mute")}</button><button class="v-float-x" data-float-toggle aria-label="${state.floatExpanded ? L("半屏", "Half screen") : L("全屏", "Full screen")}">${ic(state.floatExpanded ? "shrink" : "expand")}</button><button class="v-float-x" data-float-close aria-label="${L("收起", "Close")}">${ic("x")}</button></div>
     <div class="v-float-body">${v2FloatBody(s)}</div>${pager}${foot}</div>`;
 }
 function v2Ask() {
@@ -1313,7 +1325,9 @@ panel.addEventListener("click", (e) => {
   if (hit("[data-back]")) return back();
   if ((el = hit("[data-setting]"))) return openSetting(el.dataset.setting);
   if (hit("[data-float-close]")) return void v2CloseFloat("点了 ✕");
-  if (hit("[data-float-expand]")) return v2ExpandFloat();
+  if (hit("[data-float-toggle]")) return v2ExpandFloat();
+  if (hit("[data-float-expand]")) return v2ExpandFloat(true);
+  if (hit("[data-float-tts]")) return v2ToggleTts();
   if (hit("[data-ask]")) return v2Ask();
   if (hit("[data-live]")) return state.float ? v2OpenFloat(true) : v2GoLive();
   if ((el = hit("[data-subject]"))) return v2SwitchSubject(el.dataset.subject);
@@ -1644,12 +1658,23 @@ function v2QuoteSugs(q) {
 let selTimer = null, selFired = false;
 panel.addEventListener("pointerdown", (e) => {
   selFired = false;   // 只吞掉长按松手后紧跟的那一下点按
-  // 拖把手：一头固定，另一头跟着手指
+  // 拖把手：一头固定，另一头跟着手指（按离上圆点或下圆点更近来选哪一头，单字选区也不怕两个热区重叠）
   const hdl = isV2() && v2.sel && e.target.closest("[data-hdl]");
   if (hdl) {
     e.preventDefault();
     const sel = v2.sel;
-    v2.drag = { para: sel.para, a: sel.start, b: sel.end, which: hdl.dataset.hdl };
+    let which = hdl.dataset.hdl;
+    const sh = panel.querySelector('.read-body [data-hdl="s"]');
+    const eh = panel.querySelector('.read-body [data-hdl="e"]');
+    if (sh && eh) {
+      const sr = sh.getBoundingClientRect(), er = eh.getBoundingClientRect();
+      const sx = (sr.left + sr.right) / 2, sy = sr.top + sr.height * 0.45;
+      const ex = (er.left + er.right) / 2, ey = er.top + er.height * 0.55;
+      const ds = (e.clientX - sx) ** 2 + (e.clientY - sy) ** 2;
+      const de = (e.clientX - ex) ** 2 + (e.clientY - ey) ** 2;
+      which = ds <= de ? "s" : "e";
+    }
+    v2.drag = { para: sel.para, a: sel.start, b: sel.end, which };
     try { panel.setPointerCapture(e.pointerId); } catch {}
     return render();
   }

@@ -506,17 +506,19 @@ div.v-row { box-sizing: border-box; }
 /* 网络页多了顶部的状态卡：间距收一点，4G 那一版（状态卡、上网方式、选卡、两行入口、断网时间）一屏放得下。 */
 .v-pane.is-tight { gap: 7px; }
 
-/* 悬窗：正文页下方问这一页、聊这一页，占 3/4 屏（上沿对齐到两行之间，见 v2SnapFloat）。书页留在上面，只刷这一块。外形沿用提问页：页底同一条胶囊，通话是同一个斜切。 */
+/* 悬窗：正文页下方问这一页、聊这一页，占 3/4 屏（上沿对齐到两行之间，见 v2SnapFloat）；全屏时原地拉满整屏，不卸载底层书页。 */
 .v-float { position: absolute; left: 0; right: 0; bottom: 0; height: 75%; background: var(--paper); display: flex; flex-direction: column; z-index: 3; }
+.v-float.is-full { top: 0; height: 100% !important; }
+.v-float.is-full::before { display: none; }
 /* 和书页分开：上沿外面一条抖点阴影（墨水屏只有黑白和抖点），标题栏整条黑底 */
 .v-float::before { content: ""; position: absolute; left: 0; right: 0; top: -5px; height: 5px; background-image: radial-gradient(var(--ink) 0.55px, transparent 0.75px); background-size: 2px 2px; }
-.v-float-head { flex: none; height: 32px; padding: 0 6px 0 14px; background: var(--ink); color: var(--paper); display: flex; align-items: center; gap: 6px; }
+.v-float-head { flex: none; height: 32px; padding: 0 4px 0 14px; background: var(--ink); color: var(--paper); display: flex; align-items: center; gap: 4px; }
 .v-float-head b { font-size: 11.5px; font-weight: 600; letter-spacing: 1px; }
 .v-float-head span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; }
 .v-float-head .v-txt { padding: 6px 4px; color: var(--paper); }
 .v-float-head .v-float-x { color: var(--paper); }
-.v-float-x { width: 26px; height: 26px; padding: 0; border: 0; background: none; display: grid; place-items: center; }
-.v-float-x .ic { width: 12px; height: 12px; }
+.v-float-x { width: 28px; height: 28px; padding: 0; border: 0; background: none; display: grid; place-items: center; }
+.v-float-x .ic { width: 13px; height: 13px; }
 .v-float-body { flex: 1; min-height: 0; overflow: hidden; padding: 10px 14px 4px; display: flex; flex-direction: column; }
 .v-float-body .v-live { height: auto; flex: 1; }
 .v-float-tip { margin: 0; font-size: 10.8px; line-height: 1.6; color: var(--g1); }
@@ -655,16 +657,18 @@ div.v-row { box-sizing: border-box; }
 .v-pop-arrow { position: absolute; bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: var(--ink); transform: rotate(45deg); }
 .v-selpop.below .v-pop-arrow { bottom: auto; top: -5px; }
 /* 选中范围两头的把手：一根竖线加一个圆点（开头的点在上，结尾的点在下），按住拖动改范围。
-   放在字里面绝对定位，不改排版；透明的宽条是手指按的地方 */
+   放在字里面绝对定位，不改排版；透明的宽条是放大后的手指触控区（开头向上延伸，结尾向下延伸，避免单字重叠） */
 .v-read .read-body { touch-action: none; }
 .v-read .read-body [data-ch].sel { position: relative; }
-.v-hdl { position: absolute; top: -12px; bottom: -14px; width: 22px; z-index: 2; cursor: ew-resize; }
-.v-hdl.s { left: -11px; }
-.v-hdl.e { right: -11px; }
-.v-hdl::before { content: ""; position: absolute; left: 10px; top: 10px; bottom: 10px; width: 2px; background: var(--ink); }
-.v-hdl::after { content: ""; position: absolute; left: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
-.v-hdl.s::after { top: 2px; }
-.v-hdl.e::after { bottom: 2px; }
+.v-hdl { position: absolute; width: 48px; z-index: 2; cursor: ew-resize; }
+.v-hdl.s { left: -24px; top: -32px; bottom: 0; }
+.v-hdl.e { right: -24px; top: 0; bottom: -32px; }
+.v-hdl::before { content: ""; position: absolute; left: 23px; width: 2px; background: var(--ink); }
+.v-hdl.s::before { top: 32px; bottom: 0; }
+.v-hdl.e::before { top: 0; bottom: 32px; }
+.v-hdl::after { content: ""; position: absolute; left: 19px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
+.v-hdl.s::after { top: 23px; }
+.v-hdl.e::after { bottom: 23px; }
 
 /* 书架 · 书库（OPDS 订阅） */
 .v-lib { gap: 8px; }

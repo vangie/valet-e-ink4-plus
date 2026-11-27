@@ -45,6 +45,19 @@ function chin(dir) {
     return render();
   }
   if (s === "reader") {
+    if (state.float && state.floatExpanded && !state.live) {
+      const a = nowTalk().a;
+      if (a.length) {
+        const n = state.answerPage + dir;
+        if (n >= 0 && n < a.length) {
+          state.answerPage = n;
+          flash();
+          return render();
+        }
+      }
+      if (dir < 0) return void v2CloseFloat("上一页");
+      return;
+    }
     if (!state.sheet) return void turnPage(dir);
     if (dir < 0) {
       state.sheet = false;

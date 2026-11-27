@@ -151,15 +151,17 @@ function stopListeningAndSend() {
     return render();
   }
   state.listening = false;
-  state.speaking = true;
+  state.speaking = state.tts;
   state.answered = true;
   state.answerPage = 0;
-  log(`松开发送：「${questionFor()}」`);
+  log(`松开发送：「${questionFor()}」${state.tts ? "" : "（已静音，只显示文字）"}`);
   render();
-  later("reply", 1800, () => {
-    state.speaking = false;
-    render();
-  });
+  if (state.tts) {
+    later("reply", 1800, () => {
+      state.speaking = false;
+      render();
+    });
+  }
 }
 
 function abortSpeaking() {
