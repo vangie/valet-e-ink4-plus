@@ -407,7 +407,6 @@ void StandbyLpTask(void* /*arg*/)
         ESP_LOGI(TAG, "LP phase touch_slp done (asleep=%d)",
                  PowerPolicy::GetInstance().IsTouchAsleep() ? 1 : 0);
         bool key_in_settle = WaitStandbyPaintReady();
-        if (!key_in_settle) key_in_settle = DrainSdAndBootWork();
         if (!key_in_settle) {
             ESP_LOGI(TAG, "LP phase epd_park");
             while (!StandbyScreen::EnterEpdSleep()) {
@@ -416,10 +415,11 @@ void StandbyLpTask(void* /*arg*/)
                     break;
                 }
             }
-            if (!key_in_settle) {
-                ESP_LOGI(TAG, "LP phase lp_loop");
-                RunStandbyLpMainLoop();
-            }
+        }
+        if (!key_in_settle) key_in_settle = DrainSdAndBootWork();
+        if (!key_in_settle) {
+            ESP_LOGI(TAG, "LP phase lp_loop");
+            RunStandbyLpMainLoop();
         } else {
             ESP_LOGI(TAG, "LP phase skip park/loop (key in settle)");
         }

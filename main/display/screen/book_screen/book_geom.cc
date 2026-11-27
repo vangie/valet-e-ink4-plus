@@ -292,14 +292,17 @@ void EndReadingTimeTracking() {
     }
 }
 
-// 进待机：停累计；退出待机由 ResumeReadingTimeAfterStandby 恢复
+// 进待机：只停本地累计并存本地进度，不拉网同步（避免待机落墨和卸卡被网络请求堵在阅读页）
 void PauseReadingTimeForStandby() {
     StopReaderAutoTurn();
     auto& st = Book_State();
     if (!st.reader.session || !st.reader.session->IsReadingClockActive()) {
         return;
     }
-    EndReadingTimeTracking();
+    StopReadTimeCheckpointTimer();
+    if (!st.reader.opening.load() && st.reader.session->IsOpen()) {
+        st.reader.session->StopReadingClock();
+    }
     st.reader.session->SaveProgress();
     st.reader.reading_paused_by_standby = true;
     ESP_LOGI(TAG, "read-time paused for standby");
