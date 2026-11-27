@@ -97,8 +97,24 @@ bool Assistant_OnVkKey(const char* key) {
 namespace {
 // 悬窗交给全屏（或全屏回到悬窗）时：旧的一面离开不停语音，新的一面进来接着用同一条连接，通话不断。
 bool s_keep_voice = false;
-// 悬窗：阅读页（host）上从 top 到底的一块，画的是同一个助手页。
-struct PanelState { lv_obj_t* host = nullptr; lv_obj_t* root = nullptr; lv_coord_t top = 0; lv_obj_t* sub = nullptr; lv_obj_t* mask = nullptr; } s_panel;
+bool s_panel_reopening = false;
+// 悬窗：阅读页（host）上从 top 到底的一块，画的是同一个助手页；full=true 时原地拉满全屏，不卸载阅读页。
+struct PanelState {
+    lv_obj_t* host = nullptr;
+    lv_obj_t* root = nullptr;
+    lv_coord_t top = 0;
+    lv_coord_t trim_from = 0;
+    bool full = false;
+    lv_obj_t* shadow = nullptr;
+    lv_obj_t* head_bar = nullptr;
+    lv_obj_t* sub = nullptr;
+    lv_obj_t* full_btn = nullptr;
+    lv_obj_t* full_icon = nullptr;
+    lv_obj_t* full_label = nullptr;
+    lv_obj_t* mask = nullptr;
+    lv_obj_t* container = nullptr;
+    lv_obj_t* page_hit = nullptr;
+} s_panel;
 // 从悬窗点了「全屏」：全屏页返回书页时，悬窗接着开（同一场对话，通话不断）
 bool s_panel_return = false;
 lv_timer_t* s_panel_return_timer = nullptr;
@@ -399,10 +415,19 @@ void SwitchTalkMode(bool live) {
         if (!AssistantScreen::IsActive() || ValetProtocol::Live() == next) return;
         s_panel_return = false;
         if (Assistant_State().chrome.panel && s_panel.root) {
-            // 悬窗里换通话 / 挂断：重画悬窗，书页不动
-            auto* host = s_panel.host; const auto top = s_panel.top;
+            // 悬窗里换通话 / 挂断：重画悬窗，书页不动，保留全屏/半屏状态与选字引用
+            auto* host = s_panel.host;
+            const auto top = s_panel.top, trim = s_panel.trim_from;
+            const bool full = s_panel.full;
+            const auto quote = valet::CurrentReadingQuote();
+            s_keep_voice = true;
+            s_panel_reopening = true;
             AssistantScreen::ClosePanel();
+            s_panel_reopening = false;
+            if (quote.Valid()) valet::SetReadingQuote(quote);
             AssistantScreen::OpenPanel(host, top, next);
+            if (full) AssistantScreen::PanelFullScreen();
+            else if (trim > 0) AssistantScreen::PanelTrimAbove(trim);
             s_talk_mode_switched_at = esp_timer_get_time();
             return;
         }
@@ -471,7 +496,7 @@ void ValetLine(lv_layer_t* layer, int x1, int y1, int x2, int y2, int width, boo
     lv_draw_line(layer, &line);
 }
 // Icons on the design's 24-unit grid; the UI font pack has no symbol glyphs.
-enum ValetIcon : intptr_t { kIconBack, kIconPrev, kIconNext, kIconCamera, kIconWave, kIconMic, kIconMicOff, kIconEnd, kIconWhite = 0x100 };
+enum ValetIcon : intptr_t { kIconBack, kIconPrev, kIconNext, kIconCamera, kIconWave, kIconMic, kIconMicOff, kIconEnd, kIconExpand, kIconShrink, kIconWhite = 0x100 };
 void DrawValetIcon(lv_event_t* e) {
     auto* layer = lv_event_get_layer(e);
     lv_area_t a;
@@ -510,6 +535,14 @@ void DrawValetIcon(lv_event_t* e) {
             if ((data & 0xFF) == kIconMicOff) L(40, 30, 200, 210);
             break;
         case kIconEnd: L(60, 60, 180, 180); L(180, 60, 60, 180); break;
+        case kIconExpand:
+            L(135, 45, 195, 45); L(195, 45, 195, 105); L(195, 45, 132, 108);
+            L(105, 195, 45, 195); L(45, 195, 45, 135); L(45, 195, 108, 132);
+            break;
+        case kIconShrink:
+            L(132, 48, 132, 108); L(132, 108, 192, 108); L(195, 45, 132, 108);
+            L(48, 132, 108, 132); L(108, 132, 108, 192); L(45, 195, 108, 132);
+            break;
     }
 }
 lv_obj_t* ValetIconBox(lv_obj_t* parent, intptr_t icon, int size) {
@@ -746,6 +779,7 @@ const char* PanelTitle(bool live, bool listening) {
 }
 void (*s_panel_closed_hook)() = nullptr;
 void NotifyPanelClosed() {
+    if (s_panel_reopening) return;
     valet::ClearReadingQuote();
     if (auto* hook = s_panel_closed_hook) hook();
 }
@@ -778,10 +812,13 @@ void BuildPanelHead(lv_obj_t* scr, bool live) {
         lv_image_set_src(shadow, &dither);
         lv_obj_set_pos(shadow, 0, 0);
         lv_obj_clear_flag(shadow, LV_OBJ_FLAG_CLICKABLE);
+        if (s_panel.full) lv_obj_add_flag(shadow, LV_OBJ_FLAG_HIDDEN);
+        s_panel.shadow = shadow;
     }
-    auto* bar = ValetBox(scr, 0, kPanelShadowH, LV_HOR_RES, kPanelBarH);
+    auto* bar = ValetBox(scr, 0, s_panel.full ? 0 : kPanelShadowH, LV_HOR_RES, kPanelBarH);
     lv_obj_set_style_bg_color(bar, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    s_panel.head_bar = bar;
     auto* title = lv_label_create(bar);
     lv_label_set_text(title, PanelTitle(live, false));
     lv_obj_set_style_text_font(title, ValetStrong(), 0);
@@ -793,24 +830,32 @@ void BuildPanelHead(lv_obj_t* scr, bool live) {
     lv_label_set_text(sub, PanelSubtitle().c_str());
     lv_obj_set_style_text_font(sub, ValetSmall(), 0);
     lv_obj_set_style_text_color(sub, lv_color_white(), 0);
-    lv_obj_set_width(sub, LV_HOR_RES - kValetSide - 230 - lv_obj_get_width(title) - 24);
+    lv_obj_set_width(sub, LV_HOR_RES - kValetSide - 236 - lv_obj_get_width(title) - 24);
     lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
     lv_obj_set_height(sub, ValetSmall()->line_height);   // 只占一行：放不下就以「…」收尾，不折行
     lv_obj_align(sub, LV_ALIGN_LEFT_MID, kValetSide + lv_obj_get_width(title) + 24, 2);
     s_panel.sub = sub;
-    // 右边：「全屏」（换到完整的助手页，同一场对话）和 ✕（收起）
-    auto* full = ValetBox(bar, LV_HOR_RES - 230, 0, 130, kPanelBarH);
+    // 右边：放大/缩小按钮（在阅读页上原地拉满全屏或缩回半屏）和 ✕（直接收起回到当前书页）
+    auto* full = ValetBox(bar, LV_HOR_RES - 236, 0, 136, kPanelBarH);
+    lv_obj_set_flex_flow(full, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(full, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(full, 8, 0);
     lv_obj_add_flag(full, LV_OBJ_FLAG_CLICKABLE);
     HapticAttachClick(full);
+    auto* full_icon = ValetIconBox(full, (s_panel.full ? kIconShrink : kIconExpand) | kIconWhite, 28);
+    lv_obj_clear_flag(full_icon, LV_OBJ_FLAG_CLICKABLE);
     auto* full_label = lv_label_create(full);
-    lv_label_set_text(full_label, ValetText("全屏", "Full screen"));
+    lv_label_set_text(full_label, s_panel.full ? ValetText("半屏", "Half") : ValetText("全屏", "Full"));
     lv_obj_set_style_text_font(full_label, ValetSmall(), 0);
     lv_obj_set_style_text_color(full_label, lv_color_white(), 0);
     lv_obj_set_style_text_decor(full_label, LV_TEXT_DECOR_UNDERLINE, 0);
-    lv_obj_center(full_label);
+    lv_obj_clear_flag(full_label, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(full, [](lv_event_t*) {
         if (!ScreenLvAsync([](void*) { AssistantScreen::PanelFullScreen(); })) ScreenShowToast(ValetText("操作繁忙，请重试", "Busy. Try again."));
     }, LV_EVENT_CLICKED, nullptr);
+    s_panel.full_btn = full;
+    s_panel.full_icon = full_icon;
+    s_panel.full_label = full_label;
     auto* close = ValetBox(bar, LV_HOR_RES - 100, 0, 100, kPanelBarH);
     lv_obj_add_flag(close, LV_OBJ_FLAG_CLICKABLE);
     HapticAttachClick(close);
@@ -821,10 +866,12 @@ void BuildPanelHead(lv_obj_t* scr, bool live) {
 }
 
 bool AssistantScreen::PanelOpen() { return s_panel.root != nullptr; }
+bool AssistantScreen::PanelFull() { return s_panel.root != nullptr && s_panel.full; }
 lv_coord_t AssistantScreen::PanelTop() { return s_panel.top; }
 void AssistantScreen::PanelTrimAbove(lv_coord_t from) {
     if (!s_panel.root) return;
-    const lv_coord_t h = s_panel.top - from;
+    s_panel.trim_from = from;
+    const lv_coord_t h = s_panel.full ? 0 : (s_panel.top - from);
     if (h <= 0) {
         if (s_panel.mask && lv_obj_is_valid(s_panel.mask)) lv_obj_add_flag(s_panel.mask, LV_OBJ_FLAG_HIDDEN);
         return;
@@ -848,7 +895,7 @@ void Assistant_PanelListening(bool listening) {
     if (s_panel.sub && lv_obj_is_valid(s_panel.sub)) {
         lv_obj_update_layout(title);
         lv_obj_align(s_panel.sub, LV_ALIGN_LEFT_MID, kValetSide + lv_obj_get_width(title) + 24, 2);
-        lv_obj_set_width(s_panel.sub, LV_HOR_RES - kValetSide - 230 - lv_obj_get_width(title) - 24);
+        lv_obj_set_width(s_panel.sub, LV_HOR_RES - kValetSide - 236 - lv_obj_get_width(title) - 24);
     }
 }
 
@@ -858,6 +905,8 @@ bool AssistantScreen::OpenPanel(lv_obj_t* host, lv_coord_t top, bool live) {
     if (!valet::SelectBookContext()) { ScreenShowToast(ValetText("当前页没有可提问的正文，请等待页面加载", "This page has no text to ask about yet")); return false; }
     if (live && !chat_cloud::HasCallEntry()) { ScreenShowToast(ValetText("这个助理还没配置通话", "This assistant has no Call set up")); return false; }
     ValetProtocol::SetLive(live);
+    s_panel.full = false;
+    s_panel.trim_from = top;
     // 书页（host）离开时先收起悬窗：不等它跟着书页一起被删
     lv_obj_remove_event_cb(host, AssistantScreen_PanelHostUnload);
     lv_obj_add_event_cb(host, AssistantScreen_PanelHostUnload, LV_EVENT_SCREEN_UNLOAD_START, nullptr);
@@ -865,8 +914,6 @@ bool AssistantScreen::OpenPanel(lv_obj_t* host, lv_coord_t top, bool live) {
     s_panel.host = host; s_panel.root = root; s_panel.top = top;
     lv_obj_add_event_cb(root, [](lv_event_t* e) {
         if (lv_event_get_target(e) != s_panel.root) return;
-        const auto sub = s_panel.sub;
-        (void)sub;
         s_panel = {};
         Assistant_Leave();
         NotifyPanelClosed();
@@ -900,12 +947,108 @@ void AssistantScreen::PanelPageChanged() {
 }
 
 void AssistantScreen::PanelFullScreen() {
-    if (!s_panel.root) return;
-    // 交给全屏页：同一场对话，语音不停（通话不断）；全屏页返回时悬窗接着开
-    s_keep_voice = true;
-    s_panel_return = true;
-    ClosePanel();
-    ScreenNavigateTo(AssistantScreen::Create);
+    if (!s_panel.root || !lv_obj_is_valid(s_panel.root)) return;
+    s_panel.full = !s_panel.full;
+    const lv_coord_t eff_top = s_panel.full ? 0 : s_panel.top;
+    const lv_coord_t view_h = LV_VER_RES - eff_top;
+    lv_obj_set_pos(s_panel.root, 0, eff_top);
+    lv_obj_set_size(s_panel.root, LV_HOR_RES, view_h);
+    lv_obj_move_foreground(s_panel.root);
+    if (s_panel.shadow && lv_obj_is_valid(s_panel.shadow)) {
+        if (s_panel.full) lv_obj_add_flag(s_panel.shadow, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(s_panel.shadow, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_panel.head_bar && lv_obj_is_valid(s_panel.head_bar)) {
+        lv_obj_set_pos(s_panel.head_bar, 0, s_panel.full ? 0 : kPanelShadowH);
+    }
+    if (s_panel.full_label && lv_obj_is_valid(s_panel.full_label)) {
+        lv_label_set_text(s_panel.full_label, s_panel.full ? ValetText("半屏", "Half") : ValetText("全屏", "Full"));
+    }
+    if (s_panel.full_icon && lv_obj_is_valid(s_panel.full_icon)) {
+        lv_obj_remove_event_cb(s_panel.full_icon, DrawValetIcon);
+        lv_obj_add_event_cb(s_panel.full_icon, DrawValetIcon, LV_EVENT_DRAW_MAIN,
+                            reinterpret_cast<void*>((s_panel.full ? kIconShrink : kIconExpand) | kIconWhite));
+        lv_obj_invalidate(s_panel.full_icon);
+    }
+    PanelTrimAbove(s_panel.trim_from);
+    lv_coord_t header_h = s_panel.full ? kPanelBarH : kPanelHeadH;
+    if (s_live.row && lv_obj_is_valid(s_live.row)) {
+        lv_obj_set_pos(s_live.row, 0, header_h);
+        header_h += kLiveRowH;
+    }
+    Assistant_State().chrome.valet_body_top = header_h;
+    const lv_coord_t body_h = view_h - header_h - kFooterH - kPageIndicatorH;
+    const lv_font_t* ui_font = Assistant_UiFont();
+    if (s_panel.container && lv_obj_is_valid(s_panel.container)) {
+        lv_obj_set_size(s_panel.container, LV_HOR_RES, view_h - header_h);
+        lv_obj_align(s_panel.container, LV_ALIGN_TOP_MID, 0, header_h);
+    }
+    if (auto* content = Assistant_State().chrome.content; content && lv_obj_is_valid(content)) {
+        lv_obj_set_height(content, body_h);
+    }
+    if (s_panel.page_hit && lv_obj_is_valid(s_panel.page_hit)) {
+        lv_obj_set_size(s_panel.page_hit, LV_HOR_RES, body_h);
+        lv_obj_set_pos(s_panel.page_hit, 0, header_h);
+    }
+    if (auto* hint = Assistant_State().chrome.idle_hint; hint && lv_obj_is_valid(hint)) {
+        lv_obj_set_size(hint, LV_HOR_RES, view_h);
+        lv_obj_clean(hint);
+        Assistant_BuildIdleHint(hint);
+    }
+    if (s_panel.head_bar && lv_obj_is_valid(s_panel.head_bar)) lv_obj_move_foreground(s_panel.head_bar);
+    auto& layout = Assistant_State().layout;
+    {
+        std::lock_guard<std::mutex> g(Assistant_State().stream.session_mu);
+        size_t anchor_flow = 0;
+        bool had_anchor = false;
+        if (layout.page_index >= 0 && static_cast<size_t>(layout.page_index) < layout.page_flow_begin.size()) {
+            anchor_flow = layout.page_flow_begin[static_cast<size_t>(layout.page_index)];
+            had_anchor = true;
+        }
+        layout.viewport_w = LV_HOR_RES - kContentPadX * 2;
+        layout.viewport_h = std::max<lv_coord_t>(body_h - kContentPadY * 2, Assistant_FontLineHeight(ui_font));
+        if (!layout.flow.empty()) {
+            Assistant_RebuildPages();
+            Assistant_TrimFlowToMaxPages();
+            if (had_anchor && !layout.page_flow_begin.empty()) {
+                int best = 0;
+                for (int p = 0; p < static_cast<int>(layout.page_flow_begin.size()); ++p) {
+                    if (layout.page_flow_begin[static_cast<size_t>(p)] <= anchor_flow) best = p;
+                    else break;
+                }
+                layout.page_index = best;
+            }
+            if (layout.page_index >= static_cast<int>(layout.pages.size()))
+                layout.page_index = static_cast<int>(layout.pages.size()) - 1;
+            if (layout.page_index < 0) layout.page_index = 0;
+        }
+    }
+    Assistant_State().stream.rendered_page_json.clear();
+    if (layout.has_a2ui_content && !layout.pages.empty()) {
+        Assistant_HideIdleHint();
+        Assistant_RenderCurrentPage();
+    } else {
+        Assistant_ShowIdleHint();
+        Assistant_UpdatePageIndicator();
+    }
+    ESP_LOGI(TAG, "panel toggle full=%d view_h=%d pages=%u idx=%d", s_panel.full ? 1 : 0, int(view_h),
+             unsigned(layout.pages.size()), layout.page_index);
+}
+
+bool AssistantScreen::PanelVkKey(const char* key) {
+    if (!s_panel.root || !s_panel.full || !key) return false;
+    if (std::strcmp(key, "vk_next") == 0) {
+        if (Assistant_State().layout.has_a2ui_content && !Assistant_State().layout.pages.empty()) {
+            Assistant_TurnPage(1);
+        }
+        return true;
+    }
+    if (std::strcmp(key, "vk_prev") == 0) {
+        if (Assistant_TurnPage(-1)) return true;
+        ScreenLvAsync([](void*) { AssistantScreen::ClosePanel(); });
+        return true;
+    }
+    return false;
 }
 
 bool AssistantScreen::PanelReturnPending() { return s_panel_return; }
@@ -1083,6 +1226,7 @@ lv_obj_t* BuildAssistant(lv_obj_t* host, lv_coord_t top) {
     lv_obj_set_style_pad_row(container, 0, 0);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_CLICKABLE);
     Assistant_DisableScroll(container);
+    if (panel) s_panel.container = container;
 
     lv_obj_t* content = lv_obj_create(container);
     lv_obj_set_width(content, LV_HOR_RES);
@@ -1129,6 +1273,7 @@ lv_obj_t* BuildAssistant(lv_obj_t* host, lv_coord_t top) {
     lv_obj_add_event_cb(page_hit, OnTouchPageClicked, LV_EVENT_CLICKED, nullptr);
     // 「自建」还没连助理：没有回答可翻，欢迎页上是「去连接」按钮，别让翻页层把它盖住
     if (chat_cloud::IsCustom() && !chat_cloud::Available()) lv_obj_add_flag(page_hit, LV_OBJ_FLAG_HIDDEN);
+    if (panel) s_panel.page_hit = page_hit;
 
     const int bar_w = LV_HOR_RES - 2 * kValetSide;
     auto* bar = lv_obj_create(scr);

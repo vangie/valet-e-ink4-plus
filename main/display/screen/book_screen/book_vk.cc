@@ -191,6 +191,7 @@ bool BookScreen::OnVkKeyLongPress(const char* key_name) {
         return true;
     }
     if (BookmarkMessageVisible()) return true;
+    if (AssistantScreen::PanelFull()) return true;
     return VkPageRepeatTryStart(key_name, BookPageRepeatStep);
 }
 
@@ -292,6 +293,9 @@ bool BookScreen::OnVkKey(const char* key_name) {
                 }
                 return true;
             }
+            return true;
+        }
+        if (AssistantScreen::PanelVkKey(key_name)) {
             return true;
         }
         if (std::strcmp(key_name, "vk_prev") == 0) {

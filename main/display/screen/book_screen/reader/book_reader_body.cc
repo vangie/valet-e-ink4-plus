@@ -132,6 +132,7 @@ bool OpenPanelNow(bool live, lv_coord_t below, const std::string& question) {
     if (!st.reader.read_scr || !lv_obj_is_valid(st.reader.read_scr) || st.reader.read_scr != lv_screen_active()) return false;
     if (st.reader.read_chrome != BookUiState::ReadChrome::kReading) HideReadChrome();
     if (!AssistantScreen::OpenPanel(st.reader.read_scr, ReaderPanelTop(below), live)) return false;
+    AssistantScreen::PanelTrimAbove(ReaderPanelTrim(AssistantScreen::PanelTop()));
     if (!question.empty()) Application::GetInstance().AskValetText(question);
     return true;
 }

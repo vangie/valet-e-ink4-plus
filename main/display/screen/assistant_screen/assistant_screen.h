@@ -64,8 +64,10 @@ public:
     // 悬窗上沿位置；翻到行距不同的页时，阅读页让悬窗把 from 到上沿之间盖白（被切了一半的那行）
     static lv_coord_t PanelTop();
     static void PanelTrimAbove(lv_coord_t from);
-    // 「全屏」：换到完整的助手页，同一场对话；从那里返回时阅读页用 ConsumePanelReturn 接着开悬窗
+    // 「全屏 / 半屏」：在阅读页上原地展开为全屏或缩回半屏，不卸载阅读页；关掉时直接回到下方书页
     static void PanelFullScreen();
+    static bool PanelFull();
+    static bool PanelVkKey(const char* key);
     static bool ConsumePanelReturn();
     // 悬窗点了「全屏」、还没回到书页（同一场对话还要接着用）
     static bool PanelReturnPending();
