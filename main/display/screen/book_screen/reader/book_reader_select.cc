@@ -35,9 +35,9 @@ constexpr int kCardRadius = 17;
 constexpr int kRowMinH = 68;         // 一条预设问题
 constexpr int kRowPadX = 25;
 constexpr int kToolH = 102;          // 底下一排按钮
-constexpr int kCardGap = 40;         // 卡片离选中的字（让出把手的圆点）
+constexpr int kCardGap = 56;         // 卡片离选中的字（让出把手的圆点与扩大后的触控区）
 constexpr int kScreenMargin = 16;
-constexpr int kHandleBar = 4, kHandleDot = 22, kHandleW = 64, kHandleReach = 30;
+constexpr int kHandleBar = 4, kHandleDot = 22, kHandleW = 104, kHandleReach = 68;
 constexpr int kLongPressReachX = 60; // 长按：离最近的字超过这么远（或不在这一行）就不算按在字上
 
 const char* T(const char* zh, const char* en) { return std::strcmp(Lang::Current(), "zh-CN") == 0 ? zh : en; }
@@ -547,14 +547,20 @@ void HandleEvent(lv_event_t* e) {
     lv_point_t pt{};
     if (code == LV_EVENT_PRESSED) {
         if (!ReadEventPoint(e, &pt)) return;
-        s.drag = which == 0 ? Drag::kStart : Drag::kEnd;
+        int pick = which;
         auto* img = RasterObject();
-        if (img) {
+        if (img && s.a >= 0 && s.b > s.a && s.b <= int(s_boxes.size())) {
             lv_area_t at;
             lv_obj_get_coords(img, &at);
-            const auto& g = s_boxes[which == 0 ? s.a : s.b - 1];
-            s.drag_dy = at.y1 + (g.y0 + g.y1) / 2 - pt.y;   // 手指按在圆点上，换算回那一行
+            const auto& g0 = s_boxes[s.a];
+            const auto& g1 = s_boxes[s.b - 1];
+            const long dx0 = pt.x - (at.x1 + g0.x0), dy0 = pt.y - (at.y1 + g0.y0 - kHandleDot / 2);
+            const long dx1 = pt.x - (at.x1 + g1.x1), dy1 = pt.y - (at.y1 + g1.y1 + kHandleDot / 2);
+            pick = (dx0 * dx0 + dy0 * dy0 <= dx1 * dx1 + dy1 * dy1) ? 0 : 1;
+            const auto& g = pick == 0 ? g0 : g1;
+            s.drag_dy = at.y1 + (g.y0 + g.y1) / 2 - pt.y;   // 手指按在圆点附近，换算回那一行
         }
+        s.drag = pick == 0 ? Drag::kStart : Drag::kEnd;
         DeleteCard();
         return;
     }
