@@ -43,6 +43,7 @@
 #include "power_policy.h"
 #include "net_proxy.h"
 #include <driver/usb_serial_jtag.h>
+#include <soc/usb_serial_jtag_struct.h>
 #include <esp_app_desc.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
@@ -383,6 +384,9 @@ void ValetDevLinkHandle(const char* json) {
         error = cJSON_IsString(name) ? PressKey(name->valuestring, ms) : "MISSING_NAME";
     } else if (!strcmp(cmd, "home")) {
         ScreenRequestHome();
+    } else if (!strcmp(cmd, "usb_download")) {
+        // 仅测试版：在刷机前临时恢复 USB 串口 DTR/RTS 硬件复位（平时置 usb_uart_chip_rst_dis=1 防误进下载模式）
+        USB_SERIAL_JTAG.chip_rst.usb_uart_chip_rst_dis = 0;
     } else if (!strcmp(cmd, "proxy")) {
         // 仅测试版：直接写代理设置（和设置页「代理」保存的是同一份），省得在屏幕上一个个字输入。
         const auto* host = cJSON_GetObjectItemCaseSensitive(root, "host");

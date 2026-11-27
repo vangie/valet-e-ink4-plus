@@ -388,6 +388,11 @@ void PanelVcomInit() {
     usb_serial_jtag_driver_config_t config = {.tx_buffer_size = 1024, .rx_buffer_size = 1024};
     const esp_err_t err = usb_serial_jtag_driver_install(&config);
     s_usb = err == ESP_OK;
+    if (s_usb) {
+        // 禁用 USB CDC 串口线 DTR/RTS 抖动触发的芯片硬件复位与 ROM 下载模式跳转，
+        // 避免插着电脑 USB 线或串口闪断时意外进入 waiting for download 导致墨水屏假死。
+        USB_SERIAL_JTAG.chip_rst.usb_uart_chip_rst_dis = 1;
+    }
 #if CONFIG_VALET_DEV_LINK
     if (s_usb) LogUsbLink("boot");
 #endif

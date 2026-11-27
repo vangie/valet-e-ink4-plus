@@ -254,6 +254,7 @@ void RoutePhyToUsj() {
     vTaskDelay(pdMS_TO_TICKS(kUsbDisconnectMs));
     usb_serial_jtag_ll_phy_set_defaults();
     usb_serial_jtag_ll_phy_enable_pad(true);
+    USB_SERIAL_JTAG.chip_rst.usb_uart_chip_rst_dis = 1;
     vTaskDelay(pdMS_TO_TICKS(kUsbRouteSettleMs));
     ESP_LOGI(TAG, "PHY: S31 USB Serial/JTAG restored");
 #elif CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4

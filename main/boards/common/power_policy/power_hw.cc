@@ -43,6 +43,7 @@
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
 #include <hal/usb_serial_jtag_ll.h>
+#include <soc/usb_serial_jtag_struct.h>
 extern "C" bool usb_serial_jtag_is_connected(void);
 #endif
 
@@ -145,6 +146,7 @@ static void ReviveUsjAfterSdRestore(void) {
     usb_serial_jtag_ll_enable_bus_clock(true);
     usb_serial_jtag_ll_phy_set_defaults();
     usb_serial_jtag_ll_phy_enable_pad(true);
+    USB_SERIAL_JTAG.chip_rst.usb_uart_chip_rst_dis = 1;
 
     int waited = 0;
     while (waited < kUsjReviveWaitConnectedMs && !usb_serial_jtag_is_connected()) {

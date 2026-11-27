@@ -425,6 +425,7 @@ def main():
             sys.exit(f"{image} not found; run tools/dev/build.sh")
         try:
             status = call({"op": "status"})
+            call({"op": "dev", "request": {"cmd": "usb_download"}})
             call({"op": "release"})
         except OSError:
             sys.exit("not running: start `valetdev.py serve` first")
