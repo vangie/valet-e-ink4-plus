@@ -44,6 +44,7 @@ struct GrayRefresh {
     bool differential = false;
     bool reader_aa = false;
     bool equalize_black = false; // 统一整页纯黑像素的推黑驱动
+    bool fast_du = false; // 滚动或选字拖拉期间强制走短 DU 局刷
 };
 uint8_t *render_fb, *pending_fb, *effect_fb;
 uint8_t* effect_source_fb;
@@ -205,7 +206,7 @@ EpdDrawError Draw(EpdiyHighlevelState* hl, int mode, bool full, bool clean, bool
     // Decide against the actual old/new buffers at submission, not only the
     // earlier worker analysis: an animation may have advanced the baseline.
     // Unchanged gray does not promote a black/white-only update to GL16.
-    if (pattern<0 && !cleanup && page==PageDraw::None && mode==MODE_DU &&
+    if (pattern<0 && !cleanup && page==PageDraw::None && mode==MODE_DU && !gray.fast_du &&
         EpdAnalyzeChanges(hl->back_fb,hl->front_fb,fb_bytes).gray_changed) {
         mode=MODE_GL16;
     }
@@ -224,12 +225,13 @@ EpdDrawError Draw(EpdiyHighlevelState* hl, int mode, bool full, bool clean, bool
     // The existing 30-phase optical 8-gray table is sufficient for A2 text edges.
     // Reuse it unchanged for reading (including intermediate frames); cleaning stays GC16.
     const bool ota_progress = OtaUpgradeScreen::IsActive() && !cleanup && page==PageDraw::None;
-    const EpdWaveform* ordinary = (profile>=2 || ota_progress) && mode==MODE_DU
-        ? (profile==2 && !ota_progress ? my_waveform_fast_du() : my_waveform_short_du())
+    const bool short_du = (ota_progress || gray.fast_du) && !cleanup && page==PageDraw::None;
+    const EpdWaveform* ordinary = (profile>=2 || short_du) && mode==MODE_DU
+        ? (profile==2 && !short_du ? my_waveform_fast_du() : my_waveform_short_du())
         : ProfileWaveform(profile,mode,gray.reader_aa && !cleanup);
     const EpdWaveform* waveform=complete_waveform ? &MY_WAVEFORM : (spatial ? spatial : ordinary);
     const char* path=complete_waveform ? "full" : (spatial ? (gray_reveal ? "wipe-gray" : "wipe-bw") :
-        (ota_progress && mode==MODE_DU ? "ota-du" : "normal"));
+        (ota_progress && mode==MODE_DU ? "ota-du" : (short_du && mode==MODE_DU ? "fast-du" : "normal")));
     int phases=0;
     for (int i=0;i<waveform->num_modes;++i) {
         if (waveform->mode_data[i]->type==mode) {
@@ -546,12 +548,12 @@ void Worker(void*) {
             // Difference DU touches only changed binary UI pixels; the test job owns
             // explicit GC/GL pattern updates and deep cleaning.
             const bool quality_turn=turn && page_effect==EpdEffect::Page;
-            int mode=promote ? MODE_GC16 : ((gray_changed || scroll_settle || (!scrolling && (quality_turn || gray_page_turn))) ? MODE_GL16 : MODE_DU);
+            int mode=promote ? MODE_GC16 : ((scroll_settle || (!scrolling && (gray_changed || quality_turn || gray_page_turn))) ? MODE_GL16 : MODE_DU);
             const bool reset_gray=!full_gc && gray_on_panel &&
                 (pattern!=static_cast<int>(EpdPattern::Gray) || promote || turn);
             const auto result=preparation!=EPD_DRAW_SUCCESS ? preparation :
                 (!combined && (changed || promote || reset_gray || screen_change || turn || scroll_settle || equalize_black)
-                ? Draw(hl,mode,promote,reset_gray,false,PageDraw::None,orient,{!scroll_settle,reader_aa,equalize_black}) : EPD_DRAW_SUCCESS);
+                ? Draw(hl,mode,promote,reset_gray,false,PageDraw::None,orient,{!scroll_settle,reader_aa,equalize_black,scrolling}) : EPD_DRAW_SUCCESS);
             // 每个实际上屏的目标帧只记录一次，扫描期间不打印或遍历额外像素。
             if (updates.load()!=draws_before || result!=EPD_DRAW_SUCCESS) {
                 ESP_LOGD(TAG,"route seq=%u merged=%u screen=%d full_gc=%d turn=%d stream=%d scroll=%d settle=%d "

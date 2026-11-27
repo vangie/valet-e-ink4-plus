@@ -9,8 +9,10 @@
 #include "book_screen/reader/book_reader_body.h"
 #include "chat_cloud.h"
 #include "epd_content_policy.h"
+#include "epd_refresh.h"
 #include "fontpack_lvgl.h"
 #include "haptic_feedback.h"
+#include "lv_adapter_display.h"
 #include "reader/text_encoding.h"
 #include "screen_common.h"
 #include "settings_screen/settings_screen.h"
@@ -157,15 +159,25 @@ void InvertRange(reader::RasterImage& r, int a, int b, lv_area_t& dirty) {
         dirty.x2 = std::max<int32_t>(dirty.x2, x1 - 1); dirty.y2 = std::max<int32_t>(dirty.y2, y1 - 1);
     }
 }
-// 把位图里的反显改成现在的选中：旧的翻回来，新的翻过去（重叠处翻两次等于没动）
+// 把位图里的反显改成现在的选中：只翻转进出选区的对称差集，避免拖拉时整块多行重绘
 void Repaint() {
     auto* raster = Raster();
     auto* img = RasterObject();
     if (!raster || !img) { s.inverted = false; return; }
     lv_area_t dirty{INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN};
-    if (s.inverted) InvertRange(*raster, s.inv_a, s.inv_b, dirty);
+    if (!s.inverted) {
+        if (s.on) InvertRange(*raster, s.a, s.b, dirty);
+    } else if (!s.on) {
+        InvertRange(*raster, s.inv_a, s.inv_b, dirty);
+    } else if (s.b <= s.inv_a || s.inv_b <= s.a) {
+        InvertRange(*raster, s.inv_a, s.inv_b, dirty);
+        InvertRange(*raster, s.a, s.b, dirty);
+    } else {
+        if (s.inv_a != s.a) InvertRange(*raster, std::min(s.inv_a, s.a), std::max(s.inv_a, s.a), dirty);
+        if (s.inv_b != s.b) InvertRange(*raster, std::min(s.inv_b, s.b), std::max(s.inv_b, s.b), dirty);
+    }
     s.inverted = s.on;
-    if (s.on) { InvertRange(*raster, s.a, s.b, dirty); s.inv_a = s.a; s.inv_b = s.b; }
+    if (s.on) { s.inv_a = s.a; s.inv_b = s.b; }
     if (dirty.x1 > dirty.x2) return;
     lv_image_cache_drop(&raster->dsc);
     lv_area_t at;
@@ -204,7 +216,9 @@ lv_obj_t* MakeHandle(int which) {
     auto* h = lv_obj_create(scr);
     lv_obj_remove_style_all(h);
     lv_obj_add_flag(h, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(h, kTouchUiPagedVerticalDrag);
     lv_obj_clear_flag(h, LV_OBJ_FLAG_SCROLLABLE);
+    EpdSetContentRole(h, EpdContentRole::GrayPanel);
     auto* bar = lv_obj_create(h);
     lv_obj_remove_style_all(bar);
     lv_obj_set_style_bg_color(bar, lv_color_black(), 0);
@@ -236,22 +250,33 @@ void PlaceHandles() {
     lv_area_t at;
     lv_obj_get_coords(img, &at);
     for (int which = 0; which < 2; ++which) {
-        if (!s_handle[which] || !lv_obj_is_valid(s_handle[which])) s_handle[which] = MakeHandle(which);
+        const bool created = !s_handle[which] || !lv_obj_is_valid(s_handle[which]);
+        if (created) s_handle[which] = MakeHandle(which);
         auto* h = s_handle[which];
+        const bool was_hidden = created || lv_obj_has_flag(h, LV_OBJ_FLAG_HIDDEN);
         const auto& g = s_boxes[which == 0 ? s.a : s.b - 1];
         const int line_h = g.y1 - g.y0 + 1;
         const int bar_x = at.x1 + (which == 0 ? g.x0 : g.x1) - kHandleBar / 2;
         const int top = at.y1 + g.y0 - 1;
-        lv_obj_set_size(h, kHandleW, line_h + kHandleReach);
-        lv_obj_set_pos(h, bar_x + kHandleBar / 2 - kHandleW / 2, which == 0 ? top - kHandleReach : top);
-        auto* bar = lv_obj_get_child(h, 0);
-        auto* dot = lv_obj_get_child(h, 1);
-        lv_obj_set_size(bar, kHandleBar, line_h);
-        lv_obj_set_pos(bar, kHandleW / 2 - kHandleBar / 2, which == 0 ? kHandleReach : 0);
-        lv_obj_set_pos(dot, kHandleW / 2 - kHandleDot / 2,
-                       which == 0 ? kHandleReach - kHandleDot + 2 : line_h - 2);
-        lv_obj_clear_flag(h, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(h);
+        const int target_w = kHandleW, target_h = line_h + kHandleReach;
+        const int target_x = bar_x + kHandleBar / 2 - kHandleW / 2;
+        const int target_y = which == 0 ? top - kHandleReach : top;
+        if (was_hidden || lv_obj_get_width(h) != target_w || lv_obj_get_height(h) != target_h) {
+            lv_obj_set_size(h, target_w, target_h);
+            auto* bar = lv_obj_get_child(h, 0);
+            auto* dot = lv_obj_get_child(h, 1);
+            lv_obj_set_size(bar, kHandleBar, line_h);
+            lv_obj_set_pos(bar, kHandleW / 2 - kHandleBar / 2, which == 0 ? kHandleReach : 0);
+            lv_obj_set_pos(dot, kHandleW / 2 - kHandleDot / 2,
+                           which == 0 ? kHandleReach - kHandleDot + 2 : line_h - 2);
+        }
+        if (was_hidden || lv_obj_get_x(h) != target_x || lv_obj_get_y(h) != target_y) {
+            lv_obj_set_pos(h, target_x, target_y);
+        }
+        if (was_hidden) {
+            lv_obj_clear_flag(h, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(h);
+        }
     }
 }
 
@@ -367,7 +392,7 @@ void BuildCard() {
     const lv_font_t* small = fontpack_lv_font_get(25, 2);
     if (!small) small = font;
     const lv_color_t white = lv_color_white(), black = lv_color_black();
-    const lv_color_t rule = lv_color_hex(0x5a5a58);
+    const lv_color_t rule = lv_color_hex(0x8a8a88);
     const bool agent = AgentReady(), word = WordKind();
     const int width = lv_obj_get_width(scr) - 2 * kCardSide;
 
@@ -475,6 +500,7 @@ void Ask(const std::string* question) {
     ESP_LOGI(TAG, "ask about %u bytes (%s)%s", unsigned(quote.text.size()), quote.word ? "word" : "sentence",
              question ? ", preset question" : ", hold to talk");
     s.quoted = true;
+    EpdSetUiScrolling(false);
     HideChrome();
     valet::SetReadingQuote(quote);
     lv_coord_t below = 0;
@@ -497,10 +523,18 @@ bool CanSelect() {
            st.reader.read_chrome == BookUiState::ReadChrome::kReading && st.reader.session && !s_boxes.empty();
 }
 
-void SetRange(int a, int b, Mode mode) {
-    if (a == s.a && b == s.b) return;
+void SetVerticalDragLock(bool on) {
+    auto* content = Book_State().reader.content;
+    if (!content || !lv_obj_is_valid(content)) return;
+    if (on) lv_obj_add_flag(content, kTouchUiPagedVerticalDrag);
+    else lv_obj_clear_flag(content, kTouchUiPagedVerticalDrag);
+}
+
+bool SetRange(int a, int b, Mode mode) {
+    if (a == s.a && b == s.b) return false;
     s.a = a; s.b = b; s.mode = mode;
     Repaint();
+    return true;
 }
 
 void OnContentLongPressed(lv_event_t* e) {
@@ -517,6 +551,8 @@ void OnContentLongPressed(lv_event_t* e) {
     s.anchor_a = a; s.anchor_b = b; s.a = a; s.b = b; s.mode = Mode::kWord;
     s.drag = Drag::kGrow;
     s_eat_click = true;
+    SetVerticalDragLock(true);
+    EpdSetUiScrolling(true);
     ReaderAutoTurnManualInput();
     HapticPulseIfEnabled();
     Repaint();
@@ -561,6 +597,7 @@ void HandleEvent(lv_event_t* e) {
             s.drag_dy = at.y1 + (g.y0 + g.y1) / 2 - pt.y;   // 手指按在圆点附近，换算回那一行
         }
         s.drag = pick == 0 ? Drag::kStart : Drag::kEnd;
+        EpdSetUiScrolling(true);
         DeleteCard();
         return;
     }
@@ -570,9 +607,9 @@ void HandleEvent(lv_event_t* e) {
         pt.y += s.drag_dy;
         const int i = GlyphAt(pt, true);
         if (i < 0) return;
-        if (s.drag == Drag::kStart) SetRange(std::min(i, s.b - 1), s.b, Mode::kFree);
-        else SetRange(s.a, std::max(i + 1, s.a + 1), Mode::kFree);
-        PlaceHandles();
+        const bool changed = s.drag == Drag::kStart ? SetRange(std::min(i, s.b - 1), s.b, Mode::kFree)
+                                                    : SetRange(s.a, std::max(i + 1, s.a + 1), Mode::kFree);
+        if (changed) PlaceHandles();
         return;
     }
     // 松手：卡片回来
@@ -588,6 +625,8 @@ void ReaderSelectSetPage(std::vector<reader::GlyphBox> glyphs, const reader::Pag
     const bool was_quoted = s.quoted;
     s = {};
     s_eat_click = false;
+    SetVerticalDragLock(false);
+    EpdSetUiScrolling(false);
     HideChrome();
     if (was_quoted) valet::ClearReadingQuote();   // 翻页了：再问就是问新的这一页
     s_boxes = std::move(glyphs);
@@ -614,8 +653,15 @@ void ReaderSelectClear() {
     s.on = false;
     s.quoted = false;
     s.drag = Drag::kNone;
+    SetVerticalDragLock(false);
     HideChrome();
-    if (had) Repaint();
+    if (had) {
+        EpdSetUiScrolling(true);
+        EpdAfterNextSubmit([]() { EpdSetUiScrolling(false); });
+        Repaint();
+    } else {
+        EpdSetUiScrolling(false);
+    }
 }
 
 bool ReaderSelectActive() { return s.on; }
