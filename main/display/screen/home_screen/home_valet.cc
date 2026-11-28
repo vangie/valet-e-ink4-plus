@@ -44,9 +44,9 @@ constexpr char kLog[] = "HomeValet";
 constexpr int kSide = 33;                 // left and right margin
 constexpr int kWidth = 684 - 2 * kSide;   // 618
 constexpr int kHeroH = 284;
-constexpr int kPairY = kHeroH, kPairH = 372;
-constexpr int kWhoY = kPairY + kPairH + 16, kWhoH = 66;
-constexpr int kBookY = kWhoY + kWhoH + 10, kBookH = 190;
+constexpr int kWhoY = kHeroH, kWhoH = 60;
+constexpr int kPairY = kWhoY + kWhoH + 6, kPairH = 372;
+constexpr int kBookY = kPairY + kPairH + 26, kBookH = 190;
 constexpr int kTodoY = kBookY + kBookH + 22, kTodoH = 84;
 constexpr int kFootH = 76;
 
@@ -560,7 +560,7 @@ void BuildTodo(lv_obj_t* root) {
 void BuildTodoList(lv_obj_t* root) {
     constexpr int kHeadH = 62, kItemH = 60;
     // One touch target for the whole list: it opens the to-do page.
-    auto* list = Box(root, kSide, kWhoY + kWhoH + 8, kWidth, kHeadH + 3 * kItemH, Tasks);
+    auto* list = Box(root, kSide, kBookY, kWidth, kHeadH + 3 * kItemH, Tasks);
     lv_obj_set_style_border_width(list, 3, 0);
     lv_obj_set_style_border_side(list, LV_BORDER_SIDE_TOP, 0);
     lv_obj_set_style_border_color(list, lv_color_black(), 0);
@@ -766,8 +766,8 @@ void HomeValet_Build(lv_obj_t* screen, lv_coord_t status_height) {
     s.root = Box(screen, 0, status_height, LV_HOR_RES, height);
     lv_obj_add_event_cb(s.root, OnDeleted, LV_EVENT_DELETE, nullptr);
     BuildHero(s.root);
-    BuildPair(s.root);
     BuildWho(s.root);
+    BuildPair(s.root);
     if (chat_cloud::HasCallEntry()) {
         BuildBook(s.root);
         BuildTodo(s.root);

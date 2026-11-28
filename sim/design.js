@@ -584,6 +584,7 @@ function v2Home() {
       <div class="v-clock"><span>10</span><i></i><span>48</span></div>
       <div class="v-date"><span>2026.11.17</span><b>${L("十月初八", "November 17")}</b><span>${t("tue")} · ${t("weather")} ${t("temp")}</span></div>
     </section>
+    <button class="v-who" data-setting="talk"><i class="${!agent || liveOk ? "on" : ""}"></i><span>${v2Who()}</span>${ic("go")}</button>
     <section class="v-pair">
       <svg viewBox="0 0 222 134" width="222" height="134">
         <pattern id="v-dither" width="3" height="3" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#111"/></pattern>
@@ -592,7 +593,6 @@ function v2Home() {
       <div class="v-ask">${ic("mic")}<b>${L("提问", "Ask")}</b><span>${L("按住，说一句", "Hold and say it")}</span></div>
       ${callBlock}
     </section>
-    <button class="v-who" data-setting="talk"><i class="${!agent || liveOk ? "on" : ""}"></i><span>${v2Who()}</span>${ic("go")}</button>
     ${call ? bookCard : todoList}
     <footer class="v-foot">${v2Dots()}<button data-homepage="1">${L("全部应用", "All apps")}${ic("go")}</button></footer>
   </main>`;
