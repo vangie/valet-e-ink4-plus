@@ -564,13 +564,38 @@ void ApplyShelfEntryMetadata(const reader::BookInfo& info, lv_obj_t* host, bool 
     if (entry == st.shelf.shelf_entries.end()) return;
     st.shelf.books[index].file_size = info.file_size;
     st.shelf.books[index].mtime = info.mtime;
+    st.shelf.books[index].from_weread = info.from_weread;
     entry->book.file_size = info.file_size;
     entry->book.mtime = info.mtime;
+    entry->book.from_weread = info.from_weread;
     if (st.shelf.shelf_view == kBookReaderShelfViewCover) {
         if (progress_ready && BookReaderPrefsShowShelfProgress() != 0) {
             auto* badge = Book_CreateProgressPctBadge(host, Book_CachedProgressX10OrZero(info.path.c_str()));
             if (badge) {
                 lv_obj_align(badge, LV_ALIGN_TOP_LEFT, kCoverSpineInset + kCoverFrameBorder + 4, 8);
+            }
+        }
+        if (info.from_weread) {
+            const lv_font_t* badge_font = Book_ItemFont();
+            if (badge_font != nullptr) {
+                const char* wr_txt = "微读";
+                const lv_coord_t tw = Book_MeasureTextWidth(badge_font, wr_txt);
+                const lv_coord_t th = badge_font->line_height;
+                lv_obj_t* wr_badge = lv_obj_create(host);
+                lv_obj_remove_style_all(wr_badge);
+                lv_obj_set_size(wr_badge, tw + 8, th + 4);
+                lv_obj_set_style_bg_color(wr_badge, lv_color_black(), 0);
+                lv_obj_set_style_bg_opa(wr_badge, LV_OPA_COVER, 0);
+                lv_obj_set_style_radius(wr_badge, 0, 0);
+                Book_DisableScroll(wr_badge);
+                lv_obj_clear_flag(wr_badge, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_t* lbl = lv_label_create(wr_badge);
+                lv_label_set_text(lbl, wr_txt);
+                lv_obj_set_style_text_font(lbl, badge_font, 0);
+                lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+                lv_obj_clear_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_center(lbl);
+                lv_obj_align(wr_badge, LV_ALIGN_BOTTOM_RIGHT, -6, -6);
             }
         }
         return;
@@ -580,17 +605,18 @@ void ApplyShelfEntryMetadata(const reader::BookInfo& info, lv_obj_t* host, bool 
     if (!name || !tail) {
         return;
     }
-    char size_text[32], text[64];
+    char size_text[32], text[80];
     reader::FormatFileSize(size_text, sizeof(size_text), info.file_size);
+    const char* wr_prefix = info.from_weread ? "微信读书 · " : "";
     if (progress_ready && BookReaderPrefsShowShelfProgress() != 0) {
         const int pct = Book_CachedProgressX10OrZero(info.path.c_str());
         if (pct >= 1000) {
-            std::snprintf(text, sizeof(text), "%s/100%%", size_text);
+            std::snprintf(text, sizeof(text), "%s%s/100%%", wr_prefix, size_text);
         } else {
-            std::snprintf(text, sizeof(text), "%s/%d.%d%%", size_text, pct / 10, pct % 10);
+            std::snprintf(text, sizeof(text), "%s%s/%d.%d%%", wr_prefix, size_text, pct / 10, pct % 10);
         }
     } else {
-        std::snprintf(text, sizeof(text), "%s", size_text);
+        std::snprintf(text, sizeof(text), "%s%s", wr_prefix, size_text);
     }
     lv_label_set_text(tail, text);
     const lv_coord_t lead = st.shelf.shelf_multi ? kShelfCheckSize : kShelfListIconW;

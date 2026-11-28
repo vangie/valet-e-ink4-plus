@@ -161,6 +161,7 @@ idf_component_register(
         "library_sources.cc"
         "opds_client.cc"
         "opds_fetch.cc"
+        "weread_client.cc"
         "reader_sync.cc"
         "valet_setup/pairing.cc"
         "valet_setup/server.cc"

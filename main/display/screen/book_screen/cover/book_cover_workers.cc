@@ -35,6 +35,7 @@
 #include "reader/reader.h"
 #include "reader/list_thumbnail_cache.h"
 #include "screen_common.h"
+#include "weread_client.h"
 
 struct DetailCoverDoneMsg {
     uint32_t token = 0; // 请求代次，用于丢弃离页或翻页后的结果
@@ -181,6 +182,7 @@ static void RunListCoverWork(ListCoverFillWork* work) {
             if (work->load_metadata && stat(item.info.path.c_str(), &status) == 0) {
                 item.info.file_size = status.st_size;
                 item.info.mtime = status.st_mtime;
+                item.info.from_weread = valet::weread::IsWeReadBook(item.info.path);
                 done->metadata_ready = true;
             } else if (work->load_metadata) {
                 ESP_LOGW(TAG, "visible entry stat failed errno=%d; keep placeholder", errno);

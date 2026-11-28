@@ -9,6 +9,7 @@
 #include "reader/book_storage_paths.h"
 #include "reader/image_util.h"
 #include "screen_common.h"
+#include "weread_client.h"
 
 #include <cJSON.h>
 #include <esp_log.h>
@@ -28,7 +29,7 @@
 namespace valet::sync {
 namespace {
 constexpr const char* TAG = "ReaderSync";
-constexpr uint32_t kTaskStack = 6 * 1024;
+constexpr uint32_t kTaskStack = 8 * 1024;
 constexpr int kJumpMinX10 = 5;   // 别处的进度和本机差不到 0.5% 就不跳
 
 // 每本书一份：进度地址 + 上次看到的服务器 updated。
@@ -133,18 +134,30 @@ void NoteSeen(const std::string& book_path, long long updated) {
 
 // ── 打开时拉进度 ─────────────────────────────────────────────────────────
 struct PullJob { std::string path; std::string hint; int local_x10; };
-struct PullDone { std::string path; int x10; };
+struct PullDone { std::string path; int x10; int spine; bool from_weread; };
 
 void ApplyPull(void* p) {
     auto* done = static_cast<PullDone*>(p);
     auto& st = Book_State();
     if (st.reader.session && st.reader.session->IsOpen() && st.reader.session->Info().path == done->path &&
         st.reader.read_chrome == BookUiState::ReadChrome::kReading) {
-        if (RequestReaderNavigation(reader::BookSession::NavigationKind::kProgress, done->x10)) {
+        bool jumped = false;
+        if (done->spine >= 0 && done->spine != st.reader.session->SourceChapterIndex()) {
+            jumped = RequestReaderNavigation(reader::BookSession::NavigationKind::kToc, done->spine);
+        } else if (done->x10 >= 0) {
+            jumped = RequestReaderNavigation(reader::BookSession::NavigationKind::kProgress, done->x10);
+        }
+        if (jumped) {
             char text[96];
-            std::snprintf(text, sizeof(text), "%s %d%%",
-                          std::strcmp(Lang::Current(), "zh-CN") == 0 ? "接着别处读到的地方" : "Continued from elsewhere",
-                          (done->x10 + 5) / 10);
+            if (done->from_weread) {
+                std::snprintf(text, sizeof(text), "%s %d%%",
+                              std::strcmp(Lang::Current(), "zh-CN") == 0 ? "已同步微信读书进度" : "Synced WeRead progress",
+                              (std::max(0, done->x10) + 5) / 10);
+            } else {
+                std::snprintf(text, sizeof(text), "%s %d%%",
+                              std::strcmp(Lang::Current(), "zh-CN") == 0 ? "接着别处读到的地方" : "Continued from elsewhere",
+                              (std::max(0, done->x10) + 5) / 10);
+            }
             ScreenShowToast(text);
         }
     }
@@ -179,6 +192,27 @@ void PullTask(void* arg) {
     if (write_hint) WriteSidecar(job->path, url, seen);
     if (url.empty()) { delete job; vTaskDeleteWithCaps(nullptr); return; }
 
+    if (url.rfind("weread://", 0) == 0) {
+        const std::string wr_id = url.substr(9);
+        valet::weread::RemoteProgress wr_prog;
+        std::string wr_err;
+        if (valet::weread::FetchProgress(wr_id, wr_prog, wr_err)) {
+            const int spine = valet::weread::SpineForChapterUid(job->path, wr_prog.chapter_uid);
+            const long long updated = wr_prog.update_time;
+            const int remote_x10 = wr_prog.progress_x10;
+            ESP_LOGI(TAG, "pull weread book=%s remote=%d local=%d ch=%s spine=%d updated=%lld seen=%lld",
+                     wr_id.c_str(), remote_x10, job->local_x10, wr_prog.chapter_uid.c_str(), spine, updated, seen);
+            if (updated > seen && (std::abs(remote_x10 - job->local_x10) >= kJumpMinX10 || spine >= 0)) {
+                auto* done = new PullDone{job->path, remote_x10, spine, true};
+                if (!ScreenLvAsync(ApplyPull, done)) delete done;
+            }
+            if (updated > seen) NoteSeen(job->path, updated);
+        }
+        delete job;
+        vTaskDeleteWithCaps(nullptr);
+        return;
+    }
+
     std::string response;
     const int status = Request("GET", url, {}, response);
     long long updated = 0;
@@ -197,7 +231,7 @@ void PullTask(void* arg) {
              remote_x10, job->local_x10, updated, seen);
     // 只在「上次同步以后别处又写过」时跳：本机自己写成功的那次 updated 已经记成 seen
     if (remote_x10 >= 0 && updated > seen && std::abs(remote_x10 - job->local_x10) >= kJumpMinX10) {
-        auto* done = new PullDone{job->path, remote_x10};
+        auto* done = new PullDone{job->path, remote_x10, -1, false};
         if (!ScreenLvAsync(ApplyPull, done)) delete done;
     }
     if (updated > seen) NoteSeen(job->path, updated);
@@ -219,6 +253,25 @@ void PushTask(void*) {
             if (s_push_pending.empty()) { s_push_running = false; break; }
             job = std::move(s_push_pending.begin()->second);
             s_push_pending.erase(s_push_pending.begin());
+        }
+        if (job.url.rfind("weread://", 0) == 0) {
+            const std::string wr_id = job.url.substr(9);
+            const std::string ch_uid = valet::weread::ChapterUidForSpine(job.path, job.pos.spine);
+            std::string wr_err;
+            const bool ok = valet::weread::UploadProgress(
+                wr_id, ch_uid, std::max(1, job.pos.spine + 1),
+                std::max(0, job.pos.spine_x1000), job.pos.x10, 30, wr_err);
+            ESP_LOGI(TAG, "push weread book=%s x10=%d spine=%d ch=%s ok=%d err=[%s]",
+                     wr_id.c_str(), job.pos.x10, job.pos.spine, ch_uid.c_str(), ok ? 1 : 0, wr_err.c_str());
+            if (!ok) {
+                std::lock_guard<std::mutex> lock(s_mu);
+                auto it = s_books.find(job.path);
+                if (it != s_books.end() && it->second.pushed_x10 == job.pos.x10) it->second.pushed_x10 = -1;
+                continue;
+            }
+            long long now = 0;
+            if (ClockValid(now)) NoteSeen(job.path, now);
+            continue;
         }
         cJSON* body = cJSON_CreateObject();
         if (body == nullptr) continue;

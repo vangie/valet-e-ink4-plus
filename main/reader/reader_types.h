@@ -30,6 +30,7 @@ struct BookInfo {
     BookFormat format = BookFormat::kUnknown;
     size_t file_size = 0;
     int64_t mtime = 0;      // 文件修改时间（秒），书库列表按最新优先排序
+    bool from_weread = false; // 来自微信读书（由 .sync sidecar 的 weread:// 识别）
 };
 
 // 章节/正文中的一段内容：纯文本或图片（EPUB 内路径 / 外部文件路径）

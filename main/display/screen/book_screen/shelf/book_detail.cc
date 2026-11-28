@@ -21,6 +21,7 @@
 #include "reader/reader.h"
 #include "screen_common.h"
 #include "vk_key_handler.h"
+#include "weread_client.h"
 
 lv_obj_t* CreateDetailScreen(int book_index) {
     auto& st = Book_State();
@@ -202,7 +203,11 @@ lv_obj_t* CreateDetailScreen(int book_index) {
         Book_DisableScroll(meta);
 
         lv_obj_t* fmt = lv_label_create(meta);
-        lv_label_set_text(fmt, reader::FormatLabel(shown.format));
+        std::string fmt_str = reader::FormatLabel(shown.format);
+        if (shown.from_weread || valet::weread::IsWeReadBook(shown.path)) {
+            fmt_str += " · 微信读书";
+        }
+        lv_label_set_text(fmt, fmt_str.c_str());
         lv_obj_set_style_text_font(fmt, item_font, 0);
         lv_obj_align(fmt, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_clear_flag(fmt, LV_OBJ_FLAG_CLICKABLE);

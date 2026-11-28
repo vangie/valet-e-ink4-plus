@@ -21,7 +21,9 @@
 #include "sd_paths.h"
 #include "screen_common.h"
 #include "screen_keyboard.h"
+#include "ui_qrcode.h"
 #include "vk_key_handler.h"
+#include "weread_client.h"
 
 #include <algorithm>
 #include <cctype>
@@ -67,6 +69,9 @@ struct Ui {
     lv_obj_t* detail = nullptr;
     lv_obj_t* action = nullptr;
     lv_obj_t* action_text = nullptr;
+    lv_obj_t* qr_mask = nullptr;
+    lv_obj_t* qr_code = nullptr;
+    lv_obj_t* qr_status = nullptr;
 };
 
 Ui s_ui;
@@ -94,12 +99,14 @@ Level* Top() { return s_stack.empty() ? nullptr : &s_stack.back(); }
 std::string LibrariesSignature(const std::vector<valet::LibrarySource>& libs) {
     std::string sig;
     for (const auto& lib : libs) sig += lib.url + "\n";
+    sig += valet::weread::IsLoggedIn() ? "wr:1:" + valet::weread::LoggedVid() : "wr:0";
     return sig;
 }
 std::string s_signature;             // 订阅变了就从头开始
+uint32_t s_qr_gen = 0;               // 扫码登录轮询代次
 
 // ── 后台：拉 feed ─────────────────────────────────────────────────────────
-enum class JobKind : uint8_t { kBrowse, kMore, kSearch };
+enum class JobKind : uint8_t { kBrowse, kMore, kSearch, kWeReadShelf };
 struct SearchLib { std::string url, name, search_template; };
 struct FetchJob {
     uint32_t gen = 0;
@@ -139,7 +146,19 @@ void FetchTask(void* arg) {
     done->gen = job->gen;
     done->kind = job->kind;
     done->url = job->url;
-    if (job->kind == JobKind::kSearch) {
+    if (job->kind == JobKind::kWeReadShelf) {
+        std::vector<valet::opds::Entry> shelf_books;
+        done->ok = valet::weread::FetchShelf(shelf_books, done->error);
+        if (done->ok) {
+            done->feed_title = Text("微信读书 · 书架", "WeRead Shelf");
+            for (auto& b : shelf_books) done->entries.push_back(std::move(b));
+            valet::opds::Entry logout_entry;
+            logout_entry.title = Text("退出微信读书登录", "Sign out of WeRead");
+            logout_entry.author = Text("退出后仍可搜索全网并阅读免费试读章节", "Search & trial chapters remain available");
+            logout_entry.nav = "weread://logout";
+            done->entries.push_back(std::move(logout_entry));
+        }
+    } else if (job->kind == JobKind::kSearch) {
         int failed = 0;
         for (auto& lib : job->libs) {
             if (lib.search_template.empty()) {
@@ -160,9 +179,17 @@ void FetchTask(void* arg) {
                 done->entries.push_back(std::move(entry));
             }
         }
-        done->ok = failed < static_cast<int>(job->libs.size()) || job->libs.empty();
+        // 同时搜索微信读书全网书库（支持免登录与已登录）
+        std::vector<valet::opds::Entry> wr_entries;
+        std::string wr_err;
+        const bool wr_ok = valet::weread::SearchBooks(job->query, wr_entries, wr_err);
+        if (wr_ok) {
+            for (auto& e : wr_entries) done->entries.push_back(std::move(e));
+        }
+        done->ok = wr_ok || (failed < static_cast<int>(job->libs.size()) && !job->libs.empty());
         if (done->ok) done->error.clear();
-        else if (done->error.empty()) done->error = Text("这个书库不支持搜索", "This library has no search");
+        else if (!wr_err.empty()) done->error = wr_err;
+        else if (done->error.empty()) done->error = Text("搜索失败，请检查网络连接", "Search failed");
     } else {
         valet::opds::Feed feed;
         done->ok = FetchParse(job->url, feed, done->error);
@@ -290,6 +317,9 @@ reader::CloudBookTask TaskFor(const valet::opds::Entry& entry) {
 }
 
 void OpenDetail(int index);
+void OpenWeReadQr();
+void CloseWeReadQr();
+void StartRoot();
 
 void OnRowClicked(lv_event_t* e) {
     if (s_loading) return;
@@ -299,6 +329,26 @@ void OnRowClicked(lv_event_t* e) {
     const auto& entry = top->entries[static_cast<size_t>(index)];
     if (!entry.files.empty()) { OpenDetail(index); return; }
     if (entry.nav.empty()) return;
+    if (entry.nav == "weread://login") {
+        OpenWeReadQr();
+        return;
+    }
+    if (entry.nav == "weread://logout") {
+        valet::weread::Logout();
+        s_signature.clear();
+        StartRoot();
+        ScreenShowToast(Text("已退出微信读书", "Signed out of WeRead"));
+        return;
+    }
+    if (entry.nav == "weread://shelf") {
+        Level level;
+        level.url = entry.nav;
+        level.title = Text("微信读书 · 书架", "WeRead Shelf");
+        s_stack.push_back(std::move(level));
+        ++s_gen;
+        FetchLevel(JobKind::kWeReadShelf, "weread://shelf");
+        return;
+    }
     Level level;
     level.url = entry.nav;
     level.title = entry.title;
@@ -363,7 +413,8 @@ void Render() {
         lv_obj_set_size(title, text_w, title_h);
         lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
         const bool book = !entry.files.empty();
-        const std::string meta = book ? EntryMeta(entry, many) : std::string();
+        const bool show_lib = many || !entry.library.empty();
+        const std::string meta = book ? EntryMeta(entry, show_lib) : entry.author;
         if (!meta.empty()) {
             auto* sub = AddLabel(text, meta.c_str(), Small());
             lv_obj_set_size(sub, text_w, meta_h);
@@ -424,7 +475,11 @@ void UpdateAction() {
 }
 
 int s_last_pct = -1;
-struct DownloadJob { uint32_t gen; reader::CloudBookTask task; };
+struct DownloadJob {
+    uint32_t gen;
+    reader::CloudBookTask task;
+    std::string author;
+};
 struct DownloadMsg { uint32_t gen; int pct; bool finished; bool ok; std::string error; std::string path; std::string title; };
 
 void ApplyDownload(void* p) {
@@ -456,8 +511,16 @@ void DownloadProgress(int pct, void* user) {
 void DownloadTask(void* arg) {
     auto* job = static_cast<DownloadJob*>(arg);
     std::string err;
-    const bool ok = reader::DownloadCloudBook(job->task, err, DownloadProgress, job, &s_gate);
-    if (ok) valet::sync::Remember(job->task.LocalPath(), valet::sync::ProgressUrlFromDownload(job->task.download_url));
+    bool ok = false;
+    if (job->task.download_url.rfind("weread://", 0) == 0) {
+        const std::string wr_book_id = job->task.download_url.substr(9);
+        ok = valet::weread::DownloadBookAsEpub(wr_book_id, job->task.title, job->author,
+                                               job->task.cover_image_url, job->task.LocalPath(),
+                                               err, DownloadProgress, job, &s_gate);
+    } else {
+        ok = reader::DownloadCloudBook(job->task, err, DownloadProgress, job, &s_gate);
+        if (ok) valet::sync::Remember(job->task.LocalPath(), valet::sync::ProgressUrlFromDownload(job->task.download_url));
+    }
     ESP_LOGI(TAG, "download ok=%d size=%llu err=[%s]", ok ? 1 : 0, static_cast<unsigned long long>(job->task.file_size), err.c_str());
     auto* msg = new DownloadMsg{job->gen, 100, true, ok, err, job->task.LocalPath(), job->task.title};
     delete job;
@@ -465,29 +528,38 @@ void DownloadTask(void* arg) {
     vTaskDeleteWithCaps(nullptr);
 }
 
-void OnActionClicked(lv_event_t*) {
-    Level* top = Top();
-    if (!top || s_detail < 0 || s_detail >= static_cast<int>(top->entries.size()) || s_downloading) return;
-    const auto& entry = top->entries[static_cast<size_t>(s_detail)];
-    if (entry.Best() == nullptr) return;
+void StartEntryDownload(const valet::opds::Entry& entry, bool force_overwrite) {
     auto task = TaskFor(entry);
     if (task.LocalPath().empty()) return;
-    if (task.IsDownloaded()) {
-        valet::sync::HintBeforeOpen(task.LocalPath(), valet::sync::ProgressUrlFromDownload(task.download_url));
+    if (!force_overwrite && task.IsDownloaded()) {
+        if (task.download_url.rfind("weread://", 0) == 0) {
+            valet::sync::HintBeforeOpen(task.LocalPath(), task.download_url);
+        } else {
+            valet::sync::HintBeforeOpen(task.LocalPath(), valet::sync::ProgressUrlFromDownload(task.download_url));
+        }
         OpenBook(task.LocalPath(), task.title);
         return;
     }
-    auto* job = new DownloadJob{s_gen, std::move(task)};
+    auto* job = new DownloadJob{s_gen, std::move(task), entry.author};
     s_gate.Reset();
     s_downloading = true;
     s_download_pct = 0;
     s_last_pct = -1;
-    if (xTaskCreatePinnedToCoreWithCaps(DownloadTask, "opds_dl", kDownloadStack, job, tskIDLE_PRIORITY + 2, nullptr, 0,
+    const uint32_t stack = job->task.download_url.rfind("weread://", 0) == 0 ? (12 * 1024) : kDownloadStack;
+    if (xTaskCreatePinnedToCoreWithCaps(DownloadTask, "opds_dl", stack, job, tskIDLE_PRIORITY + 2, nullptr, 0,
                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) != pdPASS) {
         delete job;
         s_downloading = false;
     }
     UpdateAction();
+}
+
+void OnActionClicked(lv_event_t*) {
+    Level* top = Top();
+    if (!top || s_detail < 0 || s_detail >= static_cast<int>(top->entries.size()) || s_downloading) return;
+    const auto& entry = top->entries[static_cast<size_t>(s_detail)];
+    if (entry.Best() == nullptr) return;
+    StartEntryDownload(entry, false);
 }
 
 void OpenDetail(int index) {
@@ -549,8 +621,35 @@ void OpenDetail(int index) {
     lv_obj_center(s_ui.action_text);
     UpdateAction();
 
+    // 微信读书已在本机时，提供「更新全本章节」按钮（方便免登录试读后扫码登录同步已购全本）
+    const std::string dl_url = entry.files.empty() ? "" : entry.files.front().url;
+    if (dl_url.rfind("weread://", 0) == 0 && TaskFor(entry).IsDownloaded()) {
+        auto* upd_btn = lv_obj_create(body);
+        lv_obj_remove_style_all(upd_btn);
+        lv_obj_set_size(upd_btn, lv_pct(100), 72);
+        lv_obj_set_style_border_width(upd_btn, 2, 0);
+        lv_obj_set_style_border_color(upd_btn, lv_color_black(), 0);
+        lv_obj_set_style_radius(upd_btn, 6, 0);
+        lv_obj_add_flag(upd_btn, LV_OBJ_FLAG_CLICKABLE);
+        HapticAttachClick(upd_btn);
+        lv_obj_add_event_cb(upd_btn, [](lv_event_t*) {
+            Level* top = Top();
+            if (!top || s_detail < 0 || s_detail >= static_cast<int>(top->entries.size()) || s_downloading) return;
+            StartEntryDownload(top->entries[static_cast<size_t>(s_detail)], true);
+        }, LV_EVENT_CLICKED, nullptr);
+        const int ch_n = valet::weread::DownloadedChapterCount(TaskFor(entry).LocalPath());
+        char upd_txt[96];
+        if (ch_n > 0) {
+            std::snprintf(upd_txt, sizeof(upd_txt), Text("重新下载 / 更新章节（当前 %d 章）", "Redownload (%d chs)"), ch_n);
+        } else {
+            std::snprintf(upd_txt, sizeof(upd_txt), "%s", Text("重新下载 / 更新全本章节", "Redownload chapters"));
+        }
+        auto* upd_lbl = AddLabel(upd_btn, upd_txt, Small());
+        lv_obj_center(upd_lbl);
+    }
+
     // 「想读」按钮：只在有进度地址（带短码的书库）时显示
-    const std::string progress_url = valet::sync::ProgressUrlFromDownload(entry.files.empty() ? "" : entry.files.front().url);
+    const std::string progress_url = valet::sync::ProgressUrlFromDownload(dl_url);
     if (!progress_url.empty()) {
         s_wish = false;
         s_wish_pending = false;
@@ -648,8 +747,8 @@ void OpenEditor() {
     lv_obj_set_style_pad_row(panel, 16, 0);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    auto* hint = AddLabel(panel, Text("在订阅的书库里搜。书斋认拼音首字母（hlm = 红楼梦）。",
-                                      "Searches every subscribed library."), Small());
+    auto* hint = AddLabel(panel, Text("同时搜索微信读书与已订阅书库。书斋认拼音首字母（hlm = 红楼梦）。",
+                                      "Searches WeRead and every subscribed library."), Small());
     lv_obj_set_width(hint, lv_pct(100));
     lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
     auto* box = lv_obj_create(panel);
@@ -692,8 +791,151 @@ void OpenEditor() {
     RefreshEditText();
 }
 
+// ── 微信读书扫码登录弹窗 ───────────────────────────────────────────────────
+struct QrJobMsg {
+    uint32_t qr_gen = 0;
+    bool has_qr = false;
+    std::string qr_url;
+    bool done = false;
+    bool ok = false;
+    std::string status;
+};
+
+void CloseWeReadQr() {
+    ++s_qr_gen;
+    if (s_ui.qr_mask) lv_obj_delete(s_ui.qr_mask);
+}
+
+void ApplyWeReadQrMsg(void* p) {
+    auto* msg = static_cast<QrJobMsg*>(p);
+    if (msg->qr_gen != s_qr_gen || s_ui.qr_mask == nullptr) {
+        delete msg;
+        return;
+    }
+    if (msg->has_qr && s_ui.qr_code && !msg->qr_url.empty()) {
+        lv_qrcode_update(s_ui.qr_code, msg->qr_url.data(), msg->qr_url.size());
+        lv_obj_clear_flag(s_ui.qr_code, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_ui.qr_status && !msg->status.empty()) {
+        lv_label_set_text(s_ui.qr_status, msg->status.c_str());
+    }
+    if (msg->done && msg->ok) {
+        CloseWeReadQr();
+        s_signature.clear();
+        StartRoot();
+        ScreenShowToast(Text("微信读书登录成功", "WeRead signed in"));
+    }
+    delete msg;
+}
+
+void WeReadQrWorker(void* arg) {
+    const uint32_t my_gen = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(arg));
+    std::string uid, qr_url, err;
+    if (!valet::weread::BeginQrLogin(uid, qr_url, err)) {
+        auto* m = new QrJobMsg{my_gen, false, {}, true, false, err.empty() ? "获取二维码失败" : err};
+        if (!ScreenLvAsync(ApplyWeReadQrMsg, m)) delete m;
+        vTaskDelete(nullptr);
+        return;
+    }
+    {
+        auto* m = new QrJobMsg{my_gen, true, qr_url, false, false,
+                               Text("请用手机微信扫码确认登录", "Scan with WeChat to sign in")};
+        if (!ScreenLvAsync(ApplyWeReadQrMsg, m)) delete m;
+    }
+    for (int step = 0; step < 90 && my_gen == s_qr_gen; ++step) {
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        if (my_gen != s_qr_gen) break;
+        valet::weread::QrState st = valet::weread::QrState::kPending;
+        std::string poll_err;
+        if (!valet::weread::PollQrLogin(uid, {}, st, poll_err)) {
+            auto* m = new QrJobMsg{my_gen, false, {}, true, false, poll_err.empty() ? "扫码登录失败" : poll_err};
+            if (!ScreenLvAsync(ApplyWeReadQrMsg, m)) delete m;
+            vTaskDelete(nullptr);
+            return;
+        }
+        if (st == valet::weread::QrState::kComplete) {
+            auto* m = new QrJobMsg{my_gen, false, {}, true, true, Text("登录成功", "Signed in")};
+            if (!ScreenLvAsync(ApplyWeReadQrMsg, m)) delete m;
+            vTaskDelete(nullptr);
+            return;
+        }
+        if (st == valet::weread::QrState::kExpired) {
+            auto* m = new QrJobMsg{my_gen, false, {}, true, false, Text("二维码已过期，请关闭后重试", "QR code expired")};
+            if (!ScreenLvAsync(ApplyWeReadQrMsg, m)) delete m;
+            vTaskDelete(nullptr);
+            return;
+        }
+    }
+    vTaskDelete(nullptr);
+}
+
+void OpenWeReadQr() {
+    if (s_ui.qr_mask || !s_ui.scr) return;
+    ++s_qr_gen;
+    const uint32_t my_gen = s_qr_gen;
+    auto* mask = ScreenPopupMask(s_ui.scr);
+    s_ui.qr_mask = mask;
+    lv_obj_add_event_cb(mask, [](lv_event_t*) {
+        ++s_qr_gen;
+        s_ui.qr_mask = s_ui.qr_code = s_ui.qr_status = nullptr;
+    }, LV_EVENT_DELETE, nullptr);
+
+    auto* sheet = lv_obj_create(mask);
+    lv_obj_remove_style_all(sheet);
+    lv_obj_set_size(sheet, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_align(sheet, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(sheet, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(sheet, LV_OBJ_FLAG_CLICKABLE);
+    ScreenPopupTitleBar(sheet, Text("微信读书扫码登录", "WeRead Sign In"), Strong(), Text("关闭", "Close"), Small(),
+                        [](lv_event_t*) { lv_async_call([](void*) { CloseWeReadQr(); }, nullptr); });
+
+    auto* body = lv_obj_create(sheet);
+    lv_obj_remove_style_all(body);
+    lv_obj_set_size(body, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(body, 33, 0);
+    lv_obj_set_style_pad_ver(body, 28, 0);
+    lv_obj_set_style_pad_row(body, 20, 0);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(body, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+
+    const lv_coord_t qr_side = UiSx(240);
+    auto* frame = UiCreateQrFrame(body, qr_side);
+    auto* qr = lv_qrcode_create(frame);
+    lv_qrcode_set_size(qr, qr_side);
+    lv_qrcode_set_dark_color(qr, lv_color_black());
+    lv_qrcode_set_light_color(qr, lv_color_white());
+    lv_qrcode_set_quiet_zone(qr, true);
+    lv_obj_center(qr);
+    lv_obj_add_flag(qr, LV_OBJ_FLAG_HIDDEN);
+    s_ui.qr_code = qr;
+
+    s_ui.qr_status = AddLabel(body, Text("正在请求微信读书二维码…", "Requesting QR code…"), Book_ItemFont());
+    lv_obj_set_width(s_ui.qr_status, lv_pct(100));
+    lv_obj_set_style_text_align(s_ui.qr_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_ui.qr_status, LV_LABEL_LONG_WRAP);
+
+    auto* sub = AddLabel(body,
+                         Text("登录后自动同步微信读书书架、已购书籍与跨端阅读进度。\n不登录也可直接点右上角「搜书」免费试读。",
+                              "Sign in to sync your shelf, purchased books, and reading progress."),
+                         Small());
+    lv_obj_set_width(sub, lv_pct(100));
+    lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
+
+    if (xTaskCreatePinnedToCore(WeReadQrWorker, "wr_qr", 8192,
+                                reinterpret_cast<void*>(static_cast<uintptr_t>(my_gen)),
+                                tskIDLE_PRIORITY + 2, nullptr, 0) != pdPASS) {
+        lv_label_set_text(s_ui.qr_status, Text("内存不足，请稍后重试", "Out of memory"));
+    }
+}
+
 // ── 按键 ──────────────────────────────────────────────────────────────────
 void GoBack() {
+    if (s_ui.qr_mask) { CloseWeReadQr(); return; }
     if (s_ui.detail) { CloseDetail(); return; }
     if (s_ui.editor) { CloseEditor(); return; }
     Level* top = Top();
@@ -703,8 +945,12 @@ void GoBack() {
         ++s_gen;
         s_loading = false;
         s_error.clear();
-        if (Top()->entries.empty() && !Top()->url.empty()) FetchLevel(JobKind::kBrowse, Top()->url);
-        else Render();
+        if (Top()->entries.empty() && !Top()->url.empty()) {
+            if (Top()->url == "weread://shelf") FetchLevel(JobKind::kWeReadShelf, Top()->url);
+            else FetchLevel(JobKind::kBrowse, Top()->url);
+        } else {
+            Render();
+        }
         return;
     }
     s_gate.RequestStop();
@@ -712,7 +958,7 @@ void GoBack() {
 }
 
 void GoNext() {
-    if (s_ui.detail || s_ui.editor || s_loading) return;
+    if (s_ui.qr_mask || s_ui.detail || s_ui.editor || s_loading) return;
     Level* top = Top();
     if (!top) return;
     const int rows = RowsPerPage();
@@ -735,24 +981,23 @@ void StartRoot() {
     s_stack.clear();
     ++s_gen;
     s_error.clear();
-    if (libs.empty()) {
-        s_stack.push_back(Level{});
-        s_error = Text("还没有订阅书库。到 设置 → 阅读与字库 → 书库订阅 里加。", "No library yet. Add one in Settings.");
-        s_loading = false;
-        Render();
-        return;
-    }
-    if (libs.size() == 1) {
-        Level level;
-        level.url = libs.front().url;
-        level.title = libs.front().name;
-        s_stack.push_back(std::move(level));
-        FetchLevel(JobKind::kBrowse, s_stack.back().url);
-        return;
-    }
-    // 订了多个：第一层列书库，点进去是各自的目录
+    // 第一层：展示微信读书（云书架或扫码登录）+ 所有订阅的 OPDS 书库
     Level level;
     level.title = Text("书库", "Libraries");
+    {
+        valet::opds::Entry wr;
+        if (valet::weread::IsLoggedIn()) {
+            wr.title = Text("微信读书 · 我的书架", "WeRead · My Shelf");
+            wr.author = Text("已登录 · 同步云端藏书、已购章节与阅读进度", "Signed in · Syncs shelf, purchases & progress");
+            wr.nav = "weread://shelf";
+        } else {
+            wr.title = Text("微信读书（扫码登录）", "WeRead (Sign In)");
+            wr.author = Text("未登录 · 点右上角「搜书」可直接搜全网试读，扫码同步已购",
+                             "Tap Search for free trials, or sign in to sync purchases");
+            wr.nav = "weread://login";
+        }
+        level.entries.push_back(std::move(wr));
+    }
     for (const auto& lib : libs) {
         valet::opds::Entry entry;
         entry.title = lib.name;
@@ -765,7 +1010,7 @@ void StartRoot() {
 }
 } // namespace
 
-bool OpdsHasLibraries() { return !valet::LoadLibrarySources().empty(); }
+bool OpdsHasLibraries() { return true; }
 
 void OnShelfLibraryClicked(lv_event_t*) {
     lv_async_call([](void*) { ScreenLoadReplace(CreateOpdsScreen()); }, nullptr);
