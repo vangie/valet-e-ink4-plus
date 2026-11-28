@@ -1,5 +1,4 @@
 #include "epd_content_policy.h"
-#pragma GCC optimize("O1")
 
 #include "book_screen/cover/book_cover_workers.h"
 #include "book_screen/book_screen_priv.h"
@@ -115,7 +114,7 @@ static void ListCoverHostDeleted(lv_event_t* event) {
     }
 }
 
-static void ApplyListCoverImage(lv_obj_t* host, reader::RasterImage& cover, reader::BookFormat format) {
+static void ApplyListCoverImage(lv_obj_t* host, reader::RasterImage& cover, reader::BookFormat /*format*/) {
     if (host == nullptr || !lv_obj_is_valid(host) || cover.empty()) {
         return;
     }
@@ -125,8 +124,7 @@ static void ApplyListCoverImage(lv_obj_t* host, reader::RasterImage& cover, read
         auto* child = lv_obj_get_child(host, i);
         if (lv_obj_check_type(child, &lv_image_class)) {
             img = child;
-        } else if (lv_obj_check_type(child, &lv_label_class) &&
-                   std::strcmp(lv_label_get_text(child), reader::FormatLabel(format)) == 0) {
+        } else if (lv_obj_check_type(child, &lv_label_class)) {
             lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
         }
     }
@@ -182,7 +180,7 @@ static void RunListCoverWork(ListCoverFillWork* work) {
             if (work->load_metadata && stat(item.info.path.c_str(), &status) == 0) {
                 item.info.file_size = status.st_size;
                 item.info.mtime = status.st_mtime;
-                item.info.from_weread = valet::weread::IsWeReadBook(item.info.path);
+                item.info.source = valet::weread::DetectBookSource(item.info.path);
                 done->metadata_ready = true;
             } else if (work->load_metadata) {
                 ESP_LOGW(TAG, "visible entry stat failed errno=%d; keep placeholder", errno);
@@ -335,9 +333,16 @@ void FillDetailCoverPlaceholder(lv_obj_t* host, reader::BookFormat format) {
     lv_obj_remove_style_all(ph);
     lv_obj_set_size(ph, st.detail.detail_cover_fw, st.detail.detail_cover_fh);
     lv_obj_set_style_pad_all(ph, kCoverFrameBorder, 0);
-    lv_obj_set_style_bg_color(ph, lv_color_hex(0xF0F0F0), 0);
+    lv_obj_set_style_bg_color(ph, lv_color_hex(0xF8F8F8), 0);
     lv_obj_set_style_bg_opa(ph, LV_OPA_COVER, 0);
     StyleBookCoverFrame(ph);
+    if (st.shelf.selected >= 0 && st.shelf.selected < static_cast<int>(st.shelf.books.size())) {
+        const auto& b = st.shelf.books[static_cast<size_t>(st.shelf.selected)];
+        const reader::BookSource src = (b.source != reader::BookSource::kLocal)
+                                           ? b.source
+                                           : valet::weread::DetectBookSource(b.path);
+        SetBookCoverFrameSource(ph, src);
+    }
     lv_obj_t* ph_lbl = lv_label_create(ph);
     lv_label_set_text(ph_lbl, reader::FormatLabel(format));
     lv_obj_set_style_text_font(ph_lbl, Book_ListFont(), 0);
@@ -357,9 +362,16 @@ void ApplyDetailCoverImage() {
     lv_obj_remove_style_all(frame);
     lv_obj_set_size(frame, st.detail.detail_cover_fw, st.detail.detail_cover_fh);
     lv_obj_set_style_pad_all(frame, kCoverFrameBorder, 0);
-    lv_obj_set_style_bg_color(frame, lv_color_hex(0xF0F0F0), 0);
+    lv_obj_set_style_bg_color(frame, lv_color_hex(0xF8F8F8), 0);
     lv_obj_set_style_bg_opa(frame, LV_OPA_COVER, 0);
     StyleBookCoverFrame(frame);
+    if (st.shelf.selected >= 0 && st.shelf.selected < static_cast<int>(st.shelf.books.size())) {
+        const auto& b = st.shelf.books[static_cast<size_t>(st.shelf.selected)];
+        const reader::BookSource src = (b.source != reader::BookSource::kLocal)
+                                           ? b.source
+                                           : valet::weread::DetectBookSource(b.path);
+        SetBookCoverFrameSource(frame, src);
+    }
     lv_obj_clear_flag(frame, LV_OBJ_FLAG_CLICKABLE);
     Book_DisableScroll(frame);
     lv_obj_t* img = lv_image_create(frame);

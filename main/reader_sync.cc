@@ -190,7 +190,7 @@ void PullTask(void* arg) {
         seen = book.seen;
     }
     if (write_hint) WriteSidecar(job->path, url, seen);
-    if (url.empty()) { delete job; vTaskDeleteWithCaps(nullptr); return; }
+    if (url.empty() || url == "opds://" || url == "cloud://") { delete job; vTaskDeleteWithCaps(nullptr); return; }
 
     if (url.rfind("weread://", 0) == 0) {
         const std::string wr_id = url.substr(9);
@@ -443,7 +443,8 @@ void Push(const std::string& book_path, const Position& pos) {
     {
         std::lock_guard<std::mutex> lock(s_mu);
         auto it = s_books.find(book_path);
-        if (it == s_books.end() || it->second.url.empty() || it->second.pushed_x10 == pos.x10) return;
+        if (it == s_books.end() || it->second.url.empty() || it->second.url == "opds://" ||
+            it->second.url == "cloud://" || it->second.pushed_x10 == pos.x10) return;
         it->second.pushed_x10 = pos.x10;
         url = it->second.url;
     }

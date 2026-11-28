@@ -58,8 +58,17 @@ static void PrepareShelfBase(int width) {
         const int end_shift=y>=bottom?kShelfBaseDepth*(y-bottom)/std::max<int>(1,kShelfBaseTop-1):0;
         const int left=y<kShelfBaseTop?shift:0;
         const int face_right=width-kShelfBaseDepth-1+shift;
-        for(int x=left;x<width-end_shift;++x)
-            shelf_base_pixels[y*width+x]=x>face_right?0:(y<kShelfBaseTop?85:119);
+        for(int x=left;x<width-end_shift;++x) {
+            if (x > face_right) {
+                shelf_base_pixels[y*width+x] = 0; // 右侧立体端面纯黑
+            } else if (y < 2 || y == kShelfBaseTop - 1 || y == kShelfBaseTop || y >= height - 2 || x <= left + 1) {
+                shelf_base_pixels[y*width+x] = 0; // 顶边、前缘折线、底边与左边清晰黑线勾边
+            } else if (y < kShelfBaseTop) {
+                shelf_base_pixels[y*width+x] = 205; // 书架台面浅灰，衬托书籍底部
+            } else {
+                shelf_base_pixels[y*width+x] = 242; // 书架前挡板极浅灰近白，使黑字书名高对比清晰可读
+            }
+        }
     }
     shelf_base_image={};shelf_base_image.header.magic=LV_IMAGE_HEADER_MAGIC;
     shelf_base_image.header.cf=LV_COLOR_FORMAT_L8;

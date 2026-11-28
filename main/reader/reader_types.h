@@ -18,6 +18,13 @@ enum class BookFormat : uint8_t {
     kEbook,
 };
 
+enum class BookSource : uint8_t {
+    kLocal = 0,   // 本地导入 / 传书
+    kWeRead,      // 微信读书 (weread://)
+    kShuzhai,     // 书斋同步书库 (/api/u/...)
+    kLibrary,     // 其他 OPDS 书库 / 云端书城 (opds:// 或 cloud://)
+};
+
 enum class ContentKind : uint8_t {
     kText = 0,
     kImage,
@@ -30,7 +37,7 @@ struct BookInfo {
     BookFormat format = BookFormat::kUnknown;
     size_t file_size = 0;
     int64_t mtime = 0;      // 文件修改时间（秒），书库列表按最新优先排序
-    bool from_weread = false; // 来自微信读书（由 .sync sidecar 的 weread:// 识别）
+    BookSource source = BookSource::kLocal; // 书籍来源（由 .sync sidecar 识别）
 };
 
 // 章节/正文中的一段内容：纯文本或图片（EPUB 内路径 / 外部文件路径）

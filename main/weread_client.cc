@@ -1576,6 +1576,45 @@ bool IsWeReadBook(const std::string& book_path, std::string* book_id_out) {
     return buf[plen] != '\0';
 }
 
+reader::BookSource DetectBookSource(const std::string& book_path) {
+    if (book_path.empty()) return reader::BookSource::kLocal;
+    const std::string sync_path = reader::BookStoragePath(book_path.c_str(), ".sync");
+    if (sync_path.empty()) return reader::BookSource::kLocal;
+    FILE* f = std::fopen(sync_path.c_str(), "rb");
+    if (!f) return reader::BookSource::kLocal;
+    char buf[160] = {};
+    const size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+    std::fclose(f);
+    buf[n] = '\0';
+    char* nl = std::strchr(buf, '\n');
+    if (nl) *nl = '\0';
+    if (std::strncmp(buf, "weread://", 9) == 0) return reader::BookSource::kWeRead;
+    if (std::strstr(buf, "/api/u/") != nullptr) return reader::BookSource::kShuzhai;
+    if (std::strncmp(buf, "opds://", 7) == 0 || std::strncmp(buf, "cloud://", 8) == 0 ||
+        std::strncmp(buf, "http://", 7) == 0 || std::strncmp(buf, "https://", 8) == 0) {
+        return reader::BookSource::kLibrary;
+    }
+    return reader::BookSource::kLocal;
+}
+
+const char* BookSourceRibbonText(reader::BookSource src) {
+    switch (src) {
+        case reader::BookSource::kWeRead:  return "微读";
+        case reader::BookSource::kShuzhai: return "书斋";
+        case reader::BookSource::kLibrary: return "书库";
+        default:                           return "";
+    }
+}
+
+const char* BookSourceFullName(reader::BookSource src) {
+    switch (src) {
+        case reader::BookSource::kWeRead:  return "微信读书";
+        case reader::BookSource::kShuzhai: return "书斋";
+        case reader::BookSource::kLibrary: return "在线书库";
+        default:                           return "";
+    }
+}
+
 static std::vector<std::string> ReadWrMap(const std::string& book_path) {
     std::vector<std::string> uids;
     const std::string path = WrMapPath(book_path);

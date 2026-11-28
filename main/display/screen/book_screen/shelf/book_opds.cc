@@ -519,7 +519,11 @@ void DownloadTask(void* arg) {
                                                err, DownloadProgress, job, &s_gate);
     } else {
         ok = reader::DownloadCloudBook(job->task, err, DownloadProgress, job, &s_gate);
-        if (ok) valet::sync::Remember(job->task.LocalPath(), valet::sync::ProgressUrlFromDownload(job->task.download_url));
+        if (ok) {
+            std::string sync_url = valet::sync::ProgressUrlFromDownload(job->task.download_url);
+            if (sync_url.empty()) sync_url = "opds://";
+            valet::sync::Remember(job->task.LocalPath(), sync_url);
+        }
     }
     ESP_LOGI(TAG, "download ok=%d size=%llu err=[%s]", ok ? 1 : 0, static_cast<unsigned long long>(job->task.file_size), err.c_str());
     auto* msg = new DownloadMsg{job->gen, 100, true, ok, err, job->task.LocalPath(), job->task.title};

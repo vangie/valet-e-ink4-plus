@@ -1,5 +1,3 @@
-#pragma GCC optimize("O1")
-
 #include "book_screen/shelf/book_detail.h"
 #include "book_screen/book_screen_priv.h"
 #include "book_screen/cover/book_cover_loader.h"
@@ -204,8 +202,12 @@ lv_obj_t* CreateDetailScreen(int book_index) {
 
         lv_obj_t* fmt = lv_label_create(meta);
         std::string fmt_str = reader::FormatLabel(shown.format);
-        if (shown.from_weread || valet::weread::IsWeReadBook(shown.path)) {
-            fmt_str += " · 微信读书";
+        const reader::BookSource src = (shown.source != reader::BookSource::kLocal)
+                                           ? shown.source
+                                           : valet::weread::DetectBookSource(shown.path);
+        const char* src_full = valet::weread::BookSourceFullName(src);
+        if (src_full && src_full[0] != '\0') {
+            fmt_str += std::string(" · ") + src_full;
         }
         lv_label_set_text(fmt, fmt_str.c_str());
         lv_obj_set_style_text_font(fmt, item_font, 0);

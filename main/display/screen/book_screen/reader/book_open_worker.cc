@@ -1,6 +1,5 @@
 #include "reader_sync.h"
 #include "book_screen/shelf/book_shelf_ops.h"
-#pragma GCC optimize("O1")
 
 #include "assets/lang_reader.h"
 #include "sd_paths.h"
