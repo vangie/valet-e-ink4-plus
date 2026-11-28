@@ -130,6 +130,8 @@ const state = {
   assistantAdvanced: false,
   assistantUnpair: false,
   shelfView: "cover",
+  shelfStyle: "gallery", // "gallery" 画廊极简 | "glass" 玻璃挡条 | "rail" 深色书轨 | "cards" 图文大卡
+  coverTpl: "auto",      // "auto" 自动 | "art" 插画 | "dark" 深色典藏 | "modern" 现代留白 | "split" 上下撞色
   bookIndex: 0,
   wallUse: "",
   wallIndex: 0,

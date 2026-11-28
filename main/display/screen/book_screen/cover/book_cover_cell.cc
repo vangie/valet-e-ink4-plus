@@ -23,6 +23,16 @@
 #include "assets/lang_config.h"
 
 namespace {
+uint32_t CoverStyleHash(const char* s) {
+    uint32_t h = 2166136261u;
+    if (!s) return 0;
+    while (*s) {
+        h ^= static_cast<uint8_t>(*s++);
+        h *= 16777619u;
+    }
+    return h;
+}
+
 void OnCoverPlaceholderDraw(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_DRAW_MAIN) return;
     lv_obj_t* obj = static_cast<lv_obj_t*>(lv_event_get_target(e));
@@ -41,30 +51,74 @@ void OnCoverPlaceholderDraw(lv_event_t* e) {
     const lv_coord_t ch = lv_area_get_height(&a);
     if (cw < 32 || ch < 32) return;
 
+    const int tpl = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e))) & 3;
+    const lv_coord_t bw = kCoverFrameBorder;
+
     lv_draw_rect_dsc_t ink;
     lv_draw_rect_dsc_init(&ink);
     ink.bg_color = lv_color_black();
     ink.bg_opa = LV_OPA_COVER;
-    ink.border_width = 0;
-    ink.radius = 0;
 
-    // 左侧装订粗书脊（内缘与 DrawBookCoverBorder 的书脊压痕线融合）
-    const lv_coord_t spine_w = 5;
-    lv_area_t spine = {static_cast<lv_coord_t>(a.x1 + kCoverFrameBorder),
-                       static_cast<lv_coord_t>(a.y1 + kCoverFrameBorder),
-                       static_cast<lv_coord_t>(a.x1 + kCoverFrameBorder + spine_w - 1),
-                       static_cast<lv_coord_t>(a.y2 - kCoverFrameBorder)};
-    lv_draw_rect(layer, &ink, &spine);
+    lv_draw_rect_dsc_t paper;
+    lv_draw_rect_dsc_init(&paper);
+    paper.bg_color = lv_color_white();
+    paper.bg_opa = LV_OPA_COVER;
 
-    // 上部极简封面装饰横线（呼应首页阅读卡片风格）
-    const lv_coord_t lx1 = a.x1 + kCoverFrameBorder + spine_w + 14;
-    const lv_coord_t ly0 = a.y1 + ch / 5;
-    for (int i = 0; i < 2; ++i) {
-        const lv_coord_t lx2 = a.x2 - 28 - i * 18;
-        if (lx2 > lx1 + 12) {
-            lv_area_t la = {lx1, static_cast<lv_coord_t>(ly0 + i * 12),
-                            lx2, static_cast<lv_coord_t>(ly0 + i * 12 + 1)};
-            lv_draw_rect(layer, &ink, &la);
+    auto fill_rect = [&](const lv_draw_rect_dsc_t& d, lv_coord_t x1, lv_coord_t y1, lv_coord_t x2, lv_coord_t y2) {
+        if (x1 > x2 || y1 > y2) return;
+        lv_area_t r = {x1, y1, x2, y2};
+        lv_draw_rect(layer, &d, &r);
+    };
+
+    if (tpl == 1) {
+        // 模板 1：深墨典藏内框（纯黑底 + 细白内嵌线框）
+        fill_rect(ink, a.x1 + bw, a.y1 + bw, a.x2 - bw, a.y2 - bw);
+        const lv_coord_t inset = bw + 7;
+        if (cw > inset * 2 + 12 && ch > inset * 2 + 12) {
+            fill_rect(paper, a.x1 + inset, a.y1 + inset, a.x2 - inset, a.y1 + inset);
+            fill_rect(paper, a.x1 + inset, a.y2 - inset, a.x2 - inset, a.y2 - inset);
+            fill_rect(paper, a.x1 + inset, a.y1 + inset, a.x1 + inset, a.y2 - inset);
+            fill_rect(paper, a.x2 - inset, a.y1 + inset, a.x2 - inset, a.y2 - inset);
+        }
+    } else if (tpl == 2) {
+        // 模板 2：Valet 11.2° 斜切撞色（上半深墨斜切，下半纸白）
+        const int y_left = a.y1 + (ch * 58) / 100;
+        const int y_right = a.y1 + (ch * 46) / 100;
+        const int inner_w = std::max<int>(1, (a.x2 - bw) - (a.x1 + bw));
+        for (int y = a.y1 + bw; y <= std::max(y_left, y_right); ++y) {
+            int x_end = a.x2 - bw;
+            if (y > y_right) {
+                const int span = std::max(1, y_left - y_right);
+                x_end = (a.x1 + bw) + inner_w * (y_left - y) / span;
+                x_end = std::clamp<int>(x_end, a.x1 + bw, a.x2 - bw);
+            }
+            fill_rect(ink, a.x1 + bw, static_cast<lv_coord_t>(y), static_cast<lv_coord_t>(x_end), static_cast<lv_coord_t>(y));
+        }
+    } else if (tpl == 0) {
+        // 模板 0：中式线装题签（左侧四针古籍装订线 + 右侧题签细框）
+        const lv_coord_t sx = a.x1 + bw + 9;
+        fill_rect(ink, sx, a.y1 + bw, sx + 1, a.y2 - bw);
+        for (int k = 0; k < 4; ++k) {
+            const lv_coord_t ny = a.y1 + bw + ((ch - 2 * bw) * (16 + k * 22)) / 100;
+            fill_rect(ink, a.x1 + bw, ny, sx, ny + 1);
+        }
+        // 内部细装饰框
+        const lv_coord_t bx1 = sx + 10;
+        const lv_coord_t bx2 = a.x2 - bw - 10;
+        const lv_coord_t by1 = a.y1 + bw + 12;
+        const lv_coord_t by2 = a.y2 - bw - 12;
+        if (bx2 > bx1 + 16 && by2 > by1 + 16) {
+            fill_rect(ink, bx1, by1, bx2, by1);
+            fill_rect(ink, bx1, by2, bx2, by2);
+        }
+    } else {
+        // 模板 3：极简左书脊（左侧 5px 实心书脊 + 底部题记横线）
+        const lv_coord_t spine_w = 5;
+        fill_rect(ink, a.x1 + bw, a.y1 + bw, a.x1 + bw + spine_w - 1, a.y2 - bw);
+        const lv_coord_t lx1 = a.x1 + bw + spine_w + 14;
+        const lv_coord_t ly = a.y2 - bw - 26;
+        if (a.x2 - bw - 14 > lx1 + 12) {
+            fill_rect(ink, lx1, ly, a.x2 - bw - 14, ly);
         }
     }
 }
@@ -79,14 +133,17 @@ lv_obj_t* CreateCoverSlot(lv_obj_t* parent, const reader::BookInfo& info, lv_coo
     lv_obj_remove_style_all(host);
     lv_obj_set_size(host, w, h);
     lv_obj_set_style_pad_all(host, kCoverFrameBorder, 0);
-    lv_obj_set_style_bg_color(host, lv_color_hex(0xF8F8F8), 0);
+    lv_obj_set_style_bg_color(host, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(host, LV_OPA_COVER, 0);
     StyleBookCoverFrame(host);
     if (!directory && info.source != reader::BookSource::kLocal) {
         SetBookCoverFrameSource(host, info.source);
     }
+    const int tpl = directory ? 0 : static_cast<int>(CoverStyleHash(info.title.c_str()) & 3u);
+    const bool dark_top = !directory && (tpl == 1 || tpl == 2);
     if (!directory) {
-        lv_obj_add_event_cb(host, OnCoverPlaceholderDraw, LV_EVENT_DRAW_MAIN, nullptr);
+        lv_obj_add_event_cb(host, OnCoverPlaceholderDraw, LV_EVENT_DRAW_MAIN,
+                            reinterpret_cast<void*>(static_cast<intptr_t>(tpl)));
     }
     lv_obj_clear_flag(host, LV_OBJ_FLAG_CLICKABLE);
     Book_DisableScroll(host);
@@ -105,30 +162,30 @@ lv_obj_t* CreateCoverSlot(lv_obj_t* parent, const reader::BookInfo& info, lv_coo
                               : (!info.title.empty() ? info.title.c_str() : reader::FormatLabel(info.format));
     lv_label_set_text(ph_lbl, ph_text);
     lv_obj_set_style_text_font(ph_lbl, directory ? Book_ListFont() : title_f, 0);
-    lv_obj_set_style_text_color(ph_lbl, lv_color_black(), 0);
+    lv_obj_set_style_text_color(ph_lbl, dark_top ? lv_color_white() : lv_color_black(), 0);
     if (directory) {
         lv_obj_set_width(ph_lbl, std::max<int>(1, w - 2 * (kCoverSpineInset + kCoverFrameBorder + 8)));
         lv_label_set_long_mode(ph_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_align(ph_lbl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(ph_lbl);
     } else {
-        const lv_coord_t text_left = 18;
-        const lv_coord_t text_w = std::max<int>(24, w - 2 * kCoverFrameBorder - text_left - 12);
+        const lv_coord_t text_left = (tpl == 0) ? 20 : 14;
+        const lv_coord_t text_w = std::max<int>(24, w - 2 * kCoverFrameBorder - text_left - 24);
         lv_obj_set_width(ph_lbl, text_w);
         const lv_coord_t lh = (title_f && title_f->line_height > 0) ? title_f->line_height : 28;
-        lv_obj_set_style_max_height(ph_lbl, lh * 3 + 4, 0);
+        lv_obj_set_style_max_height(ph_lbl, lh * 2 + 4, 0);
         lv_label_set_long_mode(ph_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_align(ph_lbl, LV_TEXT_ALIGN_LEFT, 0);
-        lv_obj_align(ph_lbl, LV_ALIGN_LEFT_MID, text_left, 6);
+        lv_obj_align(ph_lbl, LV_ALIGN_TOP_LEFT, text_left, 18);
 
-        // 右下角低调小号格式角标
+        // 右下角低调小号格式角标（tpl==1 全黑底用白字，其余下半白底用黑字）
         const lv_font_t* fmt_f = fontpack_lv_font_get(18, 2);
         if (!fmt_f) fmt_f = title_f;
         lv_obj_t* fmt_lbl = lv_label_create(host);
         lv_label_set_text(fmt_lbl, reader::FormatLabel(info.format));
         lv_obj_set_style_text_font(fmt_lbl, fmt_f, 0);
-        lv_obj_set_style_text_color(fmt_lbl, lv_color_black(), 0);
-        lv_obj_align(fmt_lbl, LV_ALIGN_BOTTOM_RIGHT, -10, -6);
+        lv_obj_set_style_text_color(fmt_lbl, (tpl == 1) ? lv_color_white() : lv_color_black(), 0);
+        lv_obj_align(fmt_lbl, LV_ALIGN_BOTTOM_RIGHT, -10, -8);
         lv_obj_clear_flag(fmt_lbl, LV_OBJ_FLAG_CLICKABLE);
     }
     lv_obj_clear_flag(ph_lbl, LV_OBJ_FLAG_CLICKABLE);
@@ -191,16 +248,9 @@ lv_obj_t* CreateBookCoverCell(lv_obj_t* parent, const reader::BookInfo& info, in
                             BookReaderPrefsShowShelfProgress() != 0
                             ? Book_CachedProgressX10OrZero(info.path.c_str())
                             : -1;
-    if (pct_x10 >= 0) {
-        lv_obj_t* badge = Book_CreateProgressPctBadge(host, pct_x10);
-        if (badge != nullptr) {
-            // 相对书脊第二条竖线内侧再留空（外框 + 书脊 inset + 线宽 + 间隙）
-            const lv_coord_t left =
-                kCoverSpineInset + kCoverFrameBorder + 4;
-            lv_obj_align(badge, LV_ALIGN_TOP_LEFT, left, 8);
-        }
+    if (pct_x10 > 0) {
+        SetBookCoverFrameProgress(host, pct_x10);
     }
-
 
     if (show_title) {
         const lv_font_t* item_font = Book_ItemFont();
@@ -208,7 +258,7 @@ lv_obj_t* CreateBookCoverCell(lv_obj_t* parent, const reader::BookInfo& info, in
         lv_obj_set_width(title, cell_w);
         lv_obj_set_style_text_font(title, item_font, 0);
         lv_obj_set_style_text_color(title, lv_color_black(), 0);
-        lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
         lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
         const std::string clipped = TruncateTextToWidth(info.title, item_font, cell_w);
         lv_label_set_text(title, clipped.c_str());

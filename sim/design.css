@@ -670,38 +670,307 @@ div.v-row { box-sizing: border-box; }
 .v-hdl.s::after { top: 23px; }
 .v-hdl.e::after { bottom: 23px; }
 
-/* 书架 · 书库（OPDS 订阅） */
-.v-lib { gap: 8px; }
-.v-lhead-row { flex: none; display: flex; align-items: center; gap: 8px; padding-bottom: 6px; }
-.v-lhead-row .v-lhead-title { flex: 1; font-size: 14px; font-weight: 700; }
-.v-lhead-row .v-lview-wrap { flex: none; }
-.v-ltag-btn { flex: none; border: 1.5px solid var(--ink); border-radius: 4px; padding: 3px 10px; font-size: 10px; background: none; }
-.v-opds-list { display: flex; flex-direction: column; border-top: 1.5px solid var(--ink); }
-.v-opds-row { width: 100%; min-height: 52px; padding: 5px 2px; border: 0; border-bottom: 1.5px solid var(--ink); background: none; display: flex; align-items: center; gap: 8px; text-align: left; }
+/* ── 书架 · 书库（OPDS / 微信读书）与画廊式墨水屏书架 ── */
+.v-lib { gap: 8px; padding-top: 8px; }
+.v-lhead-acts { display: flex; align-items: center; gap: 6px; }
+.v-ltag-btn { flex: none; border: 1.2px solid var(--ink); padding: 2px 7px; font-size: 9px; background: none; cursor: pointer; }
+.v-sseg button { height: 22px; font-size: 9px; }
+
+.v-opds-list { display: flex; flex-direction: column; border-top: 1.2px solid var(--ink); }
+.v-opds-row { width: 100%; min-height: 48px; padding: 5px 2px; border: 0; border-bottom: 1px solid var(--ink); background: none; display: flex; align-items: center; gap: 8px; text-align: left; }
 .v-opds-row > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .v-opds-row b { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v-opds-row em { font-style: normal; font-size: 9px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.v-opds-row small { flex: none; font-size: 10px; }
+.v-opds-row small { flex: none; font-size: 9px; }
 
-.v-lsearch .ic { width: 12px; height: 12px; flex: none; }
-.v-lsearch input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--ink); font-size: 10.8px; }
-.v-lsearch button { border: 0; background: none; font-size: 9px; text-decoration: underline; padding: 4px 2px; }
+.v-lsearch { flex: none; display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 7px; border: 1.2px solid var(--ink); background: none; }
+.v-lsearch .ic { width: 11px; height: 11px; flex: none; }
+.v-lsearch input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--ink); font-size: 9.5px; }
+.v-lsearch button { border: 0; background: none; font-size: 8.5px; text-decoration: underline; padding: 2px; }
 .v-lhint { margin: 0; flex: none; font-size: 9px; color: var(--g1); }
-.v-lsec { flex: none; }
-.v-lsec h4 { margin: 2px 0 5px; padding-top: 6px; border-top: 1.2px solid var(--ink); font-size: 10.8px; font-weight: 600; }
-.v-lcovers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.v-lcovers button { min-width: 0; padding: 0; border: 0; background: none; text-align: left; display: flex; flex-direction: column; gap: 2px; }
-.v-lcovers span { font-size: 9px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.v-lcovers em { font-style: normal; font-size: 8px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.v-lcover { position: relative; height: 72px; box-sizing: border-box; padding: 7px 5px 5px 9px; border: 1.2px solid var(--ink); display: flex; flex-direction: column; justify-content: space-between; font-style: normal; overflow: hidden; }
-.v-lcover::before { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: var(--ink); }
-.v-lcover b { font: 600 10.8px "Songti SC", serif; line-height: 1.25; word-break: break-all; }
-.v-lcover em { font-style: normal; font-size: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.v-lcover.sm { width: 30px; height: 42px; flex: none; padding: 4px 2px 2px 6px; }
-.v-lcover.sm b { font-size: 7px; }
-.v-lcover.sm em { display: none; }
+
+/* ── 实体书装帧封面系统（严格遵循四级灰阶与直角线条，零圆角、零模糊） ── */
+.v-lcover {
+  position: relative;
+  height: 82px;
+  box-sizing: border-box;
+  border: 1.2px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  display: block;
+  font-style: normal;
+  overflow: hidden;
+  /* 右下 1px 纸白 + 1px 墨线 = 实体书页层叠边缘 */
+  box-shadow: 1.5px 1.5px 0 var(--paper), 2.5px 2.5px 0 var(--ink);
+}
+.v-cov-in {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 7px 5px 5px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.v-cov-t {
+  font: 600 10.5px/1.25 "Songti SC", "Source Han Serif SC", serif;
+  letter-spacing: 0.3px;
+  display: flex;
+  flex-direction: column;
+}
+.v-cov-t span { display: block; }
+.v-cov-a {
+  font-style: normal;
+  font-size: 6.8px;
+  color: var(--g1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 装帧 1：经典左书脊 (tpl-classic) */
+.v-lcover.tpl-classic::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ink);
+  z-index: 2;
+}
+
+/* 装帧 2：中式线装签条 (tpl-tategaki) — 左侧四钉线装孔 + 竖排题签框 */
+.v-lcover.tpl-tategaki {
+  background:
+    linear-gradient(90deg, transparent 4px, var(--ink) 4px, var(--ink) 4.8px, transparent 4.8px),
+    linear-gradient(180deg, transparent 16%, var(--ink) 16%, var(--ink) 17.5%, transparent 17.5%, transparent 38%, var(--ink) 38%, var(--ink) 39.5%, transparent 39.5%, transparent 60%, var(--ink) 60%, var(--ink) 61.5%, transparent 61.5%, transparent 82%, var(--ink) 82%, var(--ink) 83.5%, transparent 83.5%),
+    var(--paper);
+  background-size: 100% 100%, 4.5px 100%, 100% 100%;
+  background-repeat: no-repeat;
+}
+.v-lcover.tpl-tategaki .v-cov-in {
+  padding: 6px 6px 5px 9px;
+  flex-direction: row-reverse;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.v-lcover.tpl-tategaki .v-cov-t {
+  writing-mode: vertical-rl;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  padding: 4px 2.5px;
+  font-size: 9.5px;
+  line-height: 1.15;
+  letter-spacing: 1px;
+  max-height: 66px;
+}
+.v-lcover.tpl-tategaki.tagged .v-cov-in { padding-right: 13px; }
+.v-lcover.tpl-tategaki .v-cov-a {
+  align-self: flex-end;
+  writing-mode: vertical-rl;
+  font-size: 6.5px;
+  letter-spacing: 0.5px;
+  max-height: 52px;
+}
+
+/* 装帧 3：深墨典藏 (tpl-dark) — 墨底白字 + 内嵌细白框 */
+.v-lcover.tpl-dark {
+  background: var(--ink);
+  color: var(--paper);
+}
+.v-lcover.tpl-dark .v-cov-in {
+  margin: 3px;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  border: 1px solid rgba(242, 242, 241, 0.72);
+  padding: 5px 4px 4px 5px;
+}
+.v-lcover.tpl-dark .v-cov-t { color: var(--paper); font-size: 10px; }
+.v-lcover.tpl-dark .v-cov-a { color: var(--g2); }
+
+/* 装帧 4：斜切现代 (tpl-slash) — 呼应 Valet 首页 11.2° 斜切几何基因 */
+.v-lcover.tpl-slash {
+  background: linear-gradient(168.8deg, var(--ink) 0%, var(--ink) 54%, var(--paper) 54.5%, var(--paper) 100%);
+}
+.v-lcover.tpl-slash .v-cov-in { padding: 6px 5px 4px 7px; }
+.v-lcover.tpl-slash .v-cov-t { color: var(--paper); font-size: 10px; }
+.v-lcover.tpl-slash .v-cov-a { color: var(--ink); font-weight: 600; }
+
+/* 缩略与详情页大尺寸封面 */
+.v-lcover.sm { width: 32px; height: 46px; flex: none; box-shadow: none; border-left-width: 3px; }
+.v-lcover.sm::before { display: none; }
+.v-lcover.sm .v-cov-in { padding: 3px 2px; align-items: center; justify-content: center; text-align: center; }
+.v-lcover.sm .v-cov-t { font-size: 8.5px; line-height: 1.2; }
+.v-lcover.sm .v-cov-a { display: none; }
 .v-lcover.big { width: 74px; height: 104px; flex: none; }
-.v-lcover.big b { font-size: 13px; }
+.v-lcover.big .v-cov-t { font-size: 12.5px; }
+
+/* ── 右上角 45° 来源斜角标（微读 / 书斋 / 古登堡） ── */
+.v-ltag {
+  position: absolute;
+  top: 7px;
+  right: -20px;
+  width: 62px;
+  transform: rotate(45deg);
+  z-index: 4;
+  font-style: normal;
+  font-size: 6.2px;
+  font-weight: 600;
+  line-height: 9.5px;
+  text-align: center;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* 微读：黑底白字 + 1px 纸白外衬边（在深色/浅色封面上都清晰分明） */
+.v-ltag.is-dark {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: 0 0 0 1px var(--paper), 0 0 0 1.8px var(--ink);
+}
+/* 书斋：纸白底黑字 + 上下墨线 */
+.v-ltag.is-paper {
+  background: var(--paper);
+  color: var(--ink);
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  box-shadow: 0 0 0 1px var(--paper);
+}
+/* 古登堡：墨水屏抖点网纹底 */
+.v-ltag.is-dither {
+  background-color: var(--paper);
+  background-image: radial-gradient(var(--ink) 0.45px, transparent 0.6px);
+  background-size: 2px 2px;
+  color: var(--ink);
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+.v-lcover.tagged:not(.tpl-tategaki) .v-cov-t { padding-right: 14px; }
+.v-lcover.away { border-style: dashed; box-shadow: none; background: var(--paper) !important; color: var(--ink) !important; }
+.v-lcover.away::before { background: none; border-left: 1px dashed var(--ink); }
+.v-lcover.away .v-cov-t, .v-lcover.away .v-cov-a { color: var(--g1) !important; }
+
+/* ── 四款书架板式 ── */
+.v-sstage { display: flex; flex-direction: column; gap: 11px; padding-bottom: 4px; }
+.v-stier { position: relative; display: flex; flex-direction: column; }
+.v-sgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; position: relative; z-index: 1; }
+.v-sitem {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+.v-scov-box { position: relative; width: 100%; }
+/* 封面底部内嵌 2.5px 阅读进度条（不额外占用封面下方高度，极简克制） */
+.v-cov-prog {
+  position: absolute;
+  left: 1.2px;
+  right: 1.2px;
+  bottom: 1.2px;
+  height: 2.5px;
+  background: rgba(242, 242, 241, 0.85);
+  border-top: 1px solid var(--ink);
+  z-index: 3;
+  display: block;
+}
+.v-cov-prog b { display: block; height: 100%; background: var(--ink); }
+.v-sname {
+  margin-top: 3px;
+  font-size: 9.2px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v-snote {
+  font-style: normal;
+  font: 500 8px/1.2 "Avenir Next", "PingFang SC", sans-serif;
+  color: var(--g1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 板式 2：斜切主卡 + 网格 (is-slash) — 复用首页 .v-book 的斜切设计 */
+.v-shero {
+  position: relative;
+  flex: none;
+  width: 100%;
+  height: 60px;
+  padding: 0 0 0 8px;
+  border: 1.2px solid var(--ink);
+  background: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+}
+.v-shero-main { flex: 1; min-width: 0; padding-right: 72px; display: flex; flex-direction: column; gap: 3px; }
+.v-shero-main b { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-shero-main em { font-style: normal; font-size: 8.5px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-shero-main .v-track { width: 76px; height: 4px; }
+.v-shero .v-wedge { width: 68px; font-size: 10px; }
+
+/* 板式 3：层板托轨 (is-rail) — 封面稳立在双线层板与抖点阴影上 */
+.v-stier.is-rail .v-lcover { box-shadow: 2px 0 0 var(--ink); }
+.v-stier.is-rail .v-sname { margin-top: 8px; text-align: center; }
+.v-stier.is-rail .v-snote { text-align: center; }
+.v-sledge {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 82px;
+  height: 3px;
+  background: var(--ink);
+  z-index: 3;
+  pointer-events: none;
+}
+.v-sledge::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 3px;
+  height: 3px;
+  background-image: radial-gradient(var(--ink) 0.55px, transparent 0.75px);
+  background-size: 2px 2px;
+}
+
+/* 板式 4：瑞士目录列表 (is-clean) — 干净横线分隔，无笨重外框 */
+.v-lrows.is-clean { border-top: 1.2px solid var(--ink); display: flex; flex-direction: column; }
+.v-lrow-clean {
+  width: 100%;
+  min-height: 58px;
+  padding: 6px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--ink);
+  background: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.v-lrow-clean.away .v-lcover.sm { border-style: dashed; border-left-width: 1.2px; }
+.v-lrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3.5px; }
+.v-lrow-main b { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-lrow-main em { font-style: normal; font-size: 8.8px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-lrow-main .v-track { width: 72px; height: 4px; }
+.v-lpct { flex: none; font: 600 13px/1 "Avenir Next", sans-serif; color: var(--ink); }
+.v-lstat { flex: none; font-size: 8px; font-weight: 500; padding: 2px 5px; border: 1px solid var(--ink); color: var(--ink); }
+.v-lstat.is-away { border-style: dashed; color: var(--g1); }
+
 .v-lrows { flex: none; display: flex; flex-direction: column; border-top: 1.2px solid var(--ink); }
 .v-lrow { width: 100%; min-height: 52px; padding: 5px 2px; border: 0; border-bottom: 1px solid var(--ink); background: none; display: flex; align-items: center; gap: 8px; text-align: left; }
 .v-lrow > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -720,12 +989,7 @@ div.v-row { box-sizing: border-box; }
 .v-lacts .v-solid[disabled] { background: var(--paper); color: var(--ink); border: 1.2px dashed var(--ink); }
 .v-lacts .v-line.on { border-style: dashed; }
 .v-inputs.one { grid-template-columns: 1fr; margin-bottom: 6px; }
-.v-lbar { flex: none; display: flex; align-items: center; justify-content: space-between; font-size: 9px; color: var(--g1); }
+.v-lbar { flex: none; display: flex; align-items: center; justify-content: space-between; font-size: 8.5px; color: var(--g1); }
 .panel.v2 .seg.tiny.v-lview button { padding: 3px 9px; }
-/* 书库的书：封面右上角斜贴来源；没下载的封面是虚线框 */
-.v-lcover.away { border-style: dashed; }
-.v-lcover.away::before { background: none; border-left: 1px dashed var(--ink); }
-.v-ltag { position: absolute; top: 9px; right: -21px; width: 66px; transform: rotate(45deg); background: var(--ink); color: var(--paper); font-style: normal; font-size: 6.5px; font-weight: 600; line-height: 10px; text-align: center; white-space: nowrap; pointer-events: none; }
-.v-lcover.tagged b { padding-right: 17px; }
 .v-lrow.tagged { position: relative; overflow: hidden; }
 .v-lrow.tagged > small { margin-right: 18px; }

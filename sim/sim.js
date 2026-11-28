@@ -68,7 +68,7 @@ const ABOUT = {
     "设置是左侧十四个页签，云服务在「对话」里，换了要重启。",
   ]],
 };
-const JUMPS = [["home", "首页"], ["reader", "正文"], ["ask", "提问"], ["call", "通话"], ["settings", "设置"], ["standby", "待机"], ["setup", "配置页"]];
+const JUMPS = [["home", "首页"], ["shelf", "书架"], ["reader", "正文"], ["ask", "提问"], ["call", "通话"], ["settings", "设置"], ["standby", "待机"], ["setup", "配置页"]];
 
 function renderAbout() {
   document.querySelector("#upstream-status").textContent = `公开源码 ${UPSTREAM.sourceVersion} · 官方固件 ${UPSTREAM.releaseVersion} · 原型 ${UPSTREAM.prototypeVersion}（界面已按源码复核，底层硬件行为仍需实机验证）`;
@@ -109,6 +109,11 @@ function jumpTo(id) {
     state.standby = true;
     return render();
   }
+  if (id === "shelf") {
+    state.libBook = null;
+    state.libOpds = false;
+    return go("shelf");
+  }
   if (id === "reader") {
     if (isV2()) return go("reader");
     go("detail");
@@ -142,13 +147,32 @@ jumpEl.addEventListener("click", (e) => {
   const b = e.target.closest("[data-jump]");
   if (b) jumpTo(b.dataset.jump);
 });
+nowEl.addEventListener("click", (e) => {
+  const s = e.target.closest("[data-side-shelf]");
+  if (s) {
+    state.shelfStyle = s.dataset.sideShelf;
+    flash();
+    return render();
+  }
+  const t = e.target.closest("[data-side-tpl]");
+  if (t) {
+    state.coverTpl = t.dataset.sideTpl;
+    flash();
+    return render();
+  }
+});
 document.querySelector("[data-reset]").addEventListener("click", () => {
   sessionStorage.setItem("design", state.design);
   location.reload();
 });
 if (sessionStorage.getItem("design") === "classic") state.design = "classic";
 sessionStorage.removeItem("design");
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.get("screen")) state.screen = urlParams.get("screen");
+if (urlParams.get("style")) state.shelfStyle = urlParams.get("style");
+if (urlParams.get("tpl")) state.coverTpl = urlParams.get("tpl");
 renderAbout();
+render();
 
 // 物理键：按下开始计时，到点算长按；没到点松手算短按。
 const KEYS = {

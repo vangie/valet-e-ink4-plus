@@ -42,6 +42,7 @@ std::vector<std::weak_ptr<CoverMask>> s_masks;
 struct CoverFrameState {
     std::shared_ptr<CoverMask> mask;
     reader::BookSource source = reader::BookSource::kLocal;
+    int progress_x10 = -1;
 };
 
 struct CornerRibbonDsc {
@@ -324,6 +325,36 @@ void OnBookCoverFrameDraw(lv_event_t* e) {
         }
     }
     DrawBookCoverBorder(layer, box, r);
+
+    // 画廊风格：封面底部内嵌 5px 阅读进度条（白底黑框黑填充）
+    if (state && state->progress_x10 > 0) {
+        const lv_coord_t bw = kCoverFrameBorder;
+        const lv_coord_t bar_h = 5;
+        const lv_coord_t x1 = box.x1 + bw;
+        const lv_coord_t x2 = box.x2 - bw;
+        const lv_coord_t y2 = box.y2 - bw;
+        const lv_coord_t y1 = y2 - bar_h + 1;
+        if (x2 > x1 + 8 && y1 > box.y1 + bw) {
+            lv_draw_rect_dsc_t paper;
+            lv_draw_rect_dsc_init(&paper);
+            paper.bg_color = lv_color_white();
+            paper.bg_opa = LV_OPA_COVER;
+            lv_area_t bg_a = {x1, y1, x2, y2};
+            lv_draw_rect(layer, &paper, &bg_a);
+
+            lv_draw_rect_dsc_t ink;
+            lv_draw_rect_dsc_init(&ink);
+            ink.bg_color = lv_color_black();
+            ink.bg_opa = LV_OPA_COVER;
+            // 顶部 1px 分隔墨线
+            CoverInkFill(layer, ink, x1, y1, x2, y1);
+            const int pct = std::clamp(state->progress_x10, 0, 1000);
+            const lv_coord_t fill_w = static_cast<lv_coord_t>((static_cast<int>(x2 - x1 + 1) * pct + 999) / 1000);
+            if (fill_w > 0) {
+                CoverInkFill(layer, ink, x1, y1 + 1, std::min<lv_coord_t>(x2, x1 + fill_w - 1), y2);
+            }
+        }
+    }
 }
 
 namespace {
@@ -367,6 +398,21 @@ void SetBookCoverFrameSource(lv_obj_t* obj, reader::BookSource source) {
             auto* state = static_cast<CoverFrameState*>(lv_event_dsc_get_user_data(event));
             if (state && state->source != source) {
                 state->source = source;
+                lv_obj_invalidate(obj);
+            }
+            return;
+        }
+    }
+}
+
+void SetBookCoverFrameProgress(lv_obj_t* obj, int pct_x10) {
+    if (!obj) return;
+    for (uint32_t i = 0; i < lv_obj_get_event_count(obj); ++i) {
+        auto* event = lv_obj_get_event_dsc(obj, i);
+        if (lv_event_dsc_get_cb(event) == OnCoverFrameEvent) {
+            auto* state = static_cast<CoverFrameState*>(lv_event_dsc_get_user_data(event));
+            if (state && state->progress_x10 != pct_x10) {
+                state->progress_x10 = pct_x10;
                 lv_obj_invalidate(obj);
             }
             return;

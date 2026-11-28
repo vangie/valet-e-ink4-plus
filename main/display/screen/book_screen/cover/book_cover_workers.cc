@@ -271,7 +271,7 @@ void ScheduleListCoverFill() {
     work->token = token;
     work->load_metadata = st.shelf.back_root == BookUiState::NavRoot::kShelf &&
         st.shelf.list_scr && lv_screen_active() == st.shelf.list_scr;
-    work->load_progress = work->load_metadata && BookReaderPrefsShowShelfProgress() != 0;
+    work->load_progress = work->load_metadata;
     std::unique_ptr<ListCoverFillWork> replaced;
     bool start_failed = false;
     try {

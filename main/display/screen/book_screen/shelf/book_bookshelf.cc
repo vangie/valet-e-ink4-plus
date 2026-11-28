@@ -38,51 +38,46 @@
 #include "vk_key_handler.h"
 
 namespace {
-constexpr lv_coord_t kShelfBaseDepth=UiSx(12);
-constexpr lv_coord_t kShelfBaseTop=UiSy(18);
-static lv_coord_t ShelfSideInset() { return std::max<lv_coord_t>(kShelfBaseDepth,kShelfCoverCheckSize/2); }
-static lv_coord_t ShelfColumnGap() { return std::max<lv_coord_t>(kShelfColGap,kShelfCoverCheckSize/2+UiSx(4)); }
-static lv_coord_t ShelfBaseFrontHeight() {
-    return Book_ItemFont()->line_height+UiSy(14);
-}
-// Native L8 image: LVGL owns its clipping, stacking and gray blending.
-static std::vector<uint8_t> shelf_base_pixels;
-static lv_image_dsc_t shelf_base_image{};
-static void PrepareShelfBase(int width) {
-    lv_image_cache_drop(&shelf_base_image);
-    const int front=ShelfBaseFrontHeight(),height=kShelfBaseTop+front;
-    shelf_base_pixels.assign(width*height,255);
-    for(int y=0;y<height;++y) {
-        const int shift=y<kShelfBaseTop?kShelfBaseDepth*(kShelfBaseTop-1-y)/std::max<int>(1,kShelfBaseTop-1):0;
-        const int bottom=height-kShelfBaseTop;
-        const int end_shift=y>=bottom?kShelfBaseDepth*(y-bottom)/std::max<int>(1,kShelfBaseTop-1):0;
-        const int left=y<kShelfBaseTop?shift:0;
-        const int face_right=width-kShelfBaseDepth-1+shift;
-        for(int x=left;x<width-end_shift;++x) {
-            if (x > face_right) {
-                shelf_base_pixels[y*width+x] = 0; // 右侧立体端面纯黑
-            } else if (y < 2 || y == kShelfBaseTop - 1 || y == kShelfBaseTop || y >= height - 2 || x <= left + 1) {
-                shelf_base_pixels[y*width+x] = 0; // 顶边、前缘折线、底边与左边清晰黑线勾边
-            } else if (y < kShelfBaseTop) {
-                shelf_base_pixels[y*width+x] = 205; // 书架台面浅灰，衬托书籍底部
-            } else {
-                shelf_base_pixels[y*width+x] = 242; // 书架前挡板极浅灰近白，使黑字书名高对比清晰可读
-            }
-        }
-    }
-    shelf_base_image={};shelf_base_image.header.magic=LV_IMAGE_HEADER_MAGIC;
-    shelf_base_image.header.cf=LV_COLOR_FORMAT_L8;
-    shelf_base_image.header.w=width;shelf_base_image.header.h=height;
-    shelf_base_image.header.stride=width;
-    shelf_base_image.data_size=shelf_base_pixels.size();shelf_base_image.data=shelf_base_pixels.data();
-}
-static void CreateShelfBase(lv_obj_t* row,int cover_h) {
-    auto* base=lv_image_create(row);lv_image_set_src(base,&shelf_base_image);
-    EpdSetContentRole(base,EpdContentRole::Shelf);
-    lv_obj_set_pos(base,0,cover_h+UiSy(6)-kShelfBaseTop);
-    lv_obj_clear_flag(base,LV_OBJ_FLAG_CLICKABLE);
+constexpr lv_coord_t kGalleryPageEdge = 4; // 右侧与下侧书页层叠边宽（2px 白 + 2px 黑）
+static lv_coord_t ShelfSideInset() { return kShelfCoverCheckSize / 2; }
+static lv_coord_t ShelfColumnGap() { return std::max<lv_coord_t>(kShelfColGap, kShelfCoverCheckSize / 2 + UiSx(8)); }
+static lv_coord_t ShelfTitleBlockHeight() {
+    const lv_coord_t lh = Book_ItemFont()->line_height;
+    const lv_font_t* sub_f = fontpack_lv_font_get(25, 2);
+    const lv_coord_t sh = (sub_f && sub_f->line_height > 0) ? sub_f->line_height : (lh * 4 / 5);
+    return lh + sh + UiSy(8);
 }
 
+// 在 cell 上绘制封面右侧与下侧的「实体书页层叠边缘」（2px 纸白间隔 + 2px 墨线）
+static void OnGalleryCellDraw(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_DRAW_MAIN) return;
+    lv_obj_t* cell = static_cast<lv_obj_t*>(lv_event_get_target(e));
+    lv_layer_t* layer = lv_event_get_layer(e);
+    if (!cell || !layer || lv_obj_get_child_count(cell) == 0) return;
+    lv_obj_t* cover = lv_obj_get_child(cell, 0);
+    if (!cover) return;
+    lv_area_t ca;
+    lv_obj_get_coords(cover, &ca);
+
+    lv_draw_rect_dsc_t ink;
+    lv_draw_rect_dsc_init(&ink);
+    ink.bg_color = lv_color_black();
+    ink.bg_opa = LV_OPA_COVER;
+
+    // 右侧书页厚度墨线（留 2px 纸白缝隙，再画 2px 墨线）
+    lv_area_t right_edge = {static_cast<lv_coord_t>(ca.x2 + 3),
+                            static_cast<lv_coord_t>(ca.y1 + 4),
+                            static_cast<lv_coord_t>(ca.x2 + 4),
+                            static_cast<lv_coord_t>(ca.y2 + 4)};
+    lv_draw_rect(layer, &ink, &right_edge);
+
+    // 底部书页厚度墨线
+    lv_area_t bot_edge = {static_cast<lv_coord_t>(ca.x1 + 4),
+                          static_cast<lv_coord_t>(ca.y2 + 3),
+                          static_cast<lv_coord_t>(ca.x2 + 4),
+                          static_cast<lv_coord_t>(ca.y2 + 4)};
+    lv_draw_rect(layer, &ink, &bot_edge);
+}
 } // namespace
 
 lv_coord_t ShelfBookWidth() {
@@ -141,27 +136,43 @@ void RenderBookshelfPage() {
 
     const int start = 0;
     const int end = std::min(start + st.shelf.list_page_size, static_cast<int>(st.shelf.books.size()));
-    const lv_coord_t front_h=ShelfBaseFrontHeight();
-    PrepareShelfBase(content_w);
+    const lv_coord_t title_block_h = ShelfTitleBlockHeight();
+    const lv_font_t* sub_font = fontpack_lv_font_get(25, 2);
+    if (!sub_font) sub_font = Book_ItemFont();
     for(int row_start=start;row_start<end;row_start+=kShelfCols) {
         auto* row=lv_obj_create(st.shelf.list_body);lv_obj_remove_style_all(row);
-        lv_obj_set_size(row,content_w,cover_h+front_h+UiSy(6)+kShelfCoverCheckSize/2);
+        lv_obj_set_size(row,content_w,cover_h+title_block_h+UiSy(6)+kShelfCoverCheckSize/2);
         Book_DisableScroll(row);lv_obj_clear_flag(row,LV_OBJ_FLAG_CLICKABLE);
-        CreateShelfBase(row,cover_h+kShelfCoverCheckSize/2);
         for(int col=0;col<kShelfCols && row_start+col<end;++col) {
             const int i=row_start+col;
+            const bool is_dir = (st.shelf.shelf_entries[i].kind == reader::BookDirEntry::Kind::kFolder);
             auto* cell=CreateBookCoverCell(row,st.shelf.books[static_cast<size_t>(i)],i,cell_w,cover_h,
-                                          st.shelf.shelf_covers,true,0,true,
-                                          st.shelf.shelf_entries[i].kind == reader::BookDirEntry::Kind::kFolder);
+                                          st.shelf.shelf_covers,true,0,true, is_dir);
             lv_obj_set_style_layout(cell,LV_LAYOUT_NONE,0);
-            // The whole circle must lie inside the cell's native clip/hit bounds.
+            lv_obj_add_event_cb(cell, OnGalleryCellDraw, LV_EVENT_DRAW_MAIN, nullptr);
             const lv_coord_t circle_inset=kShelfCoverCheckSize/2;
-            lv_obj_set_size(cell,cell_w+circle_inset,cover_h+front_h+UiSy(6)+circle_inset);
+            lv_obj_set_size(cell,cell_w+circle_inset+kGalleryPageEdge,cover_h+title_block_h+UiSy(6)+circle_inset);
             lv_obj_set_pos(cell,ShelfSideInset()+col*(cell_w+ShelfColumnGap()),0);
             auto* cover=lv_obj_get_child(cell,0);lv_obj_set_pos(cover,0,circle_inset);
             auto* title=lv_obj_get_child(cell,1);
-            lv_obj_set_height(title,Book_ItemFont()->line_height);
-            lv_obj_set_pos(title,0,circle_inset+cover_h+UiSy(6)+(front_h-Book_ItemFont()->line_height)/2);
+            const lv_coord_t lh = Book_ItemFont()->line_height;
+            lv_obj_set_height(title,lh);
+            lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
+            lv_obj_set_pos(title,0,circle_inset+cover_h+UiSy(8));
+
+            // 封面下第二行：画廊式副标题（阅读百分比或格式/文件夹标识）
+            lv_obj_t* sub = lv_label_create(cell);
+            lv_obj_set_width(sub, cell_w);
+            lv_obj_set_style_text_font(sub, sub_font, 0);
+            lv_obj_set_style_text_color(sub, lv_color_black(), 0);
+            lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_LEFT, 0);
+            lv_label_set_long_mode(sub, LV_LABEL_LONG_CLIP);
+            lv_label_set_text(sub, is_dir ? Lang::Strings::BOOK_FOLDER
+                                          : reader::FormatLabel(st.shelf.books[static_cast<size_t>(i)].format));
+            lv_obj_set_pos(sub, 0, circle_inset + cover_h + UiSy(8) + lh + UiSy(2));
+            lv_obj_clear_flag(sub, LV_OBJ_FLAG_CLICKABLE);
+            // 确保多选圆圈仍在 index 2 之后也能被 FindShelfCheckBox 找到，把 sub 放到 index 2
+            lv_obj_move_to_index(sub, 2);
         }
     }
 
@@ -455,7 +466,7 @@ lv_obj_t* CreateBookshelfScreen() {
     UpdateShelfTitleLabel();
 
     const lv_coord_t cell_w = ShelfBookWidth();
-    const lv_coord_t title_h = ShelfBaseFrontHeight()+UiSy(6)+kShelfCoverCheckSize/2;
+    const lv_coord_t title_h = ShelfTitleBlockHeight() + UiSy(6) + kShelfCoverCheckSize / 2;
     const lv_coord_t usable = st.shelf.shelf_content_h;
     const lv_coord_t cell_budget =
         (usable - kShelfRowGap * (kShelfRows - 1)) / kShelfRows;
