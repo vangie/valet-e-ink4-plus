@@ -42,10 +42,7 @@ constexpr lv_coord_t kGalleryPageEdge = 4; // 右侧与下侧书页层叠边宽�
 static lv_coord_t ShelfSideInset() { return kShelfCoverCheckSize / 2; }
 static lv_coord_t ShelfColumnGap() { return std::max<lv_coord_t>(kShelfColGap, kShelfCoverCheckSize / 2 + UiSx(8)); }
 static lv_coord_t ShelfTitleBlockHeight() {
-    const lv_coord_t lh = Book_ItemFont()->line_height;
-    const lv_font_t* sub_f = fontpack_lv_font_get(25, 2);
-    const lv_coord_t sh = (sub_f && sub_f->line_height > 0) ? sub_f->line_height : (lh * 4 / 5);
-    return lh + sh + UiSy(8);
+    return Book_ItemFont()->line_height + UiSy(4);
 }
 
 // 在 cell 上绘制封面右侧与下侧的「实体书页层叠边缘」（2px 纸白间隔 + 2px 墨线）
@@ -137,8 +134,6 @@ void RenderBookshelfPage() {
     const int start = 0;
     const int end = std::min(start + st.shelf.list_page_size, static_cast<int>(st.shelf.books.size()));
     const lv_coord_t title_block_h = ShelfTitleBlockHeight();
-    const lv_font_t* sub_font = fontpack_lv_font_get(25, 2);
-    if (!sub_font) sub_font = Book_ItemFont();
     for(int row_start=start;row_start<end;row_start+=kShelfCols) {
         auto* row=lv_obj_create(st.shelf.list_body);lv_obj_remove_style_all(row);
         lv_obj_set_size(row,content_w,cover_h+title_block_h+UiSy(6)+kShelfCoverCheckSize/2);
@@ -159,20 +154,6 @@ void RenderBookshelfPage() {
             lv_obj_set_height(title,lh);
             lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
             lv_obj_set_pos(title,0,circle_inset+cover_h+UiSy(8));
-
-            // 封面下第二行：画廊式副标题（阅读百分比或格式/文件夹标识）
-            lv_obj_t* sub = lv_label_create(cell);
-            lv_obj_set_width(sub, cell_w);
-            lv_obj_set_style_text_font(sub, sub_font, 0);
-            lv_obj_set_style_text_color(sub, lv_color_black(), 0);
-            lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_LEFT, 0);
-            lv_label_set_long_mode(sub, LV_LABEL_LONG_CLIP);
-            lv_label_set_text(sub, is_dir ? Lang::Strings::BOOK_FOLDER
-                                          : reader::FormatLabel(st.shelf.books[static_cast<size_t>(i)].format));
-            lv_obj_set_pos(sub, 0, circle_inset + cover_h + UiSy(8) + lh + UiSy(2));
-            lv_obj_clear_flag(sub, LV_OBJ_FLAG_CLICKABLE);
-            // 确保多选圆圈仍在 index 2 之后也能被 FindShelfCheckBox 找到，把 sub 放到 index 2
-            lv_obj_move_to_index(sub, 2);
         }
     }
 

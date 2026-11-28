@@ -177,16 +177,6 @@ lv_obj_t* CreateCoverSlot(lv_obj_t* parent, const reader::BookInfo& info, lv_coo
         lv_label_set_long_mode(ph_lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_align(ph_lbl, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_align(ph_lbl, LV_ALIGN_TOP_LEFT, text_left, 18);
-
-        // 右下角低调小号格式角标（tpl==1 全黑底用白字，其余下半白底用黑字）
-        const lv_font_t* fmt_f = fontpack_lv_font_get(18, 2);
-        if (!fmt_f) fmt_f = title_f;
-        lv_obj_t* fmt_lbl = lv_label_create(host);
-        lv_label_set_text(fmt_lbl, reader::FormatLabel(info.format));
-        lv_obj_set_style_text_font(fmt_lbl, fmt_f, 0);
-        lv_obj_set_style_text_color(fmt_lbl, (tpl == 1) ? lv_color_white() : lv_color_black(), 0);
-        lv_obj_align(fmt_lbl, LV_ALIGN_BOTTOM_RIGHT, -10, -8);
-        lv_obj_clear_flag(fmt_lbl, LV_OBJ_FLAG_CLICKABLE);
     }
     lv_obj_clear_flag(ph_lbl, LV_OBJ_FLAG_CLICKABLE);
     bool cached = false;

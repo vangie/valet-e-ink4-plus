@@ -224,11 +224,14 @@ function renderShelfGrid(all, style) {
       <div class="v-sgrid">
         ${row.map((b) => {
           const pct = Math.round((b.progress || 0) * 100);
-          const inkBar = !b.away && pct > 0 ? `<i class="v-cov-prog"><b style="width:${pct}%"></b></i>` : "";
+          const floatProg = !b.away && pct > 0
+            ? `<i class="v-cov-fprog"><i><b style="width:${pct}%"></b></i></i>`
+            : b.away
+              ? `<i class="v-cov-faway">${esc(b.note)}</i>`
+              : "";
           return `<button class="v-sitem" ${b.attr}>
-            <div class="v-scov-box">${libCover(b)}${inkBar}</div>
+            <div class="v-scov-box">${libCover(b)}${floatProg}</div>
             <span class="v-sname">${esc(b.title)}</span>
-            <em class="v-snote">${esc(b.note)}</em>
           </button>`;
         }).join("")}
       </div>

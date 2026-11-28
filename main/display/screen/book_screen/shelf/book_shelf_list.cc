@@ -575,22 +575,6 @@ void ApplyShelfEntryMetadata(const reader::BookInfo& info, lv_obj_t* host, bool 
                                 : 0;
         SetBookCoverFrameProgress(host, pct_x10);
         SetBookCoverFrameSource(host, info.source);
-        // 同步更新封面下方第二行的进度/格式副标题（cell 的第 2 个子控件）
-        lv_obj_t* cell = lv_obj_get_parent(host);
-        if (cell && lv_obj_get_child_count(cell) >= 3) {
-            lv_obj_t* sub = lv_obj_get_child(cell, 2);
-            if (sub && lv_obj_check_type(sub, &lv_label_class)) {
-                char sub_txt[32];
-                if (pct_x10 >= 1000) {
-                    std::snprintf(sub_txt, sizeof(sub_txt), "100%%");
-                } else if (pct_x10 > 0) {
-                    std::snprintf(sub_txt, sizeof(sub_txt), "%d%%", std::max(1, (pct_x10 + 5) / 10));
-                } else {
-                    std::snprintf(sub_txt, sizeof(sub_txt), "%s", reader::FormatLabel(info.format));
-                }
-                lv_label_set_text(sub, sub_txt);
-            }
-        }
         return;
     }
     auto* name = lv_obj_get_child(host, 1);

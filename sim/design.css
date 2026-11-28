@@ -869,32 +869,42 @@ div.v-row { box-sizing: border-box; }
   cursor: pointer;
 }
 .v-scov-box { position: relative; width: 100%; }
-/* 封面底部内嵌 2.5px 阅读进度条（不额外占用封面下方高度，极简克制） */
-.v-cov-prog {
+/* 封面底部悬浮阅读进度条（白底黑框内衬进度条，无论在深色还是浅色封面上都清晰浮起） */
+.v-cov-fprog {
   position: absolute;
-  left: 1.2px;
-  right: 1.2px;
-  bottom: 1.2px;
-  height: 2.5px;
-  background: rgba(242, 242, 241, 0.85);
-  border-top: 1px solid var(--ink);
+  left: 6px;
+  right: 6px;
+  bottom: 5px;
+  height: 6px;
+  padding: 1px;
+  box-sizing: border-box;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  box-shadow: 0 0 0 1px var(--paper);
   z-index: 3;
   display: block;
 }
-.v-cov-prog b { display: block; height: 100%; background: var(--ink); }
+.v-cov-fprog > i { display: block; width: 100%; height: 100%; position: relative; }
+.v-cov-fprog b { display: block; height: 100%; background: var(--ink); }
+.v-cov-faway {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  bottom: 4px;
+  background: var(--paper);
+  border: 1px dashed var(--ink);
+  font-style: normal;
+  font-size: 6.5px;
+  line-height: 10px;
+  text-align: center;
+  color: var(--g1);
+  z-index: 3;
+}
 .v-sname {
-  margin-top: 3px;
-  font-size: 9.2px;
+  margin-top: 4px;
+  font-size: 9.5px;
   font-weight: 600;
   color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.v-snote {
-  font-style: normal;
-  font: 500 8px/1.2 "Avenir Next", "PingFang SC", sans-serif;
-  color: var(--g1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
