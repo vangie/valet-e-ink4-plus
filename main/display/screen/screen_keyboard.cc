@@ -70,6 +70,7 @@ struct Keyboard {
     bool upper = false; // 大写状态。
     bool allow_zh = false; // 是否显示中/英切换。
     bool zh_mode = false; // 当前是否为中文拼音模式。
+    bool is_assoc = false; // 当前候选栏展示的是否为选字后的联想字。
     std::string py_buf; // 当前正在输入的拼音串。
     std::vector<std::string> cands; // 当前匹配的候选字列表。
     int cand_page = 0; // 当前候选字页码。
@@ -94,6 +95,7 @@ struct Keyboard {
     void Apply(KbAction action);
     static void AddIcon(lv_obj_t* btn, KbAction action);
     void UpdatePinyinCandidates();
+    void UpdateAssocCandidates(const std::string& last_utf8_word);
     void RefreshCandBar();
     void PickCandidate(int slot);
     void ClearPinyin();
@@ -175,16 +177,36 @@ const lv_image_dsc_t* Keyboard::PressedImage() {
 void Keyboard::UpdatePinyinCandidates() {
     cands.clear();
     cand_page = 0;
+    is_assoc = false;
     if (py_buf.empty()) return;
+    constexpr size_t kPhraseCount = sizeof(kPinyinPhrases) / sizeof(kPinyinPhrases[0]);
     constexpr size_t kDictCount = sizeof(kPinyinDict) / sizeof(kPinyinDict[0]);
-    // 1. 精确匹配完整音节
+
+    // 1. 多字词全拼精确匹配（如 "santi" -> "三体"、"luxun" -> "鲁迅"）放在最前面
+    for (size_t i = 0; i < kPhraseCount; ++i) {
+        if (py_buf == kPinyinPhrases[i].py) {
+            cands.emplace_back(kPinyinPhrases[i].word);
+        }
+    }
+    // 2. 多字词前缀匹配（输入 ≥ 4 个字母时，如 "honglou" -> "红楼梦"）
+    if (py_buf.size() >= 4) {
+        for (size_t i = 0; i < kPhraseCount && cands.size() < 3; ++i) {
+            if (std::strncmp(kPinyinPhrases[i].py, py_buf.c_str(), py_buf.size()) == 0 &&
+                py_buf != kPinyinPhrases[i].py) {
+                if (std::find(cands.begin(), cands.end(), kPinyinPhrases[i].word) == cands.end()) {
+                    cands.emplace_back(kPinyinPhrases[i].word);
+                }
+            }
+        }
+    }
+    // 3. 单字精确匹配完整音节
     for (size_t i = 0; i < kDictCount; ++i) {
         if (py_buf == kPinyinDict[i].py) {
             SplitUtf8Chars(kPinyinDict[i].chars, cands);
             break;
         }
     }
-    // 2. 前缀匹配补充候选（如敲 "san" 除了 san 还补 sang；敲 "zh" 列出 zha/zhe/zhi/zhong 等高频字）
+    // 4. 若当前是连拼且无完整单字音节（如 "sant"），取最长合法首音节的单字兜底，并支持前缀匹配
     for (size_t i = 0; i < kDictCount && cands.size() < 42; ++i) {
         if (std::strncmp(kPinyinDict[i].py, py_buf.c_str(), py_buf.size()) == 0 &&
             py_buf != kPinyinDict[i].py) {
@@ -200,6 +222,26 @@ void Keyboard::UpdatePinyinCandidates() {
     }
 }
 
+void Keyboard::UpdateAssocCandidates(const std::string& last_utf8_word) {
+    cands.clear();
+    cand_page = 0;
+    is_assoc = false;
+    if (last_utf8_word.empty()) return;
+    // 取刚上屏的最后一个 UTF-8 汉字查找下一字联想
+    std::vector<std::string> chars;
+    SplitUtf8Chars(last_utf8_word.c_str(), chars);
+    if (chars.empty()) return;
+    const std::string& tail_ch = chars.back();
+    constexpr size_t kAssocCount = sizeof(kPinyinAssoc) / sizeof(kPinyinAssoc[0]);
+    for (size_t i = 0; i < kAssocCount; ++i) {
+        if (tail_ch == kPinyinAssoc[i].ch) {
+            SplitUtf8Chars(kPinyinAssoc[i].nexts, cands);
+            is_assoc = !cands.empty();
+            break;
+        }
+    }
+}
+
 void Keyboard::RefreshCandBar() {
     if (!cand_bar) return;
     if (!allow_zh || !zh_mode || mode != KbMode::kEn) {
@@ -208,10 +250,12 @@ void Keyboard::RefreshCandBar() {
     }
     lv_obj_clear_flag(cand_bar, LV_OBJ_FLAG_HIDDEN);
     if (py_label) {
-        if (py_buf.empty()) {
-            lv_label_set_text(py_label, "拼音");
-        } else {
+        if (!py_buf.empty()) {
             lv_label_set_text(py_label, py_buf.c_str());
+        } else if (is_assoc && !cands.empty()) {
+            lv_label_set_text(py_label, "联想");
+        } else {
+            lv_label_set_text(py_label, "拼音");
         }
     }
     const int total = static_cast<int>(cands.size());
@@ -242,8 +286,7 @@ void Keyboard::PickCandidate(int slot) {
     if (idx < 0 || idx >= static_cast<int>(cands.size())) return;
     const std::string chosen = cands[static_cast<size_t>(idx)];
     py_buf.clear();
-    cands.clear();
-    cand_page = 0;
+    UpdateAssocCandidates(chosen);
     RefreshCandBar();
     callback(ScreenKeyboardEvent::kInsert, chosen.c_str(), context);
 }
@@ -252,6 +295,7 @@ void Keyboard::ClearPinyin() {
     py_buf.clear();
     cands.clear();
     cand_page = 0;
+    is_assoc = false;
     RefreshCandBar();
 }
 
@@ -313,6 +357,7 @@ void Keyboard::Pressed(lv_event_t* e) {
                 UpdatePinyinCandidates();
                 RefreshCandBar();
             } else {
+                if (is_assoc) ClearPinyin();
                 callback(ScreenKeyboardEvent::kBackspace, "", context);
             }
             break;

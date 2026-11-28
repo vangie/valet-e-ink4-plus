@@ -1,5 +1,3 @@
-#pragma GCC optimize("O1")
-
 #include "book_screen/reader/book_layout_debounce.h"
 #include "book_screen/book_screen_priv.h"
 #include "book_screen/book_font_runtime.h"

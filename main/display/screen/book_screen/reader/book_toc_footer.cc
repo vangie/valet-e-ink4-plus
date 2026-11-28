@@ -1,6 +1,5 @@
 #include "assets/lang_reader.h"
 #include "epd_content_policy.h"
-#pragma GCC optimize("O1")
 
 #include "book_screen/reader/book_toc_footer.h"
 #include "book_screen/reader/book_auto_turn.h"

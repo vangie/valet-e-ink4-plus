@@ -1,5 +1,3 @@
-#pragma GCC optimize("O1")
-
 #include "book_screen/reader/book_reader_select.h"
 #include "assistant_screen/assistant_screen.h"
 #include "book_screen/reader/book_layout_worker.h"

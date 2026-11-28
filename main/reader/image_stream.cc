@@ -2,9 +2,6 @@
 #include "image_geometry.h"
 #include "image_util.h"
 
-// xtensa-g++：本文件在 -Os 下可能 ICE（cfgcleanup try_forward_edges）
-#pragma GCC optimize("O1")
-
 #include <algorithm>
 #include <atomic>
 #include <cstring>

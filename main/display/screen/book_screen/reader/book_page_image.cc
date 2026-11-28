@@ -1,6 +1,5 @@
 #include "epd_content_policy.h"
 #include "assets/lang_config.h"
-#pragma GCC optimize("O1")
 
 #include "book_screen/reader/book_page_image.h"
 #include "book_screen/book_screen_priv.h"

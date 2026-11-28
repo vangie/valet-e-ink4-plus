@@ -8,7 +8,6 @@
 #include "application.h"
 #include "assistant_screen/assistant_screen.h"
 #include "epd_refresh.h"
-#pragma GCC optimize("O1")
 
 #include "book_screen/reader/book_reader_body.h"
 #include "book_screen/reader/book_auto_turn.h"

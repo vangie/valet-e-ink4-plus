@@ -298,24 +298,70 @@ function renderShelfList(all) {
   }).join("")}</div>`;
 }
 
-function renderSearchKbOverlay() {
-  if (!state.kbOpen) return "";
+const SIM_PY_PHRASES = {
+  santi: "三体", sanguo: "三国演义", honglou: "红楼梦", hongloumeng: "红楼梦", xiyou: "西游记", xiyouji: "西游记",
+  shuihu: "水浒传", shuihuzhuan: "水浒传", huozhe: "活着", bailuyuan: "白鹿原", baiyexing: "白夜行",
+  weicheng: "围城", pingfan: "平凡的世界", bainian: "百年孤独", lishi: "历史", zhexue: "哲学",
+  jingji: "经济", xinli: "心理学", kehuan: "科幻", xiaoshuo: "小说", wenxue: "文学",
+  luxun: "鲁迅", jinyong: "金庸", yuhua: "余华", moyan: "莫言", liucixin: "刘慈欣",
+  dongye: "东野圭吾", cunchun: "村上春树", gongqijun: "宫崎骏", wangxiaobo: "王小波",
+};
+const SIM_PY_ASSOC = {
+  "三": "体国毛联生十年", "红": "楼梦高粱与黑色", "楼": "梦", "西": "游方洋汉", "游": "记戏",
+  "水": "浒平果墨", "浒": "传", "白": "鹿夜银居马", "鹿": "原鼎记", "夜": "行晚色",
+  "百": "年科度家", "年": "代孤独轻", "孤": "独儿", "平": "凡安常静", "凡": "的",
+  "人": "生类民物间工", "生": "命活物死", "围": "城棋", "朝": "花夕拾代", "天": "龙下空地才",
+  "龙": "八部族", "射": "雕击", "神": "雕曲秘话", "笑": "傲江湖话", "雪": "山飞狐花",
+  "明": "朝代天白", "万": "历水里年", "乡": "土村愁", "置": "身事内", "文": "化城学明章",
+  "沉": "默思", "黄": "金河帝色", "时": "间代候光", "未": "来知", "中": "国医华央",
+  "哲": "学理思", "历": "史代程", "政": "治府策", "思": "考想维", "自": "私由然己律",
+  "理": "想国论解财", "国": "富论家学际", "道": "德经家理路", "论": "语坛文", "资": "治通鉴本金",
+  "解": "忧决放释", "嫌": "疑人", "挪": "威的森林", "小": "王子说学", "月": "亮与六便士光",
+  "悲": "惨世界剧", "战": "争与和平略", "老": "人与海舍子师", "黑": "暗森林天鹅铁",
+  "流": "浪地球星水", "失": "控败去", "精": "进神彩", "反": "脆弱思", "鲁": "迅",
+  "金": "庸瓶梅融钱", "古": "龙代典文", "余": "华生", "莫": "言", "刘": "慈欣备",
+  "东": "野圭吾方周坡", "野": "圭吾草", "圭": "吾", "村": "上春树庄", "宫": "崎骏廷",
+  "崎": "骏", "王": "小波阳明维国维", "陈": "忠实独秀", "贾": "平凹", "钱": "钟书",
+  "张": "爱玲之洞", "沈": "从文", "史": "铁生记", "苏": "轼东坡童", "李": "白鸿章",
+  "曹": "雪芹操", "罗": "贯中振宇辑", "司": "马迁马光", "经": "济学典历", "社": "会学区",
+  "心": "理学态情", "管": "理学道", "人": "工智能生类", "计": "算机划", "小": "说王子",
+};
+
+function simGetKbCandidates() {
   const zh = state.kbZh !== false;
   const py = state.kbPy || "";
-  const page = state.kbCandPage || 0;
   const cands = [];
-  if (zh && py) {
+  if (!zh) return cands;
+  if (py) {
+    if (SIM_PY_PHRASES[py]) cands.push(SIM_PY_PHRASES[py]);
+    if (py.length >= 4) {
+      for (const [k, v] of Object.entries(SIM_PY_PHRASES)) {
+        if (k !== py && k.startsWith(py) && !cands.includes(v)) cands.push(v);
+      }
+    }
     const exact = SIM_PY_DICT[py] || "";
-    for (const ch of exact) cands.push(ch);
+    for (const ch of exact) if (!cands.includes(ch)) cands.push(ch);
     for (const [k, v] of Object.entries(SIM_PY_DICT)) {
       if (k !== py && k.startsWith(py)) {
         for (const ch of v.slice(0, 4)) if (!cands.includes(ch)) cands.push(ch);
       }
     }
+  } else if (state.kbAssoc) {
+    for (const ch of (SIM_PY_ASSOC[state.kbAssoc] || "")) cands.push(ch);
   }
+  return cands;
+}
+
+function renderSearchKbOverlay() {
+  if (!state.kbOpen) return "";
+  const zh = state.kbZh !== false;
+  const py = state.kbPy || "";
+  const page = state.kbCandPage || 0;
+  const cands = simGetKbCandidates();
   const slots = cands.slice(page * 7, page * 7 + 7);
+  const barTitle = py ? py : (state.kbAssoc && cands.length ? "联想" : "拼音");
   const candBar = zh ? `<div style="display:flex;align-items:center;border:1px solid #000;border-radius:4px;height:26px;padding:0 6px;margin-bottom:4px;font-size:11px;gap:4px">
-    <span style="width:42px;font-weight:700;overflow:hidden">${esc(py || "拼音")}</span>
+    <span style="width:42px;font-weight:700;overflow:hidden">${esc(barTitle)}</span>
     <div style="flex:1;display:flex;justify-content:space-around">${slots.map((ch, i) => `<button data-kb-cand="${i}" style="border:0;background:none;font-size:12px;font-weight:700;cursor:pointer;padding:2px 4px">${ch}</button>`).join("")}</div>
     ${page > 0 ? `<button data-kb-page="-1" style="border:1px solid #000;border-radius:3px;background:#fff;font-size:10px;padding:0 4px;cursor:pointer">&lt;</button>` : ""}
     ${(page + 1) * 7 < cands.length ? `<button data-kb-page="1" style="border:1px solid #000;border-radius:3px;background:#fff;font-size:10px;padding:0 4px;cursor:pointer">&gt;</button>` : ""}
@@ -634,6 +680,7 @@ panel.addEventListener("click", (e) => {
     const ch = el.dataset.kbChar;
     if (state.kbZh !== false) {
       state.kbPy = ((state.kbPy || "") + ch).slice(0, 12);
+      state.kbAssoc = "";
       state.kbCandPage = 0;
     } else {
       state.kbText = (state.kbText || "") + ch;
@@ -642,16 +689,12 @@ panel.addEventListener("click", (e) => {
   }
   if ((el = hit("[data-kb-cand]"))) {
     const idx = Number(el.dataset.kbCand);
-    const py = state.kbPy || "";
-    const cands = [];
-    for (const ch of (SIM_PY_DICT[py] || "")) cands.push(ch);
-    for (const [k, v] of Object.entries(SIM_PY_DICT)) {
-      if (k !== py && k.startsWith(py)) for (const ch of v.slice(0, 4)) if (!cands.includes(ch)) cands.push(ch);
-    }
+    const cands = simGetKbCandidates();
     const picked = cands[(state.kbCandPage || 0) * 7 + idx];
     if (picked) {
       state.kbText = (state.kbText || "") + picked;
       state.kbPy = "";
+      state.kbAssoc = [...picked].slice(-1)[0] || "";
       state.kbCandPage = 0;
     }
     return render();
@@ -665,15 +708,18 @@ panel.addEventListener("click", (e) => {
       state.kbPy = state.kbPy.slice(0, -1);
       state.kbCandPage = 0;
     } else {
+      state.kbAssoc = "";
       state.kbText = [...(state.kbText || "")].slice(0, -1).join("");
     }
     return render();
   }
   if (hit("[data-kb-space]")) {
     if (state.kbZh !== false && state.kbPy) {
-      const first = (SIM_PY_DICT[state.kbPy] || "")[0] || state.kbPy;
+      const cands = simGetKbCandidates();
+      const first = cands[0] || state.kbPy;
       state.kbText = (state.kbText || "") + first;
       state.kbPy = "";
+      state.kbAssoc = [...first].slice(-1)[0] || "";
       state.kbCandPage = 0;
     } else {
       state.kbText = (state.kbText || "") + " ";

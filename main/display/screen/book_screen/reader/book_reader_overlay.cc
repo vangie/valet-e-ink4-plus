@@ -1,5 +1,3 @@
-#pragma GCC optimize("O1")
-
 #include "book_screen/reader/book_reader_overlay.h"
 #include "book_screen/reader/book_auto_turn.h"
 #include "book_screen/book_screen_priv.h"
