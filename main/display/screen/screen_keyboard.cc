@@ -324,7 +324,7 @@ void Keyboard::Fill(KbKeyDesc out[kKbKeysCap]) {
         put(28, "", KbAction::kBackspace);
         put(30, "?123", KbAction::kModeSym);
         if (allow_zh) {
-            put(31, zh_mode ? "中/英" : "英/中", KbAction::kToggleLang);
+            put(31, "", KbAction::kToggleLang);
             put(32, zh_mode ? "空格" : "Space", KbAction::kSpace);
             put(33, "", KbAction::kConfirm);
         } else {
@@ -686,20 +686,88 @@ void Keyboard::Rebuild() {
             }, LV_EVENT_LONG_PRESSED, this);
         }
 
-        lv_obj_t* lbl = lv_label_create(btn);
-        lv_label_set_text(lbl, d.label != nullptr ? d.label : "");
-        const lv_font_t* use_font = (d.action == KbAction::kToggleLang) ? small_font : font;
-        if (use_font != nullptr) {
-            lv_obj_set_style_text_font(lbl, use_font, 0);
-        }
-        lv_obj_center(lbl);
-        lv_obj_clear_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
+        if (d.action == KbAction::kToggleLang) {
+            // 斜切反色双字按钮：左半「中」、右半「英」，当前激活的一侧黑底白字且字号更大
+            lv_obj_add_event_cb(btn, [](lv_event_t* e) {
+                if (lv_event_get_code(e) != LV_EVENT_DRAW_MAIN) return;
+                auto* kb = static_cast<Keyboard*>(lv_event_get_user_data(e));
+                lv_obj_t* obj = static_cast<lv_obj_t*>(lv_event_get_target(e));
+                lv_layer_t* layer = lv_event_get_layer(e);
+                if (!kb || !obj || !layer) return;
+                lv_area_t a;
+                lv_obj_get_coords(obj, &a);
+                const lv_coord_t bw = a.x2 - a.x1;
+                const lv_coord_t mid_x = a.x1 + bw / 2;
+                const lv_coord_t slant = UiSx(8);
+                const lv_coord_t top_x = mid_x + slant;
+                const lv_coord_t bot_x = mid_x - slant;
 
-        lv_obj_set_style_text_color(lbl, lv_color_black(), 0);
-        AddIcon(btn, d.action);
-        if ((d.action == KbAction::kShift && !zh_mode && upper) ||
-            (d.action == KbAction::kToggleLang && zh_mode)) {
+                lv_point_precise_t p[4];
+                if (kb->zh_mode) {
+                    // 左半梯形填充黑色
+                    p[0] = {static_cast<lv_value_precise_t>(a.x1), static_cast<lv_value_precise_t>(a.y1)};
+                    p[1] = {static_cast<lv_value_precise_t>(top_x), static_cast<lv_value_precise_t>(a.y1)};
+                    p[2] = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2)};
+                    p[3] = {static_cast<lv_value_precise_t>(a.x1), static_cast<lv_value_precise_t>(a.y2)};
+                } else {
+                    // 右半梯形填充黑色
+                    p[0] = {static_cast<lv_value_precise_t>(top_x), static_cast<lv_value_precise_t>(a.y1)};
+                    p[1] = {static_cast<lv_value_precise_t>(a.x2), static_cast<lv_value_precise_t>(a.y1)};
+                    p[2] = {static_cast<lv_value_precise_t>(a.x2), static_cast<lv_value_precise_t>(a.y2)};
+                    p[3] = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2)};
+                }
+                lv_draw_triangle_dsc_t tri;
+                lv_draw_triangle_dsc_init(&tri);
+                tri.color = lv_color_black();
+                tri.opa = LV_OPA_COVER;
+                tri.p[0] = p[0];
+                tri.p[1] = p[1];
+                tri.p[2] = p[2];
+                lv_draw_triangle(layer, &tri);
+                tri.p[0] = p[0];
+                tri.p[1] = p[2];
+                tri.p[2] = p[3];
+                lv_draw_triangle(layer, &tri);
+
+                // 斜切分割线
+                lv_draw_line_dsc_t ld;
+                lv_draw_line_dsc_init(&ld);
+                ld.color = lv_color_black();
+                ld.opa = LV_OPA_COVER;
+                ld.width = 1;
+                ld.p1 = {static_cast<lv_value_precise_t>(top_x), static_cast<lv_value_precise_t>(a.y1)};
+                ld.p2 = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2)};
+                lv_draw_line(layer, &ld);
+            }, LV_EVENT_DRAW_MAIN, this);
+
+            lv_obj_t* lbl_zh = lv_label_create(btn);
+            lv_label_set_text(lbl_zh, "中");
+            lv_obj_set_style_text_font(lbl_zh, zh_mode ? font : small_font, 0);
+            lv_obj_set_style_text_color(lbl_zh, zh_mode ? lv_color_white() : lv_color_black(), 0);
+            lv_obj_align(lbl_zh, LV_ALIGN_CENTER, -UiSx(23), 0);
+            lv_obj_clear_flag(lbl_zh, LV_OBJ_FLAG_CLICKABLE);
+
+            lv_obj_t* lbl_en = lv_label_create(btn);
+            lv_label_set_text(lbl_en, "英");
+            lv_obj_set_style_text_font(lbl_en, zh_mode ? small_font : font, 0);
+            lv_obj_set_style_text_color(lbl_en, zh_mode ? lv_color_black() : lv_color_white(), 0);
+            lv_obj_align(lbl_en, LV_ALIGN_CENTER, UiSx(23), 0);
+            lv_obj_clear_flag(lbl_en, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_clip_corner(btn, true, 0);
             lv_obj_set_style_border_width(btn, UiSx(2), 0);
+        } else {
+            lv_obj_t* lbl = lv_label_create(btn);
+            lv_label_set_text(lbl, d.label != nullptr ? d.label : "");
+            if (font != nullptr) {
+                lv_obj_set_style_text_font(lbl, font, 0);
+            }
+            lv_obj_center(lbl);
+            lv_obj_clear_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_text_color(lbl, lv_color_black(), 0);
+            AddIcon(btn, d.action);
+            if (d.action == KbAction::kShift && !zh_mode && upper) {
+                lv_obj_set_style_border_width(btn, UiSx(2), 0);
+            }
         }
     }
     Layout();

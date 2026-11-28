@@ -386,7 +386,11 @@ function renderSearchKbOverlay() {
         </div>
         <div style="display:flex;gap:3px">
           <button data-kb-sym="1" style="width:42px;height:26px;border:1px solid #000;border-radius:4px;background:#fff;font-size:10px;cursor:pointer">?123</button>
-          <button data-kb-lang="1" style="width:46px;height:26px;border:${zh ? "2px" : "1px"} solid #000;border-radius:4px;background:#fff;font-size:10px;font-weight:700;cursor:pointer">${zh ? "中/英" : "英/中"}</button>
+          <button data-kb-lang="1" style="position:relative;width:50px;height:26px;border:1.5px solid #000;border-radius:4px;background:#fff;padding:0;overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:space-around">
+            <span style="position:absolute;inset:0;background:#000;clip-path:${zh ? "polygon(0 0, 58% 0, 42% 100%, 0 100%)" : "polygon(58% 0, 100% 0, 100% 100%, 42% 100%)"}"></span>
+            <span style="position:relative;z-index:1;color:${zh ? "#fff" : "#000"};font-size:${zh ? "12px" : "9.5px"};font-weight:${zh ? "800" : "600"};line-height:1">中</span>
+            <span style="position:relative;z-index:1;color:${zh ? "#000" : "#fff"};font-size:${zh ? "9.5px" : "12px"};font-weight:${zh ? "600" : "800"};line-height:1">英</span>
+          </button>
           <button data-kb-space="1" style="flex:1;height:26px;border:1px solid #000;border-radius:4px;background:#fff;font-size:10px;cursor:pointer">${zh ? "空格" : "Space"}</button>
           <button data-kb-ok="1" style="width:46px;height:26px;border:1.5px solid #000;border-radius:4px;background:#fff;font-size:12px;font-weight:700;cursor:pointer">✓</button>
         </div>
