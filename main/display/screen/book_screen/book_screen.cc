@@ -1,5 +1,3 @@
-#pragma GCC optimize("O1")
-
 #include "book_screen/book_screen.h"
 #include "book_screen/book_screen_priv.h"
 #include "book_screen/shelf/book_bookshelf.h"

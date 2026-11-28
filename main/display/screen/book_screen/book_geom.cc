@@ -212,7 +212,7 @@ void StopReadTimeCheckpointTimer() {
     st.reader.read_time_ckpt_timer = nullptr;
 }
 
-// 有书斋进度地址的书：把当前位置交给同步（和上次一样就不发）
+// 有同步进度地址的书：把当前位置交给同步（和上次一样就不发）
 static void PushReadingPosition() {
     auto& st = Book_State();
     if (st.reader.opening.load() || !st.reader.session || !st.reader.session->IsOpen()) return;

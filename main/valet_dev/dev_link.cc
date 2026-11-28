@@ -296,7 +296,7 @@ void SetupUrl(uint32_t id) {
 }
 
 // 测试用：直接订一个书库（url 为空 = 清空所有订阅）。只编进测试版。
-void LibAdd(uint32_t id, const char* url) {
+void LibAdd(uint32_t id, const char* url, const char* name, const char* user, const char* password) {
     // 测试用：替换整个订阅列表（不追加），每次测试都从干净状态开始
     std::vector<valet::LibrarySource> items;
     if (url != nullptr && url[0]) {
@@ -304,7 +304,9 @@ void LibAdd(uint32_t id, const char* url) {
         valet::LibrarySource item;
         item.id = valet::NewLibraryId();
         item.url = url;
-        item.name = valet::LibraryNameFromUrl(url);
+        item.name = (name && name[0]) ? name : valet::LibraryNameFromUrl(url);
+        if (user && user[0]) item.user = user;
+        if (password && password[0]) item.password = password;
         item.rich = valet::LibraryRichUrl(url);
         items.push_back(std::move(item));
     }
@@ -359,8 +361,15 @@ void ValetDevLinkHandle(const char* json) {
     else if (!strcmp(cmd, "libadd")) {
         // NVS 不能在 USB 控制台的回调里碰（Flash 门闩会 abort）：交给主循环做
         const auto* url = cJSON_GetObjectItemCaseSensitive(root, "url");
-        if (!Application::GetInstance().Schedule([id, u = std::string(cJSON_IsString(url) ? url->valuestring : "")] {
-                LibAdd(id, u.c_str());
+        const auto* name = cJSON_GetObjectItemCaseSensitive(root, "name");
+        const auto* user = cJSON_GetObjectItemCaseSensitive(root, "user");
+        const auto* pass = cJSON_GetObjectItemCaseSensitive(root, "password");
+        if (!Application::GetInstance().Schedule([id,
+                u = std::string(cJSON_IsString(url) ? url->valuestring : ""),
+                n = std::string(cJSON_IsString(name) ? name->valuestring : ""),
+                usr = std::string(cJSON_IsString(user) ? user->valuestring : ""),
+                pw = std::string(cJSON_IsString(pass) ? pass->valuestring : "")] {
+                LibAdd(id, u.c_str(), n.c_str(), usr.c_str(), pw.c_str());
             })) error = "BUSY";
         else replied = true;
     }

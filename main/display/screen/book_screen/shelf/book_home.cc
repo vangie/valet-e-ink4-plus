@@ -1,5 +1,4 @@
 #include "assets/lang_reader.h"
-#pragma GCC optimize("O1")
 
 #include "book_screen/shelf/book_home.h"
 #include "book_screen/book_screen_priv.h"

@@ -241,6 +241,8 @@ esp_err_t Libraries(httpd_req_t* req) {
         cJSON_AddStringToObject(entry, "name", item.name.c_str());
         cJSON_AddStringToObject(entry, "url", item.url.c_str());
         if (!item.member.empty()) cJSON_AddStringToObject(entry, "member", item.member.c_str());
+        if (!item.user.empty()) cJSON_AddStringToObject(entry, "user", item.user.c_str());
+        cJSON_AddBoolToObject(entry, "auth", !item.password.empty() || !item.user.empty());
         cJSON_AddBoolToObject(entry, "rich", item.rich);
     }
     return JsonReply(req, root.get());
@@ -265,8 +267,19 @@ esp_err_t LibrariesMutate(httpd_req_t* req) {
         while (!url.empty() && (url.back() == ' ' || url.back() == '\t')) url.pop_back();
         while (!url.empty() && (url.front() == ' ' || url.front() == '\t')) url.erase(0, 1);
         if (!LibraryUrlValid(url)) return Reply(req, "400 Bad Request", "{\"error\":\"不是书库链接：要以 http:// 或 https:// 开头\"}");
-        for (const auto& item : items) {
+        std::string name = String(root.get(), "name");
+        while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.pop_back();
+        while (!name.empty() && (name.front() == ' ' || name.front() == '\t')) name.erase(0, 1);
+        std::string user = String(root.get(), "user");
+        std::string password = String(root.get(), "password");
+        for (auto& item : items) {
             if (item.url != url) continue;
+            if (!name.empty()) item.name = name;
+            if (!user.empty() || !password.empty()) {
+                item.user = user;
+                item.password = password;
+            }
+            SaveLibrarySources(items);
             Json ok(cJSON_CreateObject(), cJSON_Delete);
             if (!ok) return JsonReply(req, nullptr);
             cJSON_AddStringToObject(ok.get(), "name", item.name.c_str());
@@ -276,7 +289,9 @@ esp_err_t LibrariesMutate(httpd_req_t* req) {
         LibrarySource item;
         item.id = NewLibraryId();
         item.url = url;
-        item.name = LibraryNameFromUrl(url);
+        item.name = name.empty() ? LibraryNameFromUrl(url) : name;
+        item.user = user;
+        item.password = password;
         item.rich = LibraryRichUrl(url);
         items.push_back(item);
         if (!SaveLibrarySources(items)) return Reply(req, "500 Internal Server Error", "{\"error\":\"存储空间不足，没能保存\"}");

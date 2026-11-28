@@ -1,5 +1,4 @@
 #include "assets/lang_config.h"
-#pragma GCC optimize("O1")
 
 // 快捷面板（从状态栏往下拉）：
 //  - 上面两块：网络（点一下在 自动 → 4G → Wi-Fi 之间轮换）、代理（点一下开 / 关当前这条网的代理）；长按进对应的设置页。

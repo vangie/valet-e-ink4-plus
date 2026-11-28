@@ -21,7 +21,7 @@ enum class BookFormat : uint8_t {
 enum class BookSource : uint8_t {
     kLocal = 0,   // 本地导入 / 传书
     kWeRead,      // 微信读书 (weread://)
-    kShuzhai,     // 书斋同步书库 (/api/u/...)
+    kSyncedLib,   // 带进度同步的自建书库 (/api/u/...)
     kLibrary,     // 其他 OPDS 书库 / 云端书城 (opds:// 或 cloud://)
 };
 

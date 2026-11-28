@@ -5,6 +5,7 @@
 #include "book_screen/book_nav.h"
 #include "book_screen/book_screen_priv.h"
 #include "http.h"
+#include "library_sources.h"
 #include "power_policy.h"
 #include "reader/book_storage_paths.h"
 #include "reader/image_util.h"
@@ -103,6 +104,8 @@ int Request(const char* method, const std::string& url, std::string body, std::s
     http->SetKeepAlive(false);
     http->SetHeader("Accept", "application/json");
     http->SetHeader("Connection", "close");
+    const std::string auth = valet::LibraryAuthHeaderForUrl(url);
+    if (!auth.empty()) http->SetHeader("Authorization", auth);
     if (!body.empty()) {
         http->SetHeader("Content-Type", "application/json");
         http->SetContent(std::move(body));
@@ -380,7 +383,9 @@ void WishTask(void* arg) {
 } // namespace
 
 std::string ProgressUrlFromDownload(const std::string& download_url) {
-    // http(s)://host/opds/<短码>/download/<id>/<格式>/ → http(s)://host/api/u/<短码>/books/<id>/progress
+    // 支持两种带短码的下载地址：
+    // 1) http(s)://host/opds/<短码>/download/<id>/<格式>/ → http(s)://host/api/u/<短码>/books/<id>/progress
+    // 2) http(s)://host/opds/<短码>/books/<id>/download.<格式> → http(s)://host/api/u/<短码>/books/<id>/progress
     const size_t scheme = download_url.find("://");
     if (scheme == std::string::npos) return {};
     const size_t path = download_url.find('/', scheme + 3);
@@ -392,13 +397,19 @@ std::string ProgressUrlFromDownload(const std::string& download_url) {
     const size_t key_end = rest.find('/', prefix.size());
     if (key_end == std::string::npos) return {};
     const std::string key = rest.substr(prefix.size(), key_end - prefix.size());
-    if (key.empty() || key == "download") return {};   // 没有短码的 Calibre-Web 原地址
+    if (key.empty() || key == "download" || key == "books" || key == "new" || key == "search") return {};
     for (char c : key) {
         if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-') return {};
     }
-    const std::string marker = "/download/";
-    if (rest.compare(key_end, marker.size(), marker) != 0) return {};
-    const size_t id_start = key_end + marker.size();
+    size_t id_start = std::string::npos;
+    const std::string marker1 = "/download/";
+    const std::string marker2 = "/books/";
+    if (rest.compare(key_end, marker1.size(), marker1) == 0) {
+        id_start = key_end + marker1.size();
+    } else if (rest.compare(key_end, marker2.size(), marker2) == 0) {
+        id_start = key_end + marker2.size();
+    }
+    if (id_start == std::string::npos) return {};
     size_t id_end = id_start;
     while (id_end < rest.size() && std::isdigit(static_cast<unsigned char>(rest[id_end]))) ++id_end;
     if (id_end == id_start) return {};

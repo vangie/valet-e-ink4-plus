@@ -1,14 +1,12 @@
 #include "assets/lang_screen.h"
 #include "http_download_file.h"
 
-// xtensa-g++：本文件在 -Os 下曾 ICE
-#pragma GCC optimize("O1")
-
 #include "api_endpoints.h"
 #include "api_http.h"
 #include "assets/lang_config.h"
 #include "board.h"
 #include "application.h"
+#include "library_sources.h"
 #include "sd_paths.h"
 #include "sd_data_layout.h"
 #include "sd_access.h"
@@ -169,6 +167,10 @@ bool DownloadHttpToFile(const char* url, const char* tmp_path, const char* expec
 
     http_raw->SetTimeout(kHttpTimeoutMs);
     api::ApplyCommonHeaders(http_raw);
+    const std::string lib_auth = valet::LibraryAuthHeaderForUrl(url);
+    if (!lib_auth.empty()) {
+        http_raw->SetHeader("Authorization", lib_auth);
+    }
 
     if (!http_raw->Open("GET", url)) {
         if (gate != nullptr) {

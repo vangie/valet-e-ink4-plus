@@ -97,11 +97,11 @@ const SetupPage = (() => {
   let apiNote = "", apiPaired = true;
   const reply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   // ── 设备的 /api/libraries（假的）：书库订阅，和设置里「书库订阅」是同一份 state.libs。
-  // 真机上订阅时设备会先打开链接：书斋带 Accept: application/json 能拿到名字和家人，其余按 OPDS 读标题。
+  // 真机上订阅时支持 OPDS 公网地址与可选认证口令。
   async function libraries(opts) {
     await wait(opts.method === "POST" ? 900 : 120);
     if (!opts.method || opts.method === "GET") {
-      return reply({ items: state.libs.map((id) => LIB_SOURCES[id]).map((s) => ({ id: s.id, name: s.short, member: s.rich ? "杜万" : "", url: s.url, rich: !!s.rich })) });
+      return reply({ items: state.libs.map((id) => LIB_SOURCES[id]).filter(Boolean).map((s) => ({ id: s.id, name: s.short, member: "", url: s.url, rich: !!s.rich, auth: !!s.auth })) });
     }
     const d = JSON.parse(opts.body || "{}");
     if (d.action === "remove") {
@@ -112,13 +112,23 @@ const SetupPage = (() => {
     }
     if (d.action !== "add") return reply({ error: "设备不认识这个操作" }, 400);
     let id;
-    try { const u = new URL(d.url); id = /gutenberg/.test(u.host) ? "gutenberg" : /\/opds\/[a-z0-9]{6}$/i.test(u.pathname) ? "shuzhai" : ""; } catch { id = ""; }
+    try { const u = new URL(d.url); id = /gutenberg/.test(u.host) ? "gutenberg" : "custom"; } catch { id = ""; }
     if (!id) return reply({ error: "设备打开了这个链接，但不是 OPDS 书库。检查一下是不是复制全了。" }, 400);
-    if (state.libs.includes(id)) return reply({ error: `已经订过「${LIB_SOURCES[id].short}」了` }, 400);
-    state.libs.push(id);
+    if (id === "custom") {
+      const host = new URL(d.url).host;
+      LIB_SOURCES.custom = {
+        id: "custom",
+        name: d.name || host,
+        short: (d.name || "书库").slice(0, 3),
+        url: d.url,
+        rich: /\/opds\/[a-z0-9_-]{4,}$/i.test(new URL(d.url).pathname) || !!d.password,
+        auth: !!d.password || /\/opds\/[a-z0-9_-]{4,}$/i.test(new URL(d.url).pathname),
+      };
+    }
+    if (!state.libs.includes(id)) state.libs.push(id);
     log(`配置页：订阅「${LIB_SOURCES[id].name}」。`);
     render();
-    return reply({ ok: true, id, name: LIB_SOURCES[id].short });
+    return reply({ ok: true, id, name: LIB_SOURCES[id].name });
   }
   function repaintLibraries() {
     const page = el?.querySelector(".sw-frame")?.contentWindow;

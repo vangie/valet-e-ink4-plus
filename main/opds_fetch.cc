@@ -4,6 +4,7 @@
 #include "assets/lang_config.h"
 #include "board.h"
 #include "http.h"
+#include "library_sources.h"
 #include "power_policy.h"
 
 #include <memory>
@@ -44,6 +45,8 @@ FetchResult FetchFeed(const std::string& url, int timeout_ms) {
     http->SetKeepAlive(false);
     http->SetHeader("Accept", "application/atom+xml,application/xml;q=0.9,*/*;q=0.5");
     http->SetHeader("Connection", "close");
+    const std::string auth = valet::LibraryAuthHeaderForUrl(url);
+    if (!auth.empty()) http->SetHeader("Authorization", auth);
     if (!http->Open("GET", url)) {
         result.error = Lang::Strings::BOOK_CONN_FAIL;
         return result;
@@ -51,7 +54,7 @@ FetchResult FetchFeed(const std::string& url, int timeout_ms) {
     result.status = http->GetStatusCode();
     if (result.status < 200 || result.status >= 300) {
         http->Close();
-        result.error = result.status == 401 || result.status == 403 ? "订阅失效，请重新设置"
+        result.error = result.status == 401 || result.status == 403 ? "书库需要认证或密钥已失效，请重新配置"
                      : result.status == 404                    ? "这个地址上没有书库"
                                                               : "书库没有回应（" + std::to_string(result.status) + "）";
         return result;

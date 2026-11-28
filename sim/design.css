@@ -808,7 +808,7 @@ div.v-row { box-sizing: border-box; }
 .v-lcover.big { width: 74px; height: 104px; flex: none; }
 .v-lcover.big .v-cov-t { font-size: 12.5px; }
 
-/* ── 右上角 45° 来源斜角标（微读 / 书斋 / 古登堡） ── */
+/* ── 右上角 45° 来源斜角标（微读 / 书库 / 古登堡） ── */
 .v-ltag {
   position: absolute;
   top: 7px;
@@ -831,7 +831,7 @@ div.v-row { box-sizing: border-box; }
   color: var(--paper);
   box-shadow: 0 0 0 1px var(--paper), 0 0 0 1.8px var(--ink);
 }
-/* 书斋：纸白底黑字 + 上下墨线 */
+/* 自建同步书库：纸白底黑字 + 上下墨线 */
 .v-ltag.is-paper {
   background: var(--paper);
   color: var(--ink);
@@ -1026,7 +1026,7 @@ div.v-row { box-sizing: border-box; }
 .v-ll-main b { font-size: 11px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v-ll-main em { font-style: normal; font-size: 8.5px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* 来源小标签（微读黑底白字 / 书斋白底黑框） */
+/* 来源小标签（微读黑底白字 / 书库白底黑框） */
 .v-lsrc-pill {
   flex: none;
   font-style: normal;

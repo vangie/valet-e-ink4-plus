@@ -106,8 +106,8 @@ void UpdateShelfTitleLabel() {
     const std::string title = ShelfDirIsRoot() ? Lang::Strings::BOOK_SHELF_TITLE :
         "~" + st.shelf.shelf_dir.substr(std::strlen(reader::kDefaultBooksDir));
     const char* raw = title.c_str();
-    // 留给右侧封面|列表切换：两钮 + 竖线 + 间距
-    const lv_coord_t toggle_w = kShelfViewBtnW * 2 + 1 + 12;
+    // 留给右侧「搜书」「书库」与封面|列表切换
+    const lv_coord_t toggle_w = kShelfViewBtnW * 2 + 1 + UiSx(188);
     const lv_coord_t max_w = Book_ContentWidth() - toggle_w;
     const lv_coord_t budget = max_w > 40 ? max_w : 40;
     lv_obj_set_width(st.shelf.shelf_title_lbl, budget);
@@ -585,7 +585,7 @@ void ApplyShelfEntryMetadata(const reader::BookInfo& info, lv_obj_t* host, bool 
     lv_label_set_text(tail, pct_txt);
     const lv_coord_t pct_col_w = lv_obj_get_width(tail);
 
-    // 2. 来源小标签（微读：黑底白字；书斋/书库：白底黑框；本机：隐藏）
+    // 2. 来源小标签（微读：黑底白字；书库：白底黑框；本机：隐藏）
     const char* ribbon = valet::weread::BookSourceRibbonText(info.source);
     lv_coord_t pill_used = 0;
     if (ribbon && ribbon[0] != '\0') {

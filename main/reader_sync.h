@@ -1,14 +1,14 @@
 #pragma once
-// 书斋这类带成员短码的书库：同步阅读进度 + 想读标记。
-// 从 /opds/<短码>/download/<id>/… 下的书记下进度地址 /api/u/<短码>/books/<id>/progress，
+// 带成员短码的自建书库：同步阅读进度 + 想读标记。
+// 从 /opds/<短码>/... 下的书记下进度地址 /api/u/<短码>/books/<id>/progress，
 // 打开时问一次读到哪里（别处读得更新就跳过去），读的时候定时、离开时写回。
-// 只走 OPDS 的书（没有短码）不同步。网络和 SD 都在后台任务里做，不卡 UI。
+// 只走普通 OPDS 的书（没有短码）不同步。网络和 SD 都在后台任务里做，不卡 UI。
 #include <functional>
 #include <string>
 
 namespace valet::sync {
 
-/** @brief 从下载地址推出进度地址；不是带短码的书斋地址时返回空串 */
+/** @brief 从下载地址推出进度地址；不是带短码的同步书库地址时返回空串 */
 std::string ProgressUrlFromDownload(const std::string& download_url);
 
 /** @brief 记下这本书的进度地址并写 .sync sidecar（下载成功后调用，可在任意任务） */

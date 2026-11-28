@@ -1,6 +1,6 @@
 #pragma once
 // 在线书库（OPDS）：按订阅链接拉目录、搜索、看条目，条目里带封面和下载地址。
-// 只做标准 OPDS（Atom + opds:acquisition），所以书斋、Gutenberg、Calibre-Web 都能用。
+// 只做标准 OPDS（Atom + opds:acquisition），所以 Gutenberg、Calibre-Web 及自建书库都能用。
 // 纯逻辑（解析、地址补全、选格式）不碰网络，可以在电脑上单测；拉取和下载在另一层。
 #include <cstdint>
 #include <string>

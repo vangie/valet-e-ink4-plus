@@ -1,14 +1,17 @@
 #pragma once
-// 书架上的「书库」：浏览订阅的 OPDS 书库（目录、搜索），把书下到 SD 卡 books/，下好就能读。
-// 下好的书就是本机的书，书架上照常出现。
+// 书架上的「搜书」与「书库」：
+// - 「搜书」：书架一级入口，直接调起搜索键盘，跨微信读书与所有已订阅 OPDS 书库搜书、下载阅读。
+// - 「书库」：配置和管理不同书库（微信读书账号扫码登录/同步、添加/移除/认证 OPDS 书库订阅，也可点进书库浏览）。
 
 #include <lvgl.h>
 
-constexpr const char* kScreenOpds = "book_opds"; // 在线书库
+constexpr const char* kScreenOpds = "book_opds"; // 书库配置与在线搜书
 
-/** @brief 有没有订阅书库（书架标题行据此显示「书库」入口） */
+/** @brief 书架标题行是否显示「搜书」与「书库」入口 */
 bool OpdsHasLibraries();
-/** @brief 创建书库页；返回时保留上次看到的位置 */
+/** @brief 创建书库/搜书页 */
 lv_obj_t* CreateOpdsScreen();
-/** @brief 书架标题行「书库」按钮 */
+/** @brief 书架标题行「搜书」一级入口（进页即弹搜索键盘） */
+void OnShelfSearchClicked(lv_event_t* e);
+/** @brief 书架标题行「书库」配置入口（管理不同书库源） */
 void OnShelfLibraryClicked(lv_event_t* e);

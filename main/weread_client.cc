@@ -4,7 +4,9 @@
 #include "assets/lang_config.h"
 #include "board.h"
 #include "book_cover_sidecar.h"
+#include "http.h"
 #include "power_policy.h"
+#include "valet_net/proxy.h"
 #include "reader/book_library.h"
 #include "reader/book_storage_paths.h"
 #include "reader/http_download_file.h"
@@ -437,25 +439,68 @@ public:
     }
 
     bool Request(const char* method, const std::string& url, const std::string& post_body,
-                 const std::string& referer, HttpResp& out, bool absorb_cookies = true) {
-        if (RequestOnce(method, url, post_body, referer, out, absorb_cookies)) return true;
+                 const std::string& referer, HttpResp& out, bool absorb_cookies = true, int timeout_ms = 12000) {
+        if (RequestOnce(method, url, post_body, referer, out, absorb_cookies, timeout_ms)) return true;
         Close();
-        vTaskDelay(pdMS_TO_TICKS(300));
-        return RequestOnce(method, url, post_body, referer, out, absorb_cookies);
+        vTaskDelay(pdMS_TO_TICKS(250));
+        return RequestOnce(method, url, post_body, referer, out, absorb_cookies, timeout_ms);
     }
 
 private:
     bool RequestOnce(const char* method, const std::string& url, const std::string& post_body,
-                     const std::string& referer, HttpResp& out, bool absorb_cookies) {
+                     const std::string& referer, HttpResp& out, bool absorb_cookies, int timeout_ms) {
         out.status = -1;
         out.body.Reset();
         out.set_cookies.clear();
+
+        // 当请求不需要捕获 Set-Cookie（如获取扫码 UID、轮询扫码状态、搜索书籍）或设备启用了代理时，
+        // 优先走 Board::GetInstance().GetNetwork()->CreateHttp(0)，确保代理与双网连接策略生效。
+        if (!absorb_cookies || valet::proxy::InForce()) {
+            auto* network = Board::GetInstance().GetNetwork();
+            auto http = network ? network->CreateHttp(0) : nullptr;
+            if (http) {
+                http->SetTimeout(timeout_ms);
+                http->SetKeepAlive(false);
+                http->SetHeader("User-Agent", kUserAgent);
+                http->SetHeader("Accept", "application/json, text/plain, */*");
+                http->SetHeader("Origin", kHost);
+                http->SetHeader("Referer", referer.empty() ? "https://weread.qq.com/" : referer);
+                http->SetHeader("Connection", "close");
+                const std::string cookie = BuildCookieHeader();
+                if (!cookie.empty()) http->SetHeader("Cookie", cookie);
+                if (std::strcmp(method, "POST") == 0) {
+                    http->SetHeader("Content-Type", "application/json;charset=UTF-8");
+                    std::string copy = post_body;
+                    http->SetContent(std::move(copy));
+                }
+                if (http->Open(method, url)) {
+                    out.status = http->GetStatusCode();
+                    const std::string sc = http->GetResponseHeader("set-cookie");
+                    if (!sc.empty()) out.set_cookies.push_back(sc);
+                    char buf[2048];
+                    while (true) {
+                        const int n = http->Read(buf, sizeof(buf));
+                        if (n <= 0) break;
+                        if (!out.body.Append(buf, static_cast<size_t>(n))) break;
+                    }
+                    http->Close();
+                    if (absorb_cookies && !out.set_cookies.empty()) {
+                        AbsorbSetCookies(out.set_cookies);
+                    }
+                    if (!out.body.overflow && out.status >= 200 && out.status < 300) {
+                        return true;
+                    }
+                } else {
+                    http->Close();
+                }
+            }
+        }
 
         if (!client_) {
             esp_http_client_config_t cfg = {};
             cfg.url = kHost;
             cfg.user_agent = kUserAgent;
-            cfg.timeout_ms = 20000;
+            cfg.timeout_ms = timeout_ms;
             cfg.buffer_size = 4096;
             cfg.buffer_size_tx = 2048;
             cfg.keep_alive_enable = true;
@@ -479,6 +524,7 @@ private:
         }
 
         active_ = &out;
+        esp_http_client_set_timeout_ms(client_, timeout_ms);
         esp_http_client_set_url(client_, url.c_str());
         esp_http_client_set_header(client_, "Accept", "application/json, text/plain, */*");
         esp_http_client_set_header(client_, "Origin", kHost);
@@ -879,14 +925,14 @@ bool BeginQrLogin(std::string& uid, std::string& qr_url, std::string& err) {
     qr_url.clear();
     err.clear();
     PowerNeedHold hold_net(PowerNeed::OtaDownload);
-    if (!Board::GetInstance().EnsureNetworkReady()) {
+    if (!Board::GetInstance().EnsureNetworkReady(15000)) {
         err = Lang::Strings::BOOK_NET_NOT_READY;
         return false;
     }
     ActivationHold hold;
     HttpSession sess;
     HttpResp resp;
-    if (!sess.Request("GET", std::string(kHost) + "/api/auth/getLoginUid", {}, "https://weread.qq.com/", resp, true)) {
+    if (!sess.Request("GET", std::string(kHost) + "/api/auth/getLoginUid", {}, "https://weread.qq.com/", resp, false, 6000)) {
         err = "无法连接微信读书获取二维码";
         return false;
     }
@@ -914,7 +960,7 @@ bool PollQrLogin(const std::string& uid, const std::string& otp, QrState& state,
         return false;
     }
     PowerNeedHold hold_net(PowerNeed::OtaDownload);
-    if (!Board::GetInstance().EnsureNetworkReady()) {
+    if (!Board::GetInstance().EnsureNetworkReady(5000)) {
         return true; // 暂未就绪，下次继续轮询
     }
     ActivationHold hold;
@@ -922,7 +968,7 @@ bool PollQrLogin(const std::string& uid, const std::string& otp, QrState& state,
     HttpResp resp;
     std::string url = std::string(kHost) + "/api/auth/getLoginInfo?uid=" + UrlEncode(uid) + "&otp";
     if (!otp.empty()) url += "=" + UrlEncode(otp);
-    if (!sess.Request("GET", url, {}, "https://weread.qq.com/", resp, true)) {
+    if (!sess.Request("GET", url, {}, "https://weread.qq.com/", resp, true, 6000)) {
         return true;
     }
     Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
@@ -1589,7 +1635,7 @@ reader::BookSource DetectBookSource(const std::string& book_path) {
     char* nl = std::strchr(buf, '\n');
     if (nl) *nl = '\0';
     if (std::strncmp(buf, "weread://", 9) == 0) return reader::BookSource::kWeRead;
-    if (std::strstr(buf, "/api/u/") != nullptr) return reader::BookSource::kShuzhai;
+    if (std::strstr(buf, "/api/u/") != nullptr) return reader::BookSource::kSyncedLib;
     if (std::strncmp(buf, "opds://", 7) == 0 || std::strncmp(buf, "cloud://", 8) == 0 ||
         std::strncmp(buf, "http://", 7) == 0 || std::strncmp(buf, "https://", 8) == 0) {
         return reader::BookSource::kLibrary;
@@ -1599,19 +1645,19 @@ reader::BookSource DetectBookSource(const std::string& book_path) {
 
 const char* BookSourceRibbonText(reader::BookSource src) {
     switch (src) {
-        case reader::BookSource::kWeRead:  return "微读";
-        case reader::BookSource::kShuzhai: return "书斋";
-        case reader::BookSource::kLibrary: return "书库";
-        default:                           return "";
+        case reader::BookSource::kWeRead:    return "微读";
+        case reader::BookSource::kSyncedLib: return "书库";
+        case reader::BookSource::kLibrary:   return "书库";
+        default:                             return "";
     }
 }
 
 const char* BookSourceFullName(reader::BookSource src) {
     switch (src) {
-        case reader::BookSource::kWeRead:  return "微信读书";
-        case reader::BookSource::kShuzhai: return "书斋";
-        case reader::BookSource::kLibrary: return "在线书库";
-        default:                           return "";
+        case reader::BookSource::kWeRead:    return "微信读书";
+        case reader::BookSource::kSyncedLib: return "已订阅书库";
+        case reader::BookSource::kLibrary:   return "在线书库";
+        default:                             return "";
     }
 }
 

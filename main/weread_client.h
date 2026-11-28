@@ -113,11 +113,11 @@ bool UploadProgress(const std::string& book_id,
 /** @brief 判断一本书（本地路径）是否来自微信读书（检查 .sync 是否为 weread://<bookId>） */
 bool IsWeReadBook(const std::string& book_path, std::string* book_id_out = nullptr);
 
-/** @brief 探测本地书籍来源（读取 .sync 区分微信读书、书斋、在线书库与本地书籍） */
+/** @brief 探测本地书籍来源（读取 .sync 区分微信读书、自建同步书库、在线书库与本地书籍） */
 reader::BookSource DetectBookSource(const std::string& book_path);
-/** @brief 书籍来源角标短名（如 "微读" / "书斋" / "书库"，本地返回空串） */
+/** @brief 书籍来源角标短名（如 "微读" / "书库"，本地返回空串） */
 const char* BookSourceRibbonText(reader::BookSource src);
-/** @brief 书籍来源全称（如 "微信读书" / "书斋" / "在线书库"，本地返回空串） */
+/** @brief 书籍来源全称（如 "微信读书" / "在线书库"，本地返回空串） */
 const char* BookSourceFullName(reader::BookSource src);
 
 /** @brief 根据本地书籍路径和 EPUB spine 下标反查对应的微信读书 chapterUid；未找到返回空串 */

@@ -2,6 +2,7 @@
 // 网络和解析都在后台任务里，结果用 ScreenLvAsync 交回 UI；离开页面后旧结果按代次丢弃。
 #include "book_screen/shelf/book_opds.h"
 
+#include "application.h"
 #include "assets/lang_config.h"
 #include "book_screen/book_cloud_library.h"
 #include "book_screen/book_font_runtime.h"
@@ -10,6 +11,7 @@
 #include "book_screen/book_text_util.h"
 #include "book_screen/reader/book_open_worker.h"
 #include "book_screen/shelf/book_bookshelf.h"
+#include "epd_refresh.h"
 #include "fontpack_lvgl.h"
 #include "haptic_feedback.h"
 #include "library_sources.h"
@@ -22,6 +24,7 @@
 #include "screen_common.h"
 #include "screen_keyboard.h"
 #include "ui_qrcode.h"
+#include "valet_setup/server.h"
 #include "vk_key_handler.h"
 #include "weread_client.h"
 
@@ -62,6 +65,7 @@ struct Level {
 struct Ui {
     lv_obj_t* scr = nullptr;
     lv_obj_t* title = nullptr;
+    lv_obj_t* head_btn = nullptr;
     lv_obj_t* list = nullptr;
     lv_obj_t* footer = nullptr;
     lv_obj_t* editor = nullptr;
@@ -72,9 +76,17 @@ struct Ui {
     lv_obj_t* qr_mask = nullptr;
     lv_obj_t* qr_code = nullptr;
     lv_obj_t* qr_status = nullptr;
+    lv_obj_t* qr_sub = nullptr;
+    lv_obj_t* setup_mask = nullptr;
+    lv_obj_t* setup_qr = nullptr;
+    lv_obj_t* setup_status = nullptr;
+    lv_obj_t* setup_addr = nullptr;
+    lv_timer_t* setup_timer = nullptr;
 };
 
 Ui s_ui;
+bool s_open_search_immediately = false;
+bool s_opened_from_search = false;
 std::vector<Level> s_stack;          // 浏览路径；最后一层在屏上
 std::string s_query;                 // 最近一次搜索词（编辑框里的）
 bool s_loading = false;
@@ -319,6 +331,8 @@ reader::CloudBookTask TaskFor(const valet::opds::Entry& entry) {
 void OpenDetail(int index);
 void OpenWeReadQr();
 void CloseWeReadQr();
+void OpenSetupQr();
+void CloseSetupQr();
 void StartRoot();
 
 void OnRowClicked(lv_event_t* e) {
@@ -329,6 +343,10 @@ void OnRowClicked(lv_event_t* e) {
     const auto& entry = top->entries[static_cast<size_t>(index)];
     if (!entry.files.empty()) { OpenDetail(index); return; }
     if (entry.nav.empty()) return;
+    if (entry.nav == "setup://library") {
+        OpenSetupQr();
+        return;
+    }
     if (entry.nav == "weread://login") {
         OpenWeReadQr();
         return;
@@ -364,7 +382,12 @@ void SetFooter(const char* text) {
 void Render() {
     if (s_ui.list == nullptr) return;
     Level* top = Top();
+    const bool at_root = (s_stack.size() <= 1 && (!top || top->url.empty()) && (!top || top->title == Text("书库", "Libraries")));
     if (s_ui.title) lv_label_set_text(s_ui.title, top && !top->title.empty() ? top->title.c_str() : Text("书库", "Libraries"));
+    if (s_ui.head_btn) {
+        if (at_root) lv_obj_add_flag(s_ui.head_btn, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_clear_flag(s_ui.head_btn, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_obj_clean(s_ui.list);
     if (top == nullptr) return;
     const int rows = RowsPerPage();
@@ -740,7 +763,14 @@ void OpenEditor() {
     lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(sheet, LV_OBJ_FLAG_CLICKABLE);
     ScreenPopupTitleBar(sheet, Text("搜书", "Search"), Strong(), Text("取消", "Cancel"), Small(),
-                        [](lv_event_t*) { lv_async_call([](void*) { CloseEditor(); }, nullptr); });
+                        [](lv_event_t*) {
+                            lv_async_call([](void*) {
+                                CloseEditor();
+                                if (s_opened_from_search && s_stack.size() <= 1) {
+                                    OpenBookshelfAsync(nullptr);
+                                }
+                            }, nullptr);
+                        });
     auto* panel = lv_obj_create(sheet);
     lv_obj_remove_style_all(panel);
     lv_obj_set_width(panel, lv_pct(100));
@@ -751,8 +781,8 @@ void OpenEditor() {
     lv_obj_set_style_pad_row(panel, 16, 0);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    auto* hint = AddLabel(panel, Text("同时搜索微信读书与已订阅书库。书斋认拼音首字母（hlm = 红楼梦）。",
-                                      "Searches WeRead and every subscribed library."), Small());
+    auto* hint = AddLabel(panel, Text("同时搜索微信读书与已配置书库，支持书名、作者或拼音首字母。",
+                                      "Searches WeRead and every configured library."), Small());
     lv_obj_set_width(hint, lv_pct(100));
     lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
     auto* box = lv_obj_create(panel);
@@ -819,6 +849,8 @@ void ApplyWeReadQrMsg(void* p) {
     if (msg->has_qr && s_ui.qr_code && !msg->qr_url.empty()) {
         lv_qrcode_update(s_ui.qr_code, msg->qr_url.data(), msg->qr_url.size());
         lv_obj_clear_flag(s_ui.qr_code, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_invalidate(s_ui.qr_mask);
+        EpdRequestScreenChange();
     }
     if (s_ui.qr_status && !msg->status.empty()) {
         lv_label_set_text(s_ui.qr_status, msg->status.c_str());
@@ -881,7 +913,7 @@ void OpenWeReadQr() {
     s_ui.qr_mask = mask;
     lv_obj_add_event_cb(mask, [](lv_event_t*) {
         ++s_qr_gen;
-        s_ui.qr_mask = s_ui.qr_code = s_ui.qr_status = nullptr;
+        s_ui.qr_mask = s_ui.qr_code = s_ui.qr_status = s_ui.qr_sub = nullptr;
     }, LV_EVENT_DELETE, nullptr);
 
     auto* sheet = lv_obj_create(mask);
@@ -901,7 +933,7 @@ void OpenWeReadQr() {
     lv_obj_set_size(body, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_style_pad_hor(body, 33, 0);
     lv_obj_set_style_pad_ver(body, 28, 0);
-    lv_obj_set_style_pad_row(body, 20, 0);
+    lv_obj_set_style_pad_row(body, 14, 0);
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(body, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
@@ -917,18 +949,18 @@ void OpenWeReadQr() {
     lv_obj_add_flag(qr, LV_OBJ_FLAG_HIDDEN);
     s_ui.qr_code = qr;
 
-    s_ui.qr_status = AddLabel(body, Text("正在请求微信读书二维码…", "Requesting QR code…"), Book_ItemFont());
+    s_ui.qr_status = AddLabel(body, Text("正在获取登录二维码…", "Requesting QR code…"), Book_ItemFont());
     lv_obj_set_width(s_ui.qr_status, lv_pct(100));
     lv_obj_set_style_text_align(s_ui.qr_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_ui.qr_status, LV_LABEL_LONG_WRAP);
 
-    auto* sub = AddLabel(body,
-                         Text("登录后自动同步微信读书书架、已购书籍与跨端阅读进度。\n不登录也可直接点右上角「搜书」免费试读。",
-                              "Sign in to sync your shelf, purchased books, and reading progress."),
-                         Small());
-    lv_obj_set_width(sub, lv_pct(100));
-    lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
+    s_ui.qr_sub = AddLabel(body,
+                           Text("扫码同步微信读书书架、已购书籍与阅读进度",
+                                "Sign in to sync your shelf, purchases and progress."),
+                           Small());
+    lv_obj_set_width(s_ui.qr_sub, lv_pct(100));
+    lv_obj_set_style_text_align(s_ui.qr_sub, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_ui.qr_sub, LV_LABEL_LONG_WRAP);
 
     if (xTaskCreatePinnedToCore(WeReadQrWorker, "wr_qr", 8192,
                                 reinterpret_cast<void*>(static_cast<uintptr_t>(my_gen)),
@@ -937,11 +969,138 @@ void OpenWeReadQr() {
     }
 }
 
+// ── 手机扫码配置书库弹窗（复用 /setup?to=library）─────────────────────────
+void CloseSetupQr() {
+    if (s_ui.setup_timer) {
+        lv_timer_delete(s_ui.setup_timer);
+        s_ui.setup_timer = nullptr;
+    }
+    if (s_ui.setup_mask) {
+        lv_obj_delete(s_ui.setup_mask);
+    }
+    valet::CloseSetupSession();
+    const auto libs = valet::LoadLibrarySources();
+    const std::string sig = LibrariesSignature(libs);
+    if (sig != s_signature && s_ui.scr) {
+        s_signature = sig;
+        StartRoot();
+    }
+}
+
+void RefreshSetupQrUi() {
+    if (!s_ui.setup_mask) return;
+    const auto setup = valet::GetSetupStatus();
+    if (setup.running && !setup.url.empty()) {
+        std::string lib_url = setup.url;
+        const size_t hash = lib_url.find('#');
+        if (hash != std::string::npos) {
+            lib_url = lib_url.substr(0, hash) + "?to=library" + lib_url.substr(hash);
+        }
+        if (s_ui.setup_qr && lv_obj_has_flag(s_ui.setup_qr, LV_OBJ_FLAG_HIDDEN)) {
+            lv_qrcode_update(s_ui.setup_qr, lib_url.data(), lib_url.size());
+            lv_obj_clear_flag(s_ui.setup_qr, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_invalidate(s_ui.setup_mask);
+            EpdRequestScreenChange();
+        }
+        if (s_ui.setup_status) {
+            lv_label_set_text(s_ui.setup_status, Text("同一 Wi-Fi 下用手机扫码打开「书库配置」", "Scan on the same Wi-Fi to configure libraries"));
+        }
+        if (s_ui.setup_addr && hash != std::string::npos) {
+            lv_label_set_text(s_ui.setup_addr, setup.url.substr(0, hash).c_str());
+        }
+    } else if (setup.starting) {
+        if (s_ui.setup_status) {
+            lv_label_set_text(s_ui.setup_status, Text("正在连接 Wi-Fi 并开启配置页…", "Starting setup page…"));
+        }
+    } else if (!setup.note.empty()) {
+        if (s_ui.setup_status) {
+            lv_label_set_text(s_ui.setup_status, setup.note.c_str());
+        }
+    }
+    // 如果手机在配置页上添加或移除了书库，底层列表自动刷新
+    const auto libs = valet::LoadLibrarySources();
+    const std::string sig = LibrariesSignature(libs);
+    if (sig != s_signature && s_stack.size() <= 1) {
+        s_signature = sig;
+        StartRoot();
+    }
+}
+
+void OpenSetupQr() {
+    if (s_ui.setup_mask || !s_ui.scr) return;
+    auto* mask = ScreenPopupMask(s_ui.scr);
+    s_ui.setup_mask = mask;
+    lv_obj_add_event_cb(mask, [](lv_event_t*) {
+        if (s_ui.setup_timer) {
+            lv_timer_delete(s_ui.setup_timer);
+            s_ui.setup_timer = nullptr;
+        }
+        s_ui.setup_mask = s_ui.setup_qr = s_ui.setup_status = s_ui.setup_addr = nullptr;
+    }, LV_EVENT_DELETE, nullptr);
+
+    auto* sheet = lv_obj_create(mask);
+    lv_obj_remove_style_all(sheet);
+    lv_obj_set_size(sheet, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_align(sheet, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(sheet, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(sheet, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(sheet, LV_OBJ_FLAG_CLICKABLE);
+    ScreenPopupTitleBar(sheet, Text("添加 / 管理书库", "Manage Libraries"), Strong(), Text("完成", "Done"), Small(),
+                        [](lv_event_t*) { lv_async_call([](void*) { CloseSetupQr(); }, nullptr); });
+
+    auto* body = lv_obj_create(sheet);
+    lv_obj_remove_style_all(body);
+    lv_obj_set_size(body, lv_pct(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(body, 33, 0);
+    lv_obj_set_style_pad_ver(body, 28, 0);
+    lv_obj_set_style_pad_row(body, 14, 0);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(body, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+
+    const lv_coord_t qr_side = UiSx(240);
+    auto* frame = UiCreateQrFrame(body, qr_side);
+    auto* qr = lv_qrcode_create(frame);
+    lv_qrcode_set_size(qr, qr_side);
+    lv_qrcode_set_dark_color(qr, lv_color_black());
+    lv_qrcode_set_light_color(qr, lv_color_white());
+    lv_qrcode_set_quiet_zone(qr, true);
+    lv_obj_center(qr);
+    lv_obj_add_flag(qr, LV_OBJ_FLAG_HIDDEN);
+    s_ui.setup_qr = qr;
+
+    s_ui.setup_status = AddLabel(body, Text("正在连接 Wi-Fi 并开启配置页…", "Starting setup page…"), Book_ItemFont());
+    lv_obj_set_width(s_ui.setup_status, lv_pct(100));
+    lv_obj_set_style_text_align(s_ui.setup_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_ui.setup_status, LV_LABEL_LONG_WRAP);
+
+    s_ui.setup_addr = AddLabel(body, Text("支持粘贴 OPDS 公网地址与认证口令", "Paste OPDS URL and credentials on your phone"), Small());
+    lv_obj_set_width(s_ui.setup_addr, lv_pct(100));
+    lv_obj_set_style_text_align(s_ui.setup_addr, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_ui.setup_addr, LV_LABEL_LONG_WRAP);
+
+    s_ui.setup_timer = lv_timer_create([](lv_timer_t*) { RefreshSetupQrUi(); }, 600, nullptr);
+    Application::GetInstance().Schedule([]() {
+        valet::StartSetupServer();
+        ScreenLvAsync([](void*) { RefreshSetupQrUi(); }, nullptr);
+    }, Application::TaskDomain::Network);
+}
+
 // ── 按键 ──────────────────────────────────────────────────────────────────
 void GoBack() {
+    if (s_ui.setup_mask) { CloseSetupQr(); return; }
     if (s_ui.qr_mask) { CloseWeReadQr(); return; }
     if (s_ui.detail) { CloseDetail(); return; }
-    if (s_ui.editor) { CloseEditor(); return; }
+    if (s_ui.editor) {
+        CloseEditor();
+        if (s_opened_from_search && s_stack.size() <= 1) {
+            s_gate.RequestStop();
+            lv_async_call(OpenBookshelfAsync, nullptr);
+        }
+        return;
+    }
     Level* top = Top();
     if (top && top->page > 0) { --top->page; Render(); return; }
     if (s_stack.size() > 1) {
@@ -949,6 +1108,11 @@ void GoBack() {
         ++s_gen;
         s_loading = false;
         s_error.clear();
+        if (s_opened_from_search && s_stack.size() == 1) {
+            s_gate.RequestStop();
+            lv_async_call(OpenBookshelfAsync, nullptr);
+            return;
+        }
         if (Top()->entries.empty() && !Top()->url.empty()) {
             if (Top()->url == "weread://shelf") FetchLevel(JobKind::kWeReadShelf, Top()->url);
             else FetchLevel(JobKind::kBrowse, Top()->url);
@@ -962,7 +1126,7 @@ void GoBack() {
 }
 
 void GoNext() {
-    if (s_ui.qr_mask || s_ui.detail || s_ui.editor || s_loading) return;
+    if (s_ui.setup_mask || s_ui.qr_mask || s_ui.detail || s_ui.editor || s_loading) return;
     Level* top = Top();
     if (!top) return;
     const int rows = RowsPerPage();
@@ -985,19 +1149,19 @@ void StartRoot() {
     s_stack.clear();
     ++s_gen;
     s_error.clear();
-    // 第一层：展示微信读书（云书架或扫码登录）+ 所有订阅的 OPDS 书库
+    // 书库配置页：管理微信读书账号与各 OPDS 书库订阅
     Level level;
     level.title = Text("书库", "Libraries");
     {
         valet::opds::Entry wr;
         if (valet::weread::IsLoggedIn()) {
             wr.title = Text("微信读书 · 我的书架", "WeRead · My Shelf");
-            wr.author = Text("已登录 · 同步云端藏书、已购章节与阅读进度", "Signed in · Syncs shelf, purchases & progress");
+            wr.author = Text("已登录 · 同步云端书架、已购书籍与阅读进度", "Signed in · Syncs shelf, purchases & progress");
             wr.nav = "weread://shelf";
         } else {
-            wr.title = Text("微信读书（扫码登录）", "WeRead (Sign In)");
-            wr.author = Text("未登录 · 点右上角「搜书」可直接搜全网试读，扫码同步已购",
-                             "Tap Search for free trials, or sign in to sync purchases");
+            wr.title = Text("微信读书 · 扫码登录", "WeRead · Sign In");
+            wr.author = Text("未登录 · 扫码同步微信读书书架与已购书籍",
+                             "Sign in to sync your WeRead shelf & purchases");
             wr.nav = "weread://login";
         }
         level.entries.push_back(std::move(wr));
@@ -1005,8 +1169,23 @@ void StartRoot() {
     for (const auto& lib : libs) {
         valet::opds::Entry entry;
         entry.title = lib.name;
+        std::string host = valet::LibraryNameFromUrl(lib.url);
+        std::string desc = host.empty() ? lib.url : host;
+        if (lib.rich) desc += Text(" · 进度同步", " · Syncs progress");
+        else desc += " · OPDS";
+        if (!lib.password.empty() || !lib.user.empty() || lib.rich) {
+            desc += Text(" · 已认证", " · Authenticated");
+        }
+        entry.author = desc;
         entry.nav = lib.url;
         level.entries.push_back(std::move(entry));
+    }
+    {
+        valet::opds::Entry add;
+        add.title = Text("+ 添加 / 管理书库订阅", "+ Add or Manage Libraries");
+        add.author = Text("手机扫码粘贴 OPDS 公网地址与认证口令", "Scan with phone to add OPDS URL & password");
+        add.nav = "setup://library";
+        level.entries.push_back(std::move(add));
     }
     s_stack.push_back(std::move(level));
     s_loading = false;
@@ -1016,7 +1195,13 @@ void StartRoot() {
 
 bool OpdsHasLibraries() { return true; }
 
+void OnShelfSearchClicked(lv_event_t*) {
+    s_open_search_immediately = true;
+    lv_async_call([](void*) { ScreenLoadReplace(CreateOpdsScreen()); }, nullptr);
+}
+
 void OnShelfLibraryClicked(lv_event_t*) {
+    s_open_search_immediately = false;
     lv_async_call([](void*) { ScreenLoadReplace(CreateOpdsScreen()); }, nullptr);
 }
 
@@ -1030,8 +1215,14 @@ lv_obj_t* CreateOpdsScreen() {
     s_ui.scr = scr;
     lv_obj_add_event_cb(scr, [](lv_event_t* e) {
         if (lv_event_get_target(e) != s_ui.scr) return;
+        if (s_ui.setup_timer) {
+            lv_timer_delete(s_ui.setup_timer);
+            s_ui.setup_timer = nullptr;
+        }
+        valet::CloseSetupSession();
         s_ui = Ui{};
         ++s_gen;
+        ++s_qr_gen;
     }, LV_EVENT_DELETE, nullptr);
     EpdStatusBar status = ScreenCreateStatusBar(scr);
     if (status.status_label) lv_label_set_text(status.status_label, "");
@@ -1058,6 +1249,7 @@ lv_obj_t* CreateOpdsScreen() {
     lv_obj_set_flex_grow(s_ui.title, 1);
     lv_label_set_long_mode(s_ui.title, LV_LABEL_LONG_DOT);
     auto* search = lv_obj_create(head);
+    s_ui.head_btn = search;
     lv_obj_remove_style_all(search);
     lv_obj_set_size(search, LV_SIZE_CONTENT, kHeadH);
     lv_obj_set_style_pad_hor(search, UiSx(10), 0);
@@ -1067,7 +1259,7 @@ lv_obj_t* CreateOpdsScreen() {
     lv_obj_add_flag(search, LV_OBJ_FLAG_CLICKABLE);
     HapticAttachClick(search);
     lv_obj_add_event_cb(search, [](lv_event_t*) { if (!s_loading) OpenEditor(); }, LV_EVENT_CLICKED, nullptr);
-    auto* search_text = AddLabel(search, Text("搜书", "Search"), Book_ItemFont());
+    auto* search_text = AddLabel(search, Text("换个词", "Search"), Book_ItemFont());
     lv_obj_center(search_text);
 
     s_ui.list = lv_obj_create(body);
@@ -1093,15 +1285,16 @@ lv_obj_t* CreateOpdsScreen() {
 
     const auto libs = valet::LoadLibrarySources();
     const std::string sig = LibrariesSignature(libs);
-    if (sig != s_signature || s_stack.empty()) {
+    if (s_open_search_immediately) {
+        s_open_search_immediately = false;
+        s_opened_from_search = true;
         s_signature = sig;
         StartRoot();
+        OpenEditor();
     } else {
-        ++s_gen;
-        s_loading = false;
-        s_error.clear();
-        if (Top()->entries.empty() && !Top()->url.empty()) FetchLevel(JobKind::kBrowse, Top()->url);
-        else Render();
+        s_opened_from_search = false;
+        s_signature = sig;
+        StartRoot();
     }
     return scr;
 }

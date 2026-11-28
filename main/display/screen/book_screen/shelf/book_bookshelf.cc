@@ -273,26 +273,32 @@ lv_obj_t* CreateBookshelfScreen() {
     lv_obj_clear_flag(title_lbl, LV_OBJ_FLAG_CLICKABLE);
     st.shelf.shelf_title_lbl = title_lbl;
 
-    // 订了书库：标题行多一个「书库」，进去浏览、搜书、下载
+    // 书架一级入口：「搜书」直接跨书库搜书；「书库」用于配置与管理各书库源
     if (OpdsHasLibraries()) {
-        lv_obj_t* lib = lv_obj_create(header);
-        lv_obj_remove_style_all(lib);
-        lv_obj_set_size(lib, LV_SIZE_CONTENT, kShelfViewToggleH);
-        lv_obj_set_style_pad_hor(lib, UiSx(10), 0);
-        lv_obj_set_style_margin_right(lib, UiSx(8), 0);
-        lv_obj_set_style_border_width(lib, 2, 0);
-        lv_obj_set_style_border_color(lib, lv_color_black(), 0);
-        lv_obj_set_style_radius(lib, 4, 0);
-        Book_DisableScroll(lib);
-        lv_obj_add_flag(lib, LV_OBJ_FLAG_CLICKABLE);
-        HapticAttachClick(lib);
-        lv_obj_add_event_cb(lib, OnShelfLibraryClicked, LV_EVENT_CLICKED, nullptr);
-        lv_obj_t* lib_lbl = lv_label_create(lib);
-        lv_label_set_text(lib_lbl, std::strcmp(Lang::Current(), "zh-CN") == 0 ? "书库" : "Libraries");
-        lv_obj_set_style_text_font(lib_lbl, Book_ItemFont(), 0);
-        lv_obj_set_style_text_color(lib_lbl, lv_color_black(), 0);
-        lv_obj_center(lib_lbl);
-        lv_obj_clear_flag(lib_lbl, LV_OBJ_FLAG_CLICKABLE);
+        auto make_head_btn = [&](const char* text, lv_event_cb_t cb) {
+            lv_obj_t* btn = lv_obj_create(header);
+            lv_obj_remove_style_all(btn);
+            lv_obj_set_size(btn, LV_SIZE_CONTENT, kShelfViewToggleH);
+            lv_obj_set_style_pad_hor(btn, UiSx(10), 0);
+            lv_obj_set_style_margin_right(btn, UiSx(8), 0);
+            lv_obj_set_style_border_width(btn, 2, 0);
+            lv_obj_set_style_border_color(btn, lv_color_black(), 0);
+            lv_obj_set_style_radius(btn, 4, 0);
+            Book_DisableScroll(btn);
+            lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+            HapticAttachClick(btn);
+            lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, nullptr);
+            lv_obj_t* lbl = lv_label_create(btn);
+            lv_label_set_text(lbl, text);
+            lv_obj_set_style_text_font(lbl, Book_ItemFont(), 0);
+            lv_obj_set_style_text_color(lbl, lv_color_black(), 0);
+            lv_obj_center(lbl);
+            lv_obj_clear_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
+            return btn;
+        };
+        const bool zh = std::strcmp(Lang::Current(), "zh-CN") == 0;
+        make_head_btn(zh ? "搜书" : "Search", OnShelfSearchClicked);
+        make_head_btn(zh ? "书库" : "Libraries", OnShelfLibraryClicked);
     }
 
     lv_obj_t* toggle = lv_obj_create(header);

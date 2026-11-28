@@ -4,6 +4,7 @@
 
 #include <cJSON.h>
 #include <esp_random.h>
+#include <mbedtls/base64.h>
 
 #include <cstdio>
 #include <cstring>
@@ -38,6 +39,8 @@ std::string Encode(const std::vector<LibrarySource>& items) {
         cJSON_AddStringToObject(entry, "name", item.name.c_str());
         cJSON_AddStringToObject(entry, "url", item.url.c_str());
         if (!item.member.empty()) cJSON_AddStringToObject(entry, "member", item.member.c_str());
+        if (!item.user.empty()) cJSON_AddStringToObject(entry, "user", item.user.c_str());
+        if (!item.password.empty()) cJSON_AddStringToObject(entry, "password", item.password.c_str());
         cJSON_AddBoolToObject(entry, "rich", item.rich);
     }
     char* text = cJSON_PrintUnformatted(root);
@@ -60,11 +63,15 @@ std::vector<LibrarySource> Decode(const std::string& json) {
             const auto* name = cJSON_GetObjectItemCaseSensitive(entry, "name");
             const auto* url = cJSON_GetObjectItemCaseSensitive(entry, "url");
             const auto* member = cJSON_GetObjectItemCaseSensitive(entry, "member");
+            const auto* user = cJSON_GetObjectItemCaseSensitive(entry, "user");
+            const auto* password = cJSON_GetObjectItemCaseSensitive(entry, "password");
             const auto* rich = cJSON_GetObjectItemCaseSensitive(entry, "rich");
             if (cJSON_IsString(id) && id->valuestring) item.id = id->valuestring;
             if (cJSON_IsString(name) && name->valuestring) item.name = name->valuestring;
             if (cJSON_IsString(url) && url->valuestring) item.url = url->valuestring;
             if (cJSON_IsString(member) && member->valuestring) item.member = member->valuestring;
+            if (cJSON_IsString(user) && user->valuestring) item.user = user->valuestring;
+            if (cJSON_IsString(password) && password->valuestring) item.password = password->valuestring;
             if (cJSON_IsBool(rich)) item.rich = cJSON_IsTrue(rich);
             if (item.id.empty() || item.url.empty()) continue;
             if (item.name.empty()) item.name = LibraryNameFromUrl(item.url);
@@ -82,6 +89,13 @@ void EnsureLoaded() {
     const auto json = settings.GetBlob(kKey, kMaxBlobBytes);
     s_items = json.empty() ? std::vector<LibrarySource>{} : Decode(json);
     s_loaded = true;
+}
+
+std::string UrlOrigin(const std::string& url) {
+    const size_t scheme = url.find("://");
+    if (scheme == std::string::npos) return {};
+    const size_t slash = url.find('/', scheme + 3);
+    return slash == std::string::npos ? url : url.substr(0, slash);
 }
 } // namespace
 
@@ -127,9 +141,37 @@ std::string LibraryNameFromUrl(const std::string& url) {
 }
 
 bool LibraryRichUrl(const std::string& url) {
-    // 书斋：/opds/<短码>，或者 /api/u/<短码>/
+    // 带成员短码的同步订阅：/opds/<短码>，或者 /api/u/<短码>/
     return url.find("/api/u/") != std::string::npos ||
            (url.find("/opds/") != std::string::npos && url.find("/opds/", url.find("/opds/") + 6) == std::string::npos);
+}
+
+std::string LibraryAuthHeaderForUrl(const std::string& url) {
+    const std::string origin = UrlOrigin(url);
+    if (origin.empty()) return {};
+    std::string user, password;
+    {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        EnsureLoaded();
+        for (const auto& item : s_items) {
+            if (item.password.empty() && item.user.empty()) continue;
+            if (url.rfind(item.url, 0) == 0 || UrlOrigin(item.url) == origin) {
+                user = item.user;
+                password = item.password;
+                break;
+            }
+        }
+    }
+    if (user.empty() && password.empty()) return {};
+    const std::string raw = user + ":" + password;
+    unsigned char encoded[256] = {};
+    size_t out_len = 0;
+    if (mbedtls_base64_encode(encoded, sizeof(encoded) - 1, &out_len,
+                              reinterpret_cast<const unsigned char*>(raw.data()), raw.size()) != 0) {
+        return {};
+    }
+    encoded[out_len] = '\0';
+    return std::string("Basic ") + reinterpret_cast<const char*>(encoded);
 }
 
 std::string NewLibraryId() {

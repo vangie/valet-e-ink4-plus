@@ -331,6 +331,9 @@ def main():
     p.add_argument("--link-file", help="file holding a whole proxy link (ss://… keeps the password off the command line)")
     p = sub.add_parser("libadd", help="subscribe to an OPDS library (no url = remove all)"); p.add_argument("url", nargs="?", default="")
     p.add_argument("--url-file", help="file holding the link (a member link keeps its code off the command line)")
+    p.add_argument("--name", default="", help="display name for the library")
+    p.add_argument("--user", default="", help="optional basic auth username")
+    p.add_argument("--pass-file", default="", help="optional file holding password / key")
     p = sub.add_parser("flash"); p.add_argument("--image", default=str(APP))
     args = parser.parse_args()
 
@@ -343,7 +346,12 @@ def main():
             sys.exit("not running")
     elif args.command == "libadd":
         url = Path(args.url_file).read_text().strip() if args.url_file else args.url
-        print(json.dumps(dev({"cmd": "libadd", "url": url}), ensure_ascii=False))
+        pw = Path(args.pass_file).read_text().strip() if args.pass_file else ""
+        req = {"cmd": "libadd", "url": url}
+        if args.name: req["name"] = args.name
+        if args.user: req["user"] = args.user
+        if pw: req["password"] = pw
+        print(json.dumps(dev(req), ensure_ascii=False))
     elif args.command == "info":
         print(json.dumps(dev({"cmd": "info"}), ensure_ascii=False))
     elif args.command == "settle":
