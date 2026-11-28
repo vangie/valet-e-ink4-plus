@@ -862,7 +862,7 @@ void OpenEditor() {
     lv_obj_add_event_cb(mask, [](lv_event_t*) { s_ui.editor = s_ui.edit_text = nullptr; }, LV_EVENT_DELETE, nullptr);
     auto* sheet = lv_obj_create(mask);
     lv_obj_remove_style_all(sheet);
-    lv_obj_set_size(sheet, lv_pct(100), UiSx(314) + 330);
+    lv_obj_set_size(sheet, lv_pct(100), UiSx(260) + 330 + UiSy(54) + UiSx(7));
     lv_obj_align(sheet, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(sheet, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, 0);
@@ -903,7 +903,8 @@ void OpenEditor() {
     lv_label_set_long_mode(s_ui.edit_text, LV_LABEL_LONG_CLIP);
     lv_obj_set_width(s_ui.edit_text, lv_pct(100));
     lv_obj_align(s_ui.edit_text, LV_ALIGN_LEFT_MID, 0, 0);
-    auto* keyboard = ScreenKeyboardCreate(panel, [](ScreenKeyboardEvent event, const char* text, void*) {
+    auto* keyboard = ScreenKeyboardCreate(panel, [](ScreenKeyboardEvent event, const char* text, void* ctx) {
+        auto* sh = static_cast<lv_obj_t*>(ctx);
         switch (event) {
             case ScreenKeyboardEvent::kInsert:
                 if (s_query.size() + std::strlen(text) < 80) s_query += text;
@@ -921,10 +922,19 @@ void OpenEditor() {
                     lv_async_call([](void*) { CloseEditor(); RunSearch(); }, nullptr);
                 }
                 return;
-            case ScreenKeyboardEvent::kLayout: return;
+            case ScreenKeyboardEvent::kLayout:
+                if (sh && lv_obj_is_valid(sh)) {
+                    lv_obj_t* pn = lv_obj_get_child(sh, 1);
+                    lv_obj_t* kb = pn ? lv_obj_get_child(pn, 2) : nullptr;
+                    const bool bar = kb && ScreenKeyboardHasCandidateBar(kb);
+                    // 4 行按键高度始终恒定为 UiSx(260)，有候选栏时仅把弹窗整体往上顶 (UiSy(54) + UiSx(7))
+                    lv_obj_set_height(sh, UiSx(260) + 330 + (bar ? (UiSy(54) + UiSx(7)) : 0));
+                    lv_obj_align(sh, LV_ALIGN_BOTTOM_MID, 0, 0);
+                }
+                return;
         }
         RefreshEditText();
-    });
+    }, sheet);
     if (!keyboard) { CloseEditor(); return; }
     lv_obj_set_height(keyboard, 0);
     lv_obj_set_flex_grow(keyboard, 1);

@@ -504,6 +504,7 @@ void Keyboard::Layout() {
     const int h = lv_obj_get_content_height(root);
     const bool has_bar = allow_zh && zh_mode && mode == KbMode::kEn;
     const int top_off = has_bar ? (kCandBarH + kKbGap) : 0;
+    // 4 行按键始终保持恒定高度（不因候选栏显隐而挤压按键），仅在有候选栏时整体把弹窗往上顶
     const int avail_h = h - top_off;
     const int key_h = (avail_h - kKbGap * (kKbRows - 1)) / kKbRows;
     if (w <= 0 || key_h <= 0) {
@@ -650,6 +651,11 @@ void Keyboard::Rebuild() {
     KbKeyDesc layout[kKbKeysCap];
     Fill(layout);
 
+    // 4 行按键区域固定高度 UiSx(260)；当中文候选栏显示时，root 高度向上扩展 (kCandBarH + kKbGap)，
+    // 使 4 行按键的宽高与间距在中/英切换时完全不变，只把上方弹窗往上顶一段。
+    const bool has_bar = allow_zh && zh_mode && mode == KbMode::kEn;
+    lv_obj_set_height(root, UiSx(260) + (has_bar ? (kCandBarH + kKbGap) : 0));
+
     for (int i = 0; i < nkeys; ++i) {
         const KbKeyDesc& d = layout[i];
         if (d.action == KbAction::kEmpty) {
@@ -688,6 +694,8 @@ void Keyboard::Rebuild() {
 
         if (d.action == KbAction::kToggleLang) {
             // 斜切反色双字按钮：左半「中」、右半「英」，当前激活的一侧黑底白字且字号更大
+            // 先用圆角矩形画黑底（确保外侧两个圆角完整），再用白色梯形覆盖未激活的一侧，最后叠上圆角黑框
+            lv_obj_set_style_border_width(btn, 0, 0);
             lv_obj_add_event_cb(btn, [](lv_event_t* e) {
                 if (lv_event_get_code(e) != LV_EVENT_DRAW_MAIN) return;
                 auto* kb = static_cast<Keyboard*>(lv_event_get_user_data(e));
@@ -701,24 +709,34 @@ void Keyboard::Rebuild() {
                 const lv_coord_t slant = UiSx(8);
                 const lv_coord_t top_x = mid_x + slant;
                 const lv_coord_t bot_x = mid_x - slant;
+                const lv_coord_t rad = UiSx(7);
 
+                // 1. 先在激活侧画带圆角的黑色底座，保证左右外侧圆角与相邻按键完全一致
+                lv_draw_rect_dsc_t blk;
+                lv_draw_rect_dsc_init(&blk);
+                blk.bg_color = lv_color_black();
+                blk.bg_opa = LV_OPA_COVER;
+                blk.radius = rad;
+                lv_draw_rect(layer, &blk, &a);
+
+                // 2. 在非激活侧覆盖白色梯形（外侧延伸 1px 清除黑色底，随后第 4 步统一画圆角外框）
                 lv_point_precise_t p[4];
                 if (kb->zh_mode) {
-                    // 左半梯形填充黑色
-                    p[0] = {static_cast<lv_value_precise_t>(a.x1), static_cast<lv_value_precise_t>(a.y1)};
-                    p[1] = {static_cast<lv_value_precise_t>(top_x), static_cast<lv_value_precise_t>(a.y1)};
-                    p[2] = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2)};
-                    p[3] = {static_cast<lv_value_precise_t>(a.x1), static_cast<lv_value_precise_t>(a.y2)};
-                } else {
-                    // 右半梯形填充黑色
+                    // 中文激活（左黑右白）：把右半梯形涂白
                     p[0] = {static_cast<lv_value_precise_t>(top_x), static_cast<lv_value_precise_t>(a.y1)};
-                    p[1] = {static_cast<lv_value_precise_t>(a.x2), static_cast<lv_value_precise_t>(a.y1)};
-                    p[2] = {static_cast<lv_value_precise_t>(a.x2), static_cast<lv_value_precise_t>(a.y2)};
-                    p[3] = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2)};
+                    p[1] = {static_cast<lv_value_precise_t>(a.x2 + 1), static_cast<lv_value_precise_t>(a.y1)};
+                    p[2] = {static_cast<lv_value_precise_t>(a.x2 + 1), static_cast<lv_value_precise_t>(a.y2 + 1)};
+                    p[3] = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2 + 1)};
+                } else {
+                    // 英文激活（左白右黑）：把左半梯形涂白
+                    p[0] = {static_cast<lv_value_precise_t>(a.x1 - 1), static_cast<lv_value_precise_t>(a.y1)};
+                    p[1] = {static_cast<lv_value_precise_t>(top_x), static_cast<lv_value_precise_t>(a.y1)};
+                    p[2] = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2 + 1)};
+                    p[3] = {static_cast<lv_value_precise_t>(a.x1 - 1), static_cast<lv_value_precise_t>(a.y2 + 1)};
                 }
                 lv_draw_triangle_dsc_t tri;
                 lv_draw_triangle_dsc_init(&tri);
-                tri.color = lv_color_black();
+                tri.color = lv_color_white();
                 tri.opa = LV_OPA_COVER;
                 tri.p[0] = p[0];
                 tri.p[1] = p[1];
@@ -729,15 +747,25 @@ void Keyboard::Rebuild() {
                 tri.p[2] = p[3];
                 lv_draw_triangle(layer, &tri);
 
-                // 斜切分割线
+                // 3. 斜切分割线
                 lv_draw_line_dsc_t ld;
                 lv_draw_line_dsc_init(&ld);
                 ld.color = lv_color_black();
                 ld.opa = LV_OPA_COVER;
                 ld.width = 1;
-                ld.p1 = {static_cast<lv_value_precise_t>(top_x), static_cast<lv_value_precise_t>(a.y1)};
-                ld.p2 = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2)};
+                ld.p1 = {static_cast<lv_value_precise_t>(top_x), static_cast<lv_value_precise_t>(a.y1 + 1)};
+                ld.p2 = {static_cast<lv_value_precise_t>(bot_x), static_cast<lv_value_precise_t>(a.y2 - 1)};
                 lv_draw_line(layer, &ld);
+
+                // 4. 在最上层绘制完整的圆角矩形边框，使左右两侧四个角都是干净对称的圆角
+                lv_draw_rect_dsc_t brd;
+                lv_draw_rect_dsc_init(&brd);
+                brd.bg_opa = LV_OPA_TRANSP;
+                brd.border_color = lv_color_black();
+                brd.border_width = 1;
+                brd.border_opa = LV_OPA_COVER;
+                brd.radius = rad;
+                lv_draw_rect(layer, &brd, &a);
             }, LV_EVENT_DRAW_MAIN, this);
 
             lv_obj_t* lbl_zh = lv_label_create(btn);
@@ -753,8 +781,6 @@ void Keyboard::Rebuild() {
             lv_obj_set_style_text_color(lbl_en, zh_mode ? lv_color_black() : lv_color_white(), 0);
             lv_obj_align(lbl_en, LV_ALIGN_CENTER, UiSx(23), 0);
             lv_obj_clear_flag(lbl_en, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_set_style_clip_corner(btn, true, 0);
-            lv_obj_set_style_border_width(btn, UiSx(2), 0);
         } else {
             lv_obj_t* lbl = lv_label_create(btn);
             lv_label_set_text(lbl, d.label != nullptr ? d.label : "");
@@ -823,6 +849,12 @@ void ScreenKeyboardEnableChinese(lv_obj_t* root, bool default_zh) {
     kb->cands.clear();
     kb->cand_page = 0;
     kb->Rebuild();
+}
+
+bool ScreenKeyboardHasCandidateBar(lv_obj_t* root) {
+    if (root == nullptr) return false;
+    auto* kb = static_cast<Keyboard*>(lv_obj_get_user_data(root));
+    return kb != nullptr && kb->allow_zh && kb->zh_mode && kb->mode == KbMode::kEn;
 }
 
 void ScreenKeyboardShowSymbols(lv_obj_t* root) {

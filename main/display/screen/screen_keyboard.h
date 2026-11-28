@@ -15,6 +15,8 @@ lv_obj_t* ScreenKeyboardCreate(lv_obj_t* parent, ScreenKeyboardCallback callback
 void ScreenKeyboardReset(lv_obj_t* keyboard);
 /** @brief 启用中/英切换并默认进入中文拼音输入模式（用于搜书等中文输入场景） */
 void ScreenKeyboardEnableChinese(lv_obj_t* keyboard, bool default_zh = true);
+/** @brief 当前键盘是否处于中文候选栏展开状态 */
+bool ScreenKeyboardHasCandidateBar(lv_obj_t* keyboard);
 /** @brief 停止输入反馈并取消待处理确认，保留键盘对象 */
 void ScreenKeyboardPause(lv_obj_t* keyboard);
 /** @brief 切到数字符号布局并重建按键（输入地址、端口时用） */
