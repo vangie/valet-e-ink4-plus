@@ -382,8 +382,10 @@ void BuildWho(lv_obj_t* root) {
     bool ready = true;
     if (chat_cloud::IsCustom()) {
         const auto profiles = valet::LoadAssistantProfiles();
-        if (const auto* active = profiles.Active()) who = active->name;
-        else { who = Text("自建 · 还没配对", "Custom · not paired"); ready = false; }
+        if (const auto* active = profiles.Active()) {
+            const char* backend = active->connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw";
+            who = active->name + " · " + backend;
+        } else { who = Text("自建 · 还没配对", "Custom · not paired"); ready = false; }
     } else {
         who = std::string(AssistantScreen::DisplayName()) + Text(" · 官方订阅", " · official plan");
     }

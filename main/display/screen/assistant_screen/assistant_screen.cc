@@ -767,7 +767,10 @@ std::string PanelSubtitle() {
     std::string who;
     const auto profiles = valet::LoadAssistantProfiles();
     if (!chat_cloud::IsCustom()) who = AssistantScreen::DisplayName();   // 书里提问用的是官方云
-    else if (const auto* active = profiles.Active()) who = active->name;
+    else if (const auto* active = profiles.Active()) {
+        const char* backend = active->connection.backend == custom_chat::Backend::Hermes ? "Hermes" : "OpenClaw";
+        who = active->name + " · " + backend;
+    }
     char page[48];
     std::snprintf(page, sizeof(page), ValetText("第 %d 页", "p.%d"), reading.page);
     std::string where = page;
