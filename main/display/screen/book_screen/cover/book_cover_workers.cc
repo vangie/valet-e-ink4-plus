@@ -207,6 +207,8 @@ static void RunListCoverWork(ListCoverFillWork* work) {
                     reader::CacheListThumbnail(item.info.path.c_str(), item.max_w, item.max_h, item.info.file_size,
                                                item.info.mtime, done->cover);
                 }
+            } else if (done->metadata_ready && item.info.author.empty()) {
+                BookCoverLoader_PeekBookMetadata(item.info);
             }
             done->info = std::move(item.info);
         } catch (const std::bad_alloc&) {

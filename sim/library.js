@@ -199,62 +199,99 @@ const SHELF_STYLES = [
   { id: "cards",   label: "目录", ref: "KOReader · 瑞士列表", desc: "无冗余外框，1.2px 墨线分隔；左侧缩略封面，右侧书名、来源、68px 精确进度条与大号Avenir百分比" },
 ];
 
+const SHELF_LIST_STYLES = [
+  { id: "twoline",   label: "双行主次", desc: "无封面，一屏 7 本。上行粗体书名（去后缀），下行「作者 · 来源」，右侧大号 Avenir 百分比 + 40px 迷你进度条" },
+  { id: "bottombar", label: "底轨进度", desc: "无封面，一屏 7 本。行底分隔线本身加厚为通栏进度条（呼应封面底框墨线），左侧书名+作者，右侧「来源标签 + 百分比」" },
+  { id: "compact",   label: "单行紧凑", desc: "无封面，一屏 9 本高密度。单行左书名、中作者、右来源小标与百分比，适合藏书多时快速扫视" },
+  { id: "catalog",   label: "左竖标线", desc: "无封面，一屏 7 本。左侧 3px 竖线代表在读状态（实心=在读，虚线=未下，浅灰=未读），中间书名+作者·来源，右侧进度" },
+];
+
 function renderShelfGrid(all, style) {
-  let list = all;
-  let heroHtml = "";
-  if (style === "slash" && all.length > 0) {
-    const cur = all[0];
-    const pct = Math.round((cur.progress || 0) * 100);
-    const srcName = cur.src ? cur.src : "本机";
-    heroHtml = `<button class="v-shero" ${cur.attr}>
-      ${libCover(cur, " sm")}
-      <span class="v-shero-main">
-        <b>${esc(cur.title)}</b>
-        <em>${esc(cur.author)} · ${esc(srcName)} · ${pct > 0 ? `已读 ${pct}%` : "未读"}</em>
-        <i class="v-track"><i style="width:${pct}%"></i></i>
-      </span>
-      <span class="v-wedge">${L("接着读", "Read")}${ic("go")}</span>
-    </button>`;
-    list = all.slice(1);
-  }
   const rows = [];
-  for (let i = 0; i < list.length; i += 3) rows.push(list.slice(i, i + 3));
+  for (let i = 0; i < all.length; i += 3) rows.push(all.slice(i, i + 3));
   const tiers = rows.map((row) => `
-    <div class="v-stier is-${style}">
+    <div class="v-stier is-${style} pm-edge">
       <div class="v-sgrid">
         ${row.map((b) => {
           const pct = Math.round((b.progress || 0) * 100);
-          const floatProg = !b.away && pct > 0
-            ? `<i class="v-cov-fprog"><i><b style="width:${pct}%"></b></i></i>`
-            : b.away
-              ? `<i class="v-cov-faway">${esc(b.note)}</i>`
-              : "";
+          const covOverlay = !b.away && pct > 0 ? `<i class="v-prog-edge"><b style="width:${pct}%"></b></i>` : "";
           return `<button class="v-sitem" ${b.attr}>
-            <div class="v-scov-box">${libCover(b)}${floatProg}</div>
+            <div class="v-scov-box">${libCover(b)}${covOverlay}</div>
             <span class="v-sname">${esc(b.title)}</span>
           </button>`;
         }).join("")}
       </div>
-      ${style === "rail" ? `<div class="v-sledge"></div>` : ""}
     </div>`).join("");
-  return `${heroHtml}<div class="v-sstage is-${style}">${tiers}</div>`;
+  return `<div class="v-sstage is-${style}">${tiers}</div>`;
 }
 
-function renderShelfCards(all) {
-  return `<div class="v-lrows is-clean">${all.map((b) => {
+function renderShelfList(all) {
+  const ls = state.shelfListStyle || "twoline";
+  return `<div class="v-llist is-${ls}">${all.map((b) => {
     const pct = Math.round((b.progress || 0) * 100);
-    const srcText = b.src ? `${b.src}` : "本机";
-    const rightCol = b.away
+    const srcName = b.src || "";
+    const authorText = b.author || "佚名";
+    const badge = srcName ? `<i class="v-lsrc-pill${b.srcId === "weread" ? " is-dark" : ""}">${esc(srcName)}</i>` : "";
+
+    if (ls === "twoline") {
+      // 方案 1：双行主次（左侧书名 + 作者·来源，右侧大百分比 + 迷你进度条）
+      const meta = [authorText, srcName || "本机"].filter(Boolean).join(" · ");
+      const right = b.away
+        ? `<span class="v-lr-box"><small class="v-lstat is-away">${esc(b.note)}</small></span>`
+        : pct > 0
+          ? `<span class="v-lr-box"><b class="v-lpct">${pct}%</b><i class="v-lmini-bar"><b style="width:${pct}%"></b></i></span>`
+          : `<span class="v-lr-box"><small class="v-lstat">未读</small></span>`;
+      return `<button class="v-litem is-twoline${b.away ? " away" : ""}" ${b.attr}>
+        <span class="v-ll-main">
+          <b>${esc(b.title)}</b>
+          <em>${esc(meta)}</em>
+        </span>
+        ${right}
+      </button>`;
+    }
+
+    if (ls === "bottombar") {
+      // 方案 2：底轨墨线（行底线本身就是通栏进度轨，呼应封面底框墨线）
+      const rightTxt = b.away ? `<small class="v-lstat is-away">${esc(b.note)}</small>`
+        : pct > 0 ? `<b class="v-lpct">${pct}%</b>` : `<small class="v-lstat">未读</small>`;
+      const edgeBar = !b.away && pct > 0 ? `<i class="v-lrow-edge"><b style="width:${pct}%"></b></i>` : "";
+      return `<button class="v-litem is-bottombar${b.away ? " away" : ""}" ${b.attr}>
+        <span class="v-ll-main">
+          <b>${esc(b.title)}</b>
+          <em>${esc(authorText)}</em>
+        </span>
+        <span class="v-lr-inline">${badge}${rightTxt}</span>
+        ${edgeBar}
+      </button>`;
+    }
+
+    if (ls === "compact") {
+      // 方案 3：单行高密度紧凑列表（一屏 9 本，书名 · 作者 — 来源 · 进度）
+      const rightTxt = b.away ? `<small class="v-lc-stat is-away">未下</small>`
+        : pct > 0 ? `<b class="v-lc-pct">${pct}%</b>` : `<small class="v-lc-stat">—</small>`;
+      return `<button class="v-litem is-compact${b.away ? " away" : ""}" ${b.attr}>
+        <b class="v-lc-title">${esc(b.title)}</b>
+        <em class="v-lc-author">${esc(authorText)}</em>
+        ${badge}
+        ${rightTxt}
+      </button>`;
+    }
+
+    // 方案 4：左竖标线（左侧 3px 状态竖条 + 书名/作者 + 右侧胶囊来源与进度）
+    const meta = [authorText, srcName || "本机"].filter(Boolean).join(" · ");
+    const barState = b.away ? "is-away" : pct > 0 ? "is-reading" : "is-unread";
+    const right = b.away
       ? `<small class="v-lstat is-away">${esc(b.note)}</small>`
-      : `<span class="v-lpct">${pct > 0 ? `${pct}%` : `<small class="v-lstat">未读</small>`}</span>`;
-    return `<button class="v-lrow-clean${b.away ? " away" : ""}" ${b.attr}>
-      ${libCover(b, " sm")}
-      <span class="v-lrow-main">
+      : pct > 0
+        ? `<span class="v-lcat-r"><b>${pct}%</b><i class="v-lmini-bar"><b style="width:${pct}%"></b></i></span>`
+        : `<small class="v-lstat">未读</small>`;
+    return `<button class="v-litem is-catalog${b.away ? " away" : ""}" ${b.attr}>
+      <i class="v-lcat-bar ${barState}"><b style="height:${b.away ? 0 : pct}%"></b></i>
+      <span class="v-ll-main">
         <b>${esc(b.title)}</b>
-        <em>${esc(b.author)} · ${esc(srcText)} · ${esc(b.fmt)}</em>
-        ${b.away ? "" : `<i class="v-track"><i style="width:${pct}%"></i></i>`}
+        <em>${esc(meta)}</em>
       </span>
-      ${rightCol}
+      ${right}
     </button>`;
   }).join("")}</div>`;
 }
@@ -273,7 +310,7 @@ function v2Shelf() {
   const search = `<label class="v-lsearch">${ic("search")}<input data-lib-q value="${esc(q)}" placeholder="${L("书名、作者或拼音首字母", "Title or author")}">${q ? `<button data-lib-clear>${L("清空", "Clear")}</button>` : ""}</label>`;
   const body = !all.length ? `<p class="v-lhint">${L("没找到。换个词，或者只打拼音首字母试试。", "Nothing. Try other words.")}</p>`
     : state.shelfView === "list"
-      ? renderShelfCards(all)
+      ? renderShelfList(all)
       : renderShelfGrid(all, "gallery");
   const none = state.libs.length ? "" : `<button class="v-line dashed" data-setting="library">${L("订一个书库，书库里的书也会出现在这里", "Subscribe to a library to see its books here")}</button>`;
   const rightAct = `<div class="v-lhead-acts">${libBtn}${view}</div>`;
@@ -400,6 +437,13 @@ panel.addEventListener("click", (e) => {
     state.shelfStyle = el.dataset.shelfStyle;
     const s = SHELF_STYLES.find((x) => x.id === state.shelfStyle);
     if (s) log(`切换书架风格为「${s.label}」（${s.ref}）：${s.desc}。`);
+    flash();
+    return render();
+  }
+  if ((el = hit("[data-shelf-list]"))) {
+    state.shelfListStyle = el.dataset.shelfList;
+    const s = SHELF_LIST_STYLES.find((x) => x.id === state.shelfListStyle);
+    if (s) log(`切换列表视图排版为「${s.label}」：${s.desc}。`);
     flash();
     return render();
   }

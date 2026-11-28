@@ -869,37 +869,84 @@ div.v-row { box-sizing: border-box; }
   cursor: pointer;
 }
 .v-scov-box { position: relative; width: 100%; }
-/* 封面底部悬浮阅读进度条（白底黑框内衬进度条，无论在深色还是浅色封面上都清晰浮起） */
-.v-cov-fprog {
+
+/* 方案 1：书脊刻度 (v-prog-spine) — 嵌在封面左侧 3.5px 书脊装订槽内，从下往上生长，完全不遮挡封面和作者 */
+.v-prog-spine {
   position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: 5px;
-  height: 6px;
-  padding: 1px;
-  box-sizing: border-box;
+  left: 1.2px;
+  top: 1.2px;
+  bottom: 1.2px;
+  width: 3.2px;
   background: var(--paper);
-  border: 1px solid var(--ink);
-  box-shadow: 0 0 0 1px var(--paper);
+  border-right: 1px solid var(--ink);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.v-prog-spine b {
+  display: block;
+  width: 100%;
+  background: var(--ink);
+}
+
+/* 方案 2：底框墨线 (v-prog-edge) — 贴在封面最底边 3px，不悬浮进封面内部，不遮挡左下角作者行 */
+.v-prog-edge {
+  position: absolute;
+  left: 1.2px;
+  right: 1.2px;
+  bottom: 1.2px;
+  height: 3px;
+  background: var(--paper);
+  border-top: 1px solid var(--ink);
   z-index: 3;
   display: block;
+  pointer-events: none;
 }
-.v-cov-fprog > i { display: block; width: 100%; height: 100%; position: relative; }
-.v-cov-fprog b { display: block; height: 100%; background: var(--ink); }
-.v-cov-faway {
-  position: absolute;
-  left: 5px;
-  right: 5px;
-  bottom: 4px;
-  background: var(--paper);
-  border: 1px dashed var(--ink);
-  font-style: normal;
-  font-size: 6.5px;
-  line-height: 10px;
-  text-align: center;
+.v-prog-edge b { display: block; height: 100%; background: var(--ink); }
+.pm-edge .v-cov-in { padding-bottom: 6px; }
+
+/* 方案 3：书名同行 (v-sname-row) — 封面零遮挡，下方单行左书名、右百分比 */
+.v-sname-row {
+  margin-top: 4px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 3px;
+  min-width: 0;
+}
+.v-sname-row .v-sname { margin-top: 0; flex: 1; min-width: 0; }
+.v-sname-row b {
+  flex: none;
+  font: 600 8px/1 "Avenir Next", sans-serif;
   color: var(--g1);
-  z-index: 3;
 }
+.v-sname-row .v-sin-away {
+  flex: none;
+  font-size: 7.2px;
+  color: var(--g1);
+}
+
+/* 方案 4：书名下细线 (v-prog-sub) — 封面零遮挡，书名下紧跟一条 2.5px 细进度轨 */
+.v-prog-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 7px;
+  margin-top: 1px;
+}
+.v-prog-sub.is-empty { visibility: hidden; }
+.v-prog-sub > i {
+  flex: 1;
+  height: 2.5px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  display: block;
+}
+.v-prog-sub b { display: block; height: 100%; background: var(--ink); }
+.v-prog-sub span { flex: none; font: 600 7.2px/1 "Avenir Next", sans-serif; color: var(--g1); }
+
 .v-sname {
   margin-top: 4px;
   font-size: 9.5px;
@@ -957,28 +1004,94 @@ div.v-row { box-sizing: border-box; }
   background-size: 2px 2px;
 }
 
-/* 板式 4：瑞士目录列表 (is-clean) — 干净横线分隔，无笨重外框 */
-.v-lrows.is-clean { border-top: 1.2px solid var(--ink); display: flex; flex-direction: column; }
-.v-lrow-clean {
+/* ── 列表视图：4 款无封面排版方案对比 ── */
+.v-llist { border-top: 1.2px solid var(--ink); display: flex; flex-direction: column; }
+.v-litem {
+  position: relative;
   width: 100%;
-  min-height: 58px;
   padding: 6px 2px;
   border: 0;
   border-bottom: 1px solid var(--ink);
   background: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   text-align: left;
   cursor: pointer;
+  box-sizing: border-box;
 }
-.v-lrow-clean.away .v-lcover.sm { border-style: dashed; border-left-width: 1.2px; }
-.v-lrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3.5px; }
-.v-lrow-main b { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.v-lrow-main em { font-style: normal; font-size: 8.8px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.v-lrow-main .v-track { width: 72px; height: 4px; }
-.v-lpct { flex: none; font: 600 13px/1 "Avenir Next", sans-serif; color: var(--ink); }
-.v-lstat { flex: none; font-size: 8px; font-weight: 500; padding: 2px 5px; border: 1px solid var(--ink); color: var(--ink); }
+.v-litem.away .v-ll-main b,
+.v-litem.away .v-lc-title { color: var(--g1); }
+.v-ll-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2.5px; }
+.v-ll-main b { font-size: 11px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-ll-main em { font-style: normal; font-size: 8.5px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 来源小标签（微读黑底白字 / 书斋白底黑框） */
+.v-lsrc-pill {
+  flex: none;
+  font-style: normal;
+  font-size: 7.5px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 4px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+}
+.v-lsrc-pill.is-dark {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* 方案 1：双行主次 (is-twoline) — 右侧上下叠放百分比与 42px 迷你进度条 */
+.v-litem.is-twoline { min-height: 44px; }
+.v-lr-box { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 44px; }
+.v-lmini-bar { width: 42px; height: 3.5px; border: 1px solid var(--ink); background: var(--paper); display: block; box-sizing: border-box; }
+.v-lmini-bar b { display: block; height: 100%; background: var(--ink); }
+
+/* 方案 2：底轨进度 (is-bottombar) — 行底分隔线本身加粗为通栏进度条，呼应封面底框墨线 */
+.v-litem.is-bottombar { min-height: 44px; padding-bottom: 8px; }
+.v-lr-inline { flex: none; display: flex; align-items: center; gap: 6px; }
+.v-lrow-edge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 3px;
+  background: transparent;
+  pointer-events: none;
+}
+.v-lrow-edge b { display: block; height: 100%; background: var(--ink); }
+
+/* 方案 3：单行紧凑 (is-compact) — 一屏 9 本高密度目录 */
+.v-litem.is-compact { min-height: 33px; padding: 4px 2px; gap: 6px; }
+.v-lc-title { flex: 1; min-width: 0; font-size: 10.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-lc-author { flex: 0 1 54px; font-style: normal; font-size: 8.5px; color: var(--g1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.v-lc-pct { flex: none; width: 28px; text-align: right; font: 600 10px/1 "Avenir Next", sans-serif; color: var(--ink); }
+.v-lc-stat { flex: none; width: 28px; text-align: right; font-size: 8px; color: var(--g1); }
+.v-lc-stat.is-away { text-decoration: underline; text-decoration-style: dashed; }
+
+/* 方案 4：左竖标线 (is-catalog) — 左侧 3px 竖向进度刻度槽 + 双行信息 + 右侧进度 */
+.v-litem.is-catalog { min-height: 44px; gap: 8px; }
+.v-lcat-bar {
+  flex: none;
+  width: 3px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.v-lcat-bar.is-unread { border-color: var(--g2); }
+.v-lcat-bar.is-away { border-style: dashed; border-color: var(--g1); }
+.v-lcat-bar b { display: block; width: 100%; background: var(--ink); }
+.v-lcat-r { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.v-lcat-r b { font: 600 11px/1 "Avenir Next", sans-serif; }
+
+.v-lpct { flex: none; font: 600 12px/1 "Avenir Next", sans-serif; color: var(--ink); }
+.v-lstat { flex: none; font-size: 8px; font-weight: 500; padding: 1.5px 4px; border: 1px solid var(--ink); color: var(--ink); }
 .v-lstat.is-away { border-style: dashed; color: var(--g1); }
 
 .v-lrows { flex: none; display: flex; flex-direction: column; border-top: 1.2px solid var(--ink); }

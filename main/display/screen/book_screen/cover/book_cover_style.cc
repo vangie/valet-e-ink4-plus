@@ -326,44 +326,31 @@ void OnBookCoverFrameDraw(lv_event_t* e) {
     }
     DrawBookCoverBorder(layer, box, r);
 
-    // 画廊风格：封面底部悬浮阅读进度条（白底黑框卡片悬浮在封面下部，里面是实心进度槽）
+    // 画廊风格 · 底框墨线：贴在封面最底边内侧的 5px 进度轨道，不悬浮进封面内部，不遮挡左下角作者名
     if (state && state->progress_x10 > 0) {
         const lv_coord_t bw = kCoverFrameBorder;
-        const lv_coord_t margin_x = 12;
-        const lv_coord_t margin_b = 10;
-        const lv_coord_t pill_h = 14;
-        const lv_coord_t x1 = box.x1 + bw + margin_x;
-        const lv_coord_t x2 = box.x2 - bw - margin_x;
-        const lv_coord_t y2 = box.y2 - bw - margin_b;
-        const lv_coord_t y1 = y2 - pill_h + 1;
-        if (x2 > x1 + 20 && y1 > box.y1 + bw + 20) {
+        const lv_coord_t bar_h = 5;
+        const lv_coord_t x1 = box.x1 + bw;
+        const lv_coord_t x2 = box.x2 - bw;
+        const lv_coord_t y2 = box.y2 - bw;
+        const lv_coord_t y1 = y2 - bar_h + 1;
+        if (x2 > x1 + 8 && y1 > box.y1 + bw) {
             lv_draw_rect_dsc_t paper;
             lv_draw_rect_dsc_init(&paper);
             paper.bg_color = lv_color_white();
             paper.bg_opa = LV_OPA_COVER;
+            CoverInkFill(layer, paper, x1, y1, x2, y2);
 
             lv_draw_rect_dsc_t ink;
             lv_draw_rect_dsc_init(&ink);
             ink.bg_color = lv_color_black();
             ink.bg_opa = LV_OPA_COVER;
-
-            // 外圈 1px 纸白光晕，确保在深色封面上也清晰浮起
-            CoverInkFill(layer, paper, x1 - 1, y1 - 1, x2 + 1, y2 + 1);
-            // 2px 黑色外框 + 内部白底
-            CoverInkFill(layer, ink, x1, y1, x2, y2);
-            CoverInkFill(layer, paper, x1 + 2, y1 + 2, x2 - 2, y2 - 2);
-
-            // 内部进度条填充（留 1px 白边内衬，更有层次）
-            const lv_coord_t tx1 = x1 + 4;
-            const lv_coord_t tx2 = x2 - 4;
-            const lv_coord_t ty1 = y1 + 4;
-            const lv_coord_t ty2 = y2 - 4;
-            if (tx2 > tx1 && ty2 >= ty1) {
-                const int pct = std::clamp(state->progress_x10, 0, 1000);
-                const lv_coord_t fill_w = std::max<lv_coord_t>(
-                    2, static_cast<lv_coord_t>((static_cast<int>(tx2 - tx1 + 1) * pct + 999) / 1000));
-                CoverInkFill(layer, ink, tx1, ty1, std::min<lv_coord_t>(tx2, tx1 + fill_w - 1), ty2);
-            }
+            // 顶部 1px 墨线分隔
+            CoverInkFill(layer, ink, x1, y1, x2, y1);
+            const int pct = std::clamp(state->progress_x10, 0, 1000);
+            const lv_coord_t fill_w = std::max<lv_coord_t>(
+                2, static_cast<lv_coord_t>((static_cast<int>(x2 - x1 + 1) * pct + 999) / 1000));
+            CoverInkFill(layer, ink, x1, y1 + 1, std::min<lv_coord_t>(x2, x1 + fill_w - 1), y2);
         }
     }
 }

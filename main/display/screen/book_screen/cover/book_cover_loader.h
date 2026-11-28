@@ -18,3 +18,6 @@ bool BookCoverLoader_TryLoadBookSidecarPreview(const reader::BookInfo& info, int
 
 /** @brief 旁路优先，失败再读文件内封面并回写旁路（可能打开 EPUB/EBOOK；须在工作任务中调用） */
 bool BookCoverLoader_LoadBookDetailCover(reader::BookInfo& info, int max_w, int max_h, reader::RasterImage& out);
+
+/** @brief 仅轻量读取 EPUB/EBOOK 文档的书名与作者元数据，不解码封面图片 */
+void BookCoverLoader_PeekBookMetadata(reader::BookInfo& info);

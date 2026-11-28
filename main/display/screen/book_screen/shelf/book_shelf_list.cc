@@ -398,10 +398,12 @@ void RenderBookshelfListPage() {
 
     const lv_coord_t row_w = Book_ContentWidth();
     const lv_font_t* item_font = Book_ItemFont();
+    const lv_font_t* sub_font = fontpack_lv_font_get(25, 2);
+    if (!sub_font) sub_font = item_font;
     const int start = 0;
     const int end =
         std::min(start + st.shelf.list_page_size, static_cast<int>(st.shelf.shelf_entries.size()));
-    const lv_coord_t lead_w = st.shelf.shelf_multi ? kShelfCheckSize : kShelfListIconW;
+    const lv_coord_t pct_col_w = Book_MeasureTextWidth(item_font, "100%");
 
     for (int i = start; i < end; ++i) {
         const auto& ent = st.shelf.shelf_entries[static_cast<size_t>(i)];
@@ -415,7 +417,11 @@ void RenderBookshelfListPage() {
         if (selected) {
             lv_obj_set_style_bg_color(row, lv_color_hex(0xE8E8E8), 0);
         }
-        lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+        if (i == start) {
+            lv_obj_set_style_border_side(row, static_cast<lv_border_side_t>(LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_BOTTOM), 0);
+        } else {
+            lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+        }
         lv_obj_set_style_border_width(row, 2, 0);
         lv_obj_set_style_border_color(row, lv_color_black(), 0);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
@@ -427,8 +433,9 @@ void RenderBookshelfListPage() {
         HapticAttachClick(row);
         lv_obj_set_user_data(row, reinterpret_cast<void*>(static_cast<intptr_t>(i)));
 
+        lv_coord_t lead_used = 0;
         if (st.shelf.shelf_multi) {
-            // 勾选框在文件名前，避免与进文件夹冲突
+            // 多选勾选框
             lv_obj_t* check = lv_obj_create(row);
             lv_obj_remove_style_all(check);
             lv_obj_set_size(check, kShelfCheckSize, kShelfCheckSize);
@@ -436,7 +443,7 @@ void RenderBookshelfListPage() {
             lv_obj_set_style_bg_opa(check, LV_OPA_COVER, 0);
             lv_obj_set_style_border_color(check, lv_color_black(), 0);
             lv_obj_set_style_border_width(check, kRowBorderW, 0);
-            lv_obj_set_style_radius(check, 4, 0);
+            lv_obj_set_style_radius(check, 0, 0);
             Book_DisableScroll(check);
             lv_obj_clear_flag(check, LV_OBJ_FLAG_CLICKABLE);
             if (selected) {
@@ -447,88 +454,58 @@ void RenderBookshelfListPage() {
                 lv_obj_center(mark);
                 lv_obj_clear_flag(mark, LV_OBJ_FLAG_CLICKABLE);
             }
-        } else if (is_folder) {
-            // 文件夹：顶标签 + 主体，避免「空框」观感
-            lv_obj_t* ico = lv_obj_create(row);
-            lv_obj_remove_style_all(ico);
-            lv_obj_set_size(ico, kShelfListIconW, 18);
-            lv_obj_set_style_bg_opa(ico, LV_OPA_TRANSP, 0);
-            Book_DisableScroll(ico);
-            lv_obj_clear_flag(ico, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_t* tab = lv_obj_create(ico);
-            lv_obj_remove_style_all(tab);
-            lv_obj_set_size(tab, 9, 5);
-            lv_obj_set_style_border_width(tab, 2, 0);
-            lv_obj_set_style_border_color(tab, lv_color_black(), 0);
-            lv_obj_set_style_bg_opa(tab, LV_OPA_TRANSP, 0);
-            lv_obj_align(tab, LV_ALIGN_TOP_LEFT, 1, 0);
-            lv_obj_clear_flag(tab, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_t* body = lv_obj_create(ico);
-            lv_obj_remove_style_all(body);
-            lv_obj_set_size(body, 20, 12);
-            lv_obj_set_style_border_width(body, 2, 0);
-            lv_obj_set_style_border_color(body, lv_color_black(), 0);
-            lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
-            lv_obj_align(body, LV_ALIGN_BOTTOM_MID, 0, 0);
-            lv_obj_clear_flag(body, LV_OBJ_FLAG_CLICKABLE);
-        } else {
-            // 书籍：折角页 + 两行字线
-            lv_obj_t* ico = lv_obj_create(row);
-            lv_obj_remove_style_all(ico);
-            lv_obj_set_size(ico, kShelfListIconW, 18);
-            lv_obj_set_style_border_width(ico, 2, 0);
-            lv_obj_set_style_border_color(ico, lv_color_black(), 0);
-            lv_obj_set_style_bg_opa(ico, LV_OPA_TRANSP, 0);
-            Book_DisableScroll(ico);
-            lv_obj_clear_flag(ico, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_t* line = lv_obj_create(ico);
-            lv_obj_remove_style_all(line);
-            lv_obj_set_size(line, 12, 2);
-            lv_obj_set_style_bg_color(line, lv_color_black(), 0);
-            lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
-            lv_obj_align(line, LV_ALIGN_LEFT_MID, 4, -3);
-            lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_t* line2 = lv_obj_create(ico);
-            lv_obj_remove_style_all(line2);
-            lv_obj_set_size(line2, 12, 2);
-            lv_obj_set_style_bg_color(line2, lv_color_black(), 0);
-            lv_obj_set_style_bg_opa(line2, LV_OPA_COVER, 0);
-            lv_obj_align(line2, LV_ALIGN_LEFT_MID, 4, 2);
-            lv_obj_clear_flag(line2, LV_OBJ_FLAG_CLICKABLE);
+            lead_used = kShelfCheckSize + kShelfListColGap;
         }
 
+        // 单行紧凑排版（方案 3）：[书名 (去后缀)] [作者 (25px)] [来源小徽章] [百分比 / —]
+        lv_obj_t* name = lv_label_create(row);
+        lv_obj_set_style_text_font(name, item_font, 0);
+        lv_obj_set_style_text_color(name, lv_color_black(), 0);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_CLIP);
+        lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
+
+        lv_obj_t* author_lbl = lv_label_create(row);
+        lv_obj_set_style_text_font(author_lbl, sub_font, 0);
+        lv_obj_set_style_text_color(author_lbl, lv_color_black(), 0);
+        lv_label_set_long_mode(author_lbl, LV_LABEL_LONG_CLIP);
+        lv_label_set_text(author_lbl, "");
+        lv_obj_add_flag(author_lbl, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(author_lbl, LV_OBJ_FLAG_CLICKABLE);
+
+        lv_obj_t* pill = lv_obj_create(row);
+        lv_obj_remove_style_all(pill);
+        lv_obj_set_size(pill, LV_SIZE_CONTENT, sub_font->line_height + 4);
+        lv_obj_set_style_pad_hor(pill, 6, 0);
+        lv_obj_set_style_border_width(pill, 2, 0);
+        lv_obj_set_style_border_color(pill, lv_color_black(), 0);
+        lv_obj_add_flag(pill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(pill, LV_OBJ_FLAG_CLICKABLE);
+        Book_DisableScroll(pill);
+        lv_obj_t* pill_lbl = lv_label_create(pill);
+        lv_obj_set_style_text_font(pill_lbl, sub_font, 0);
+        lv_label_set_text(pill_lbl, "");
+        lv_obj_center(pill_lbl);
+        lv_obj_clear_flag(pill_lbl, LV_OBJ_FLAG_CLICKABLE);
+
         lv_obj_t* tail = lv_label_create(row);
+        lv_obj_set_width(tail, pct_col_w);
+        lv_obj_set_style_text_align(tail, LV_TEXT_ALIGN_RIGHT, 0);
         lv_obj_set_style_text_font(tail, item_font, 0);
         lv_obj_set_style_text_color(tail, lv_color_black(), 0);
         lv_obj_clear_flag(tail, LV_OBJ_FLAG_CLICKABLE);
 
-        std::string name_src;
-        const char* tail_txt = ">";
+        std::string title_src;
         if (is_folder) {
-            name_src = ent.name;
-            name_src.push_back('/');
+            title_src = ent.name + "/";
             lv_label_set_text(tail, ">");
         } else {
-            name_src = ent.name;
-            tail_txt = "";
-            lv_label_set_text(tail, tail_txt);
+            title_src = !ent.book.title.empty() ? ent.book.title : reader::TitleFromPath(ent.name.c_str());
+            lv_label_set_text(tail, "—");
             EnqueueListCoverFill(ent.book, 0, 0, row, nullptr);
-            // I1 阈值=16：0x444444 会变白；397 阈值=127 时灰色仍可见
-            lv_obj_set_style_text_color(tail, lv_color_black(), 0);
         }
-        const lv_coord_t tail_w = Book_MeasureTextWidth(item_font, tail_txt);
-        const lv_coord_t name_w =
-            row_w - lead_w - kShelfListColGap * 2 - tail_w - kShelfListTailGap;
-        const lv_coord_t name_budget = name_w > 24 ? name_w : 24;
-
-        lv_obj_t* name = lv_label_create(row);
-        lv_obj_set_width(name, name_budget);
-        lv_obj_set_style_text_font(name, item_font, 0);
-        lv_obj_set_style_text_color(name, lv_color_black(), 0);
-        lv_label_set_long_mode(name, LV_LABEL_LONG_CLIP);
-        lv_label_set_text(name, TruncateFilenameKeepExt(name_src, item_font, name_budget).c_str());
-        lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_move_to_index(name, 1); // lead(0) name(1) tail(2)
+        const lv_coord_t name_w = std::max<lv_coord_t>(48, row_w - lead_used - pct_col_w - kShelfListColGap);
+        lv_obj_set_width(name, name_w);
+        lv_label_set_text(name, TruncateTextToWidth(title_src, item_font, name_w).c_str());
 
         lv_obj_add_event_cb(row, OnShelfListEntryLongPressed, LV_EVENT_LONG_PRESSED,
                             reinterpret_cast<void*>(static_cast<intptr_t>(i)));
@@ -566,9 +543,13 @@ void ApplyShelfEntryMetadata(const reader::BookInfo& info, lv_obj_t* host, bool 
     st.shelf.books[index].file_size = info.file_size;
     st.shelf.books[index].mtime = info.mtime;
     st.shelf.books[index].source = info.source;
+    if (!info.title.empty()) st.shelf.books[index].title = info.title;
+    if (!info.author.empty()) st.shelf.books[index].author = info.author;
     entry->book.file_size = info.file_size;
     entry->book.mtime = info.mtime;
     entry->book.source = info.source;
+    if (!info.title.empty()) entry->book.title = info.title;
+    if (!info.author.empty()) entry->book.author = info.author;
     if (st.shelf.shelf_view == kBookReaderShelfViewCover) {
         const int pct_x10 = progress_ready
                                 ? Book_CachedProgressX10OrZero(info.path.c_str())
@@ -577,30 +558,71 @@ void ApplyShelfEntryMetadata(const reader::BookInfo& info, lv_obj_t* host, bool 
         SetBookCoverFrameSource(host, info.source);
         return;
     }
-    auto* name = lv_obj_get_child(host, 1);
-    auto* tail = lv_obj_get_child(host, 2);
-    if (!name || !tail) {
-        return;
-    }
-    char size_text[32], text[80];
-    reader::FormatFileSize(size_text, sizeof(size_text), info.file_size);
-    const char* src_name = valet::weread::BookSourceFullName(info.source);
-    std::string prefix = (src_name && src_name[0] != '\0') ? (std::string(src_name) + " · ") : "";
-    if (progress_ready && BookReaderPrefsShowShelfProgress() != 0) {
-        const int pct = Book_CachedProgressX10OrZero(info.path.c_str());
-        if (pct >= 1000) {
-            std::snprintf(text, sizeof(text), "%s%s/100%%", prefix.c_str(), size_text);
-        } else {
-            std::snprintf(text, sizeof(text), "%s%s/%d.%d%%", prefix.c_str(), size_text, pct / 10, pct % 10);
+
+    // 列表视图（单行紧凑）：子控件顺序为 [check?], name, author_lbl, pill, tail
+    const uint32_t base_idx = st.shelf.shelf_multi ? 1u : 0u;
+    if (lv_obj_get_child_count(host) < base_idx + 4) return;
+    auto* name = lv_obj_get_child(host, base_idx);
+    auto* author_lbl = lv_obj_get_child(host, base_idx + 1);
+    auto* pill = lv_obj_get_child(host, base_idx + 2);
+    auto* tail = lv_obj_get_child(host, base_idx + 3);
+    if (!name || !author_lbl || !pill || !tail) return;
+
+    const lv_font_t* item_font = Book_ItemFont();
+    const lv_font_t* sub_font = fontpack_lv_font_get(25, 2);
+    if (!sub_font) sub_font = item_font;
+
+    // 1. 右侧进度百分比（未读显示 —）
+    char pct_txt[16] = "—";
+    if (progress_ready) {
+        const int pct_x10 = Book_CachedProgressX10OrZero(info.path.c_str());
+        if (pct_x10 >= 1000) {
+            std::snprintf(pct_txt, sizeof(pct_txt), "100%%");
+        } else if (pct_x10 > 0) {
+            std::snprintf(pct_txt, sizeof(pct_txt), "%d%%", std::max(1, (pct_x10 + 5) / 10));
         }
-    } else {
-        std::snprintf(text, sizeof(text), "%s%s", prefix.c_str(), size_text);
     }
-    lv_label_set_text(tail, text);
-    const lv_coord_t lead = st.shelf.shelf_multi ? kShelfCheckSize : kShelfListIconW;
-    const lv_coord_t width = std::max<int>(24, Book_ContentWidth() - lead - kShelfListColGap * 2 -
-                                                   Book_MeasureTextWidth(Book_ItemFont(), text) - kShelfListTailGap);
-    lv_obj_set_width(name, width);
-    lv_label_set_text(name,
-                      TruncateFilenameKeepExt(entry->name, Book_ItemFont(), width).c_str());
+    lv_label_set_text(tail, pct_txt);
+    const lv_coord_t pct_col_w = lv_obj_get_width(tail);
+
+    // 2. 来源小标签（微读：黑底白字；书斋/书库：白底黑框；本机：隐藏）
+    const char* ribbon = valet::weread::BookSourceRibbonText(info.source);
+    lv_coord_t pill_used = 0;
+    if (ribbon && ribbon[0] != '\0') {
+        const bool is_dark = (info.source == reader::BookSource::kWeRead);
+        lv_obj_set_style_bg_color(pill, is_dark ? lv_color_black() : lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+        lv_obj_t* pill_lbl = lv_obj_get_child(pill, 0);
+        if (pill_lbl) {
+            lv_label_set_text(pill_lbl, ribbon);
+            lv_obj_set_style_text_color(pill_lbl, is_dark ? lv_color_white() : lv_color_black(), 0);
+        }
+        lv_obj_clear_flag(pill, LV_OBJ_FLAG_HIDDEN);
+        pill_used = Book_MeasureTextWidth(sub_font, ribbon) + 16 + kShelfListColGap;
+    } else {
+        lv_obj_add_flag(pill, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // 3. 作者列（25px 字号，最多占行宽 28%）
+    const lv_coord_t row_w = Book_ContentWidth();
+    const lv_coord_t lead_used = st.shelf.shelf_multi ? (kShelfCheckSize + kShelfListColGap) : 0;
+    lv_coord_t author_used = 0;
+    if (!entry->book.author.empty()) {
+        const lv_coord_t max_author_w = row_w * 28 / 100;
+        const std::string clipped_author = TruncateTextToWidth(entry->book.author, sub_font, max_author_w);
+        const lv_coord_t aw = std::min<lv_coord_t>(max_author_w, Book_MeasureTextWidth(sub_font, clipped_author.c_str()) + 4);
+        lv_obj_set_width(author_lbl, aw);
+        lv_label_set_text(author_lbl, clipped_author.c_str());
+        lv_obj_clear_flag(author_lbl, LV_OBJ_FLAG_HIDDEN);
+        author_used = aw + kShelfListColGap;
+    } else {
+        lv_obj_add_flag(author_lbl, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // 4. 左侧书名（去后缀）
+    const std::string clean_title = !entry->book.title.empty() ? entry->book.title : reader::TitleFromPath(entry->name.c_str());
+    const lv_coord_t name_w = std::max<lv_coord_t>(
+        48, row_w - lead_used - author_used - pill_used - pct_col_w - kShelfListColGap);
+    lv_obj_set_width(name, name_w);
+    lv_label_set_text(name, TruncateTextToWidth(clean_title, item_font, name_w).c_str());
 }

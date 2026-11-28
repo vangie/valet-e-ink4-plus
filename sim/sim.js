@@ -160,6 +160,13 @@ nowEl.addEventListener("click", (e) => {
     flash();
     return render();
   }
+  const p = e.target.closest("[data-side-list]");
+  if (p) {
+    state.shelfView = "list";
+    state.shelfListStyle = p.dataset.sideList;
+    flash();
+    return render();
+  }
 });
 document.querySelector("[data-reset]").addEventListener("click", () => {
   sessionStorage.setItem("design", state.design);
@@ -169,7 +176,10 @@ if (sessionStorage.getItem("design") === "classic") state.design = "classic";
 sessionStorage.removeItem("design");
 const urlParams = new URLSearchParams(location.search);
 if (urlParams.get("screen")) state.screen = urlParams.get("screen");
+if (urlParams.get("view")) state.shelfView = urlParams.get("view");
+if (urlParams.get("list")) state.shelfListStyle = urlParams.get("list");
 if (urlParams.get("style")) state.shelfStyle = urlParams.get("style");
+if (urlParams.get("prog")) state.shelfProg = urlParams.get("prog");
 if (urlParams.get("tpl")) state.coverTpl = urlParams.get("tpl");
 renderAbout();
 render();

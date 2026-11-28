@@ -140,3 +140,20 @@ bool BookCoverLoader_LoadBookDetailCover(reader::BookInfo& info, int max_w, int 
     }
     return false;
 }
+
+void BookCoverLoader_PeekBookMetadata(reader::BookInfo& info) {
+    if (info.path.empty()) return;
+    if (info.format == reader::BookFormat::kEpub) {
+        reader::EpubDocument doc;
+        if (!doc.Open(info.path.c_str(), false)) return;
+        if (!doc.Title().empty()) info.title = doc.Title();
+        if (!doc.Author().empty()) info.author = doc.Author();
+        doc.Close();
+    } else if (info.format == reader::BookFormat::kEbook) {
+        reader::EbookDocument doc;
+        if (!doc.Open(info.path.c_str())) return;
+        if (!doc.Title().empty()) info.title = doc.Title();
+        if (!doc.Author().empty()) info.author = doc.Author();
+        doc.Close();
+    }
+}
