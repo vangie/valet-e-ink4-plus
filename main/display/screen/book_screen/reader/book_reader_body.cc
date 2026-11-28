@@ -194,9 +194,7 @@ void FinishReaderFirstPaintGate() {
         return;
     }
     s_reader_first_paint = false;
-    if (auto* disp = LVAdapterDisplay::Instance()) {
-        disp->RequestFullOnNextCommit();
-    }
+    EpdRequestScreenChange(false);
     auto& st = Book_State();
     if (st.reader.read_scr != nullptr && lv_obj_is_valid(st.reader.read_scr)) {
         lv_obj_invalidate(st.reader.read_scr);
@@ -279,6 +277,10 @@ void ShowReaderPageLoading() {
     if (!st.reader.content || st.reader.standby_paused) {
         return;
     }
+    // 打开过渡卡片仍在屏幕上时保留之，避免闪一下单调的「加载中...」
+    if (st.reader.open_bar != nullptr && lv_obj_is_valid(st.reader.open_bar)) {
+        return;
+    }
     CancelPageImageLoad();
     if (st.reader.background_layer && lv_obj_is_valid(st.reader.background_layer)) {
         lv_obj_delete(st.reader.background_layer);
@@ -308,9 +310,9 @@ void RenderReaderPage() {
     }
     // Loading/errors/TOC stay binary; opt into text gray only when a page exists.
     EpdSetContentRole(st.reader.content,EpdContentRole::Monochrome);
-    st.reader.open_bar = nullptr;
-    st.reader.open_pct_lbl = nullptr;
     if (st.reader.read_chrome == BookUiState::ReadChrome::kToc) {
+        st.reader.open_bar = nullptr;
+        st.reader.open_pct_lbl = nullptr;
         s_reader_first_paint = false;
         SyncReaderAaForImmersion(false);
         RenderTocList();
@@ -324,9 +326,12 @@ void RenderReaderPage() {
         SetReadStatusVisible(false);
         SetReadSettingsSheetVisible(false);
     }
-    ApplyReaderPageGeometry(ReaderGeomMode::kImmersive);
-    // 目录等会把 content 设成 flex；正文用绝对坐标居中，必须关掉 layout
-    lv_obj_set_style_layout(st.reader.content, LV_LAYOUT_NONE, 0);
+    const bool open_card_active = (st.reader.open_bar != nullptr && lv_obj_is_valid(st.reader.open_bar));
+    if (!open_card_active) {
+        ApplyReaderPageGeometry(ReaderGeomMode::kImmersive);
+        // 目录等会把 content 设成 flex；正文用绝对坐标居中，必须关掉 layout
+        lv_obj_set_style_layout(st.reader.content, LV_LAYOUT_NONE, 0);
+    }
 
     const bool page_images = st.reader.session->IsPageImagesMode();
     const lv_coord_t vw = st.reader.session->ViewportWidth();
@@ -360,6 +365,12 @@ void RenderReaderPage() {
     if (!prepared) {
         RequestReaderNavigation(reader::BookSession::NavigationKind::kRefresh);
         return;
+    }
+    st.reader.open_bar = nullptr;
+    st.reader.open_pct_lbl = nullptr;
+    if (open_card_active) {
+        ApplyReaderPageGeometry(ReaderGeomMode::kImmersive);
+        lv_obj_set_style_layout(st.reader.content, LV_LAYOUT_NONE, 0);
     }
     struct RetiredFontRelease {
         ~RetiredFontRelease() { ReleaseRetiredBookFont(); }
