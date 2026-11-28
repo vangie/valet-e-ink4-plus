@@ -8,6 +8,8 @@
 #include "power_policy.h"
 #include "valet_net/proxy.h"
 #include "reader/book_library.h"
+#include "reader/book_progress_cache.h"
+#include "reader/book_session.h"
 #include "reader/book_storage_paths.h"
 #include "reader/http_download_file.h"
 #include "reader/image_util.h"
@@ -62,6 +64,26 @@ struct JsonDeleter {
     void operator()(cJSON* v) const { cJSON_Delete(v); }
 };
 using Json = std::unique_ptr<cJSON, JsonDeleter>;
+
+void EnsurePsramJsonHooks() {
+    static bool s_inited = false;
+    if (s_inited) return;
+    cJSON_Hooks hooks{};
+    hooks.malloc_fn = [](size_t sz) -> void* {
+        void* p = heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        return p ? p : heap_caps_malloc(sz, MALLOC_CAP_8BIT);
+    };
+    hooks.free_fn = [](void* p) {
+        heap_caps_free(p);
+    };
+    cJSON_InitHooks(&hooks);
+    s_inited = true;
+}
+
+cJSON* ParseJsonPsram(const char* data, size_t len) {
+    EnsurePsramJsonHooks();
+    return cJSON_ParseWithLength(data, len);
+}
 
 // ── PSRAM 缓冲（大响应不占内部 DRAM）────────────────────────────────────
 struct PsBuffer {
@@ -592,7 +614,7 @@ bool TryRenewSession(HttpSession& sess) {
     if (!sess.Request("POST", std::string(kHost) + "/web/login/renewal", body, "https://weread.qq.com/web/", resp, true)) {
         return false;
     }
-    Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+    Json root(ParseJsonPsram(resp.body.data, resp.body.len));
     if (!root) return false;
     if (JsonInt(root.get(), "succ", 0) == 1 || !resp.set_cookies.empty()) {
         ESP_LOGI(TAG, "session renewed ok");
@@ -670,7 +692,7 @@ bool ExtractChaptersFromHtml(const char* html, size_t len, std::vector<ChapterIt
             }
         }
         if (end > bracket) {
-            Json arr(cJSON_ParseWithLength(html + bracket, end - bracket));
+            Json arr(ParseJsonPsram(html + bracket, end - bracket));
             std::vector<ChapterItem> candidate;
             if (arr && ParseChaptersFromJsonArray(arr.get(), candidate) && !candidate.empty()) {
                 // 优先选择带 title 字段的完整 chapterInfos（而非底部 AI 大纲简表）
@@ -936,7 +958,7 @@ bool BeginQrLogin(std::string& uid, std::string& qr_url, std::string& err) {
         err = "无法连接微信读书获取二维码";
         return false;
     }
-    Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+    Json root(ParseJsonPsram(resp.body.data, resp.body.len));
     if (!root) {
         err = "登录二维码响应异常";
         return false;
@@ -971,7 +993,7 @@ bool PollQrLogin(const std::string& uid, const std::string& otp, QrState& state,
     if (!sess.Request("GET", url, {}, "https://weread.qq.com/", resp, true, 6000)) {
         return true;
     }
-    Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+    Json root(ParseJsonPsram(resp.body.data, resp.body.len));
     if (!root) return true;
     cJSON* data = cJSON_GetObjectItemCaseSensitive(root.get(), "data");
     if (!cJSON_IsObject(data)) data = root.get();
@@ -1024,7 +1046,7 @@ bool SearchBooks(const std::string& query, std::vector<valet::opds::Entry>& out,
         err = "微信读书搜索连接失败";
         return false;
     }
-    Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+    Json root(ParseJsonPsram(resp.body.data, resp.body.len));
     if (!root) {
         err = "微信读书搜索解析失败";
         return false;
@@ -1069,10 +1091,10 @@ bool FetchShelf(std::vector<valet::opds::Entry>& out, std::string& err) {
         err = "微信读书书架加载失败";
         return false;
     }
-    Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+    Json root(ParseJsonPsram(resp.body.data, resp.body.len));
     if (root && (JsonErrCode(root.get()) == -2012 || JsonErrCode(root.get()) == -2010)) {
         if (TryRenewSession(sess) && sess.Request("GET", url, {}, "https://weread.qq.com/web/shelf", resp, true)) {
-            root.reset(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+            root.reset(ParseJsonPsram(resp.body.data, resp.body.len));
         }
     }
     if (!root) {
@@ -1117,7 +1139,48 @@ bool FetchShelf(std::vector<valet::opds::Entry>& out, std::string& err) {
     });
     out.reserve(books.size());
     for (const auto& b : books) {
-        out.push_back(BookToOpdsEntry(b, true));
+        auto entry = BookToOpdsEntry(b, true);
+        if (b.progress_x10 > 0 && SdCardManager::GetInstance().IsMounted()) {
+            // 若该书已下载在本机但尚未读过（或云端进度更新），同步更新本机 .pos 百分比，让书架直接显示云端进度
+            std::string clean_name;
+            for (char c : entry.title) clean_name.push_back(std::strchr("/\\:*?\"<>|", c) ? ' ' : c);
+            while (!clean_name.empty() && (clean_name.back() == ' ' || clean_name.back() == '.')) clean_name.pop_back();
+            if (!clean_name.empty()) {
+                const std::string local_epub = std::string(SD_PATH_BOOKS) + "/" + clean_name + ".epub";
+                struct stat st{};
+                if (stat(local_epub.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+                    const int cur_x10 = reader::BookSession::PeekReadingProgressX10(local_epub.c_str());
+                    if (cur_x10 <= 10 && b.progress_x10 > cur_x10) {
+                        const int spine = std::max(0, SpineForChapterUid(local_epub, b.chapter_uid));
+                        #pragma pack(push, 1)
+                        struct Pos3Blob {
+                            char magic[4];
+                            uint32_t chapter;
+                            uint32_t page;
+                            uint32_t pct_x10;
+                            uint32_t reading_seconds;
+                            uint32_t day_id;
+                            uint32_t daily_seconds;
+                            uint32_t anchor_magic, txt_anchor, txt_para;
+                        };
+                        #pragma pack(pop)
+                        Pos3Blob blob{};
+                        std::memcpy(blob.magic, "POS3", 4);
+                        blob.chapter = static_cast<uint32_t>(spine);
+                        blob.page = 0;
+                        blob.pct_x10 = static_cast<uint32_t>(std::clamp(b.progress_x10, 0, 1000));
+                        const std::string pos_path = reader::BookStoragePath(local_epub.c_str(), ".pos");
+                        if (!pos_path.empty()) {
+                            reader::WriteFileAtomic(pos_path.c_str(), reinterpret_cast<const uint8_t*>(&blob), sizeof(blob));
+                        }
+                        reader::BookSession::ProgressPeek peek;
+                        peek.progress_x10 = static_cast<int>(blob.pct_x10);
+                        reader::book_progress_cache::Upsert(local_epub.c_str(), peek);
+                    }
+                }
+            }
+        }
+        out.push_back(std::move(entry));
     }
     return true;
 }
@@ -1180,11 +1243,11 @@ bool DownloadBookAsEpub(const std::string& book_id,
     if (chapters.empty() || IsLoggedIn()) {
         const std::string ch_body = "{\"bookIds\":[\"" + EscapeJson(book_id) + "\"]}";
         if (sess.Request("POST", std::string(kHost) + "/web/book/chapterInfos", ch_body, reader_url, resp, true)) {
-            Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+            Json root(ParseJsonPsram(resp.body.data, resp.body.len));
             if (root && (JsonErrCode(root.get()) == -2012 || JsonErrCode(root.get()) == -2010) && IsLoggedIn()) {
                 if (TryRenewSession(sess) &&
                     sess.Request("POST", std::string(kHost) + "/web/book/chapterInfos", ch_body, reader_url, resp, true)) {
-                    root.reset(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+                    root.reset(ParseJsonPsram(resp.body.data, resp.body.len));
                 }
             }
             if (root) {
@@ -1462,6 +1525,47 @@ bool DownloadBookAsEpub(const std::string& book_id,
             reader::WriteFileAtomic(map_path.c_str(), reinterpret_cast<const uint8_t*>(map_text.data()), map_text.size());
         }
         valet::sync::Remember(save_path, "weread://" + book_id);
+
+        // 若已登录，顺带把云端阅读进度写入本地 .pos 与进度缓存，让书架直接显示云端在读百分比
+        if (IsLoggedIn()) {
+            RemoteProgress rp;
+            std::string rp_err;
+            if (FetchProgress(book_id, rp, rp_err) && rp.progress_x10 > 0) {
+                int spine = 0;
+                for (size_t i = 0; i < packed.size(); ++i) {
+                    if (packed[i].uid == rp.chapter_uid) {
+                        spine = static_cast<int>(i);
+                        break;
+                    }
+                }
+                #pragma pack(push, 1)
+                struct Pos3Blob {
+                    char magic[4];
+                    uint32_t chapter;
+                    uint32_t page;
+                    uint32_t pct_x10;
+                    uint32_t reading_seconds;
+                    uint32_t day_id;
+                    uint32_t daily_seconds;
+                    uint32_t anchor_magic, txt_anchor, txt_para;
+                };
+                #pragma pack(pop)
+                Pos3Blob blob{};
+                std::memcpy(blob.magic, "POS3", 4);
+                blob.chapter = static_cast<uint32_t>(std::max(0, spine));
+                blob.page = 0;
+                blob.pct_x10 = static_cast<uint32_t>(std::clamp(rp.progress_x10, 0, 1000));
+                blob.reading_seconds = static_cast<uint32_t>(std::max(0, rp.reading_time_sec));
+                const std::string pos_path = reader::BookStoragePath(save_path.c_str(), ".pos");
+                if (!pos_path.empty()) {
+                    reader::WriteFileAtomic(pos_path.c_str(), reinterpret_cast<const uint8_t*>(&blob), sizeof(blob));
+                }
+                reader::BookSession::ProgressPeek peek;
+                peek.progress_x10 = static_cast<int>(blob.pct_x10);
+                peek.reading_seconds = blob.reading_seconds;
+                reader::book_progress_cache::Upsert(save_path.c_str(), peek);
+            }
+        }
     }
 
     reader::DeleteBookCoverSidecar(save_path.c_str());
@@ -1498,10 +1602,10 @@ bool FetchProgress(const std::string& book_id, RemoteProgress& out, std::string&
         err = "获取微信读书进度失败";
         return false;
     }
-    Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+    Json root(ParseJsonPsram(resp.body.data, resp.body.len));
     if (root && (JsonErrCode(root.get()) == -2012 || JsonErrCode(root.get()) == -2010)) {
         if (TryRenewSession(sess) && sess.Request("GET", url, {}, referer, resp, true)) {
-            root.reset(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+            root.reset(ParseJsonPsram(resp.body.data, resp.body.len));
         }
     }
     if (!root) {
@@ -1594,7 +1698,7 @@ bool UploadProgress(const std::string& book_id,
         err = "上传微信读书进度失败";
         return false;
     }
-    Json root(cJSON_ParseWithLength(resp.body.data, resp.body.len));
+    Json root(ParseJsonPsram(resp.body.data, resp.body.len));
     if (!root || JsonInt(root.get(), "succ", 0) != 1) {
         err = "微信读书进度未接受";
         return false;

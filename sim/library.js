@@ -298,6 +298,136 @@ function renderShelfList(all) {
   }).join("")}</div>`;
 }
 
+function renderSearchKbOverlay() {
+  if (!state.kbOpen) return "";
+  const zh = state.kbZh !== false;
+  const py = state.kbPy || "";
+  const page = state.kbCandPage || 0;
+  const cands = [];
+  if (zh && py) {
+    const exact = SIM_PY_DICT[py] || "";
+    for (const ch of exact) cands.push(ch);
+    for (const [k, v] of Object.entries(SIM_PY_DICT)) {
+      if (k !== py && k.startsWith(py)) {
+        for (const ch of v.slice(0, 4)) if (!cands.includes(ch)) cands.push(ch);
+      }
+    }
+  }
+  const slots = cands.slice(page * 7, page * 7 + 7);
+  const candBar = zh ? `<div style="display:flex;align-items:center;border:1px solid #000;border-radius:4px;height:26px;padding:0 6px;margin-bottom:4px;font-size:11px;gap:4px">
+    <span style="width:42px;font-weight:700;overflow:hidden">${esc(py || "拼音")}</span>
+    <div style="flex:1;display:flex;justify-content:space-around">${slots.map((ch, i) => `<button data-kb-cand="${i}" style="border:0;background:none;font-size:12px;font-weight:700;cursor:pointer;padding:2px 4px">${ch}</button>`).join("")}</div>
+    ${page > 0 ? `<button data-kb-page="-1" style="border:1px solid #000;border-radius:3px;background:#fff;font-size:10px;padding:0 4px;cursor:pointer">&lt;</button>` : ""}
+    ${(page + 1) * 7 < cands.length ? `<button data-kb-page="1" style="border:1px solid #000;border-radius:3px;background:#fff;font-size:10px;padding:0 4px;cursor:pointer">&gt;</button>` : ""}
+  </div>` : "";
+  const row = (chars) => `<div style="display:flex;gap:3px;justify-content:center;margin-bottom:3px">${[...chars].map((c) => `<button data-kb-char="${c}" style="flex:1;height:26px;border:1px solid #000;border-radius:4px;background:#fff;font-size:11px;font-weight:600;cursor:pointer">${c}</button>`).join("")}</div>`;
+  return `<div class="v-sheet-mask" style="position:absolute;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;z-index:25">
+    <div style="width:100%;background:#fff;border-top:2px solid #000">
+      <div style="background:#000;color:#fff;padding:6px 12px;display:flex;justify-content:space-between;align-items:center;font-size:12px">
+        <b>${L("搜书", "Search")}</b>
+        <button data-kb-close="1" style="color:#fff;text-decoration:underline;background:none;border:0;cursor:pointer;font-size:11px">${L("取消", "Cancel")}</button>
+      </div>
+      <div style="padding:8px 12px">
+        <div style="font-size:10px;color:#333;margin-bottom:6px">${L("同时搜索微信读书与已配置书库，支持书名、作者或拼音首字母。", "Searches WeRead and every configured library.")}</div>
+        <div style="border:1.5px solid #000;height:30px;display:flex;align-items:center;padding:0 8px;font-size:12px;font-weight:600;margin-bottom:6px">${esc(state.kbText || "") || `<span style="color:#666">${L("书名、作者", "Title or author")}</span>`}</div>
+        ${candBar}
+        ${row("qwertyuiop")}
+        ${row("asdfghjkl")}
+        <div style="display:flex;gap:3px;margin-bottom:3px">
+          <button data-kb-shift="1" style="width:34px;height:26px;border:1px solid #000;border-radius:4px;background:#fff;font-size:11px;cursor:pointer">⇧</button>
+          ${[..."zxcvbnm"].map((c) => `<button data-kb-char="${c}" style="flex:1;height:26px;border:1px solid #000;border-radius:4px;background:#fff;font-size:11px;font-weight:600;cursor:pointer">${c}</button>`).join("")}
+          <button data-kb-bs="1" style="width:34px;height:26px;border:1px solid #000;border-radius:4px;background:#fff;font-size:11px;cursor:pointer">⌫</button>
+        </div>
+        <div style="display:flex;gap:3px">
+          <button data-kb-sym="1" style="width:42px;height:26px;border:1px solid #000;border-radius:4px;background:#fff;font-size:10px;cursor:pointer">?123</button>
+          <button data-kb-lang="1" style="width:46px;height:26px;border:${zh ? "2px" : "1px"} solid #000;border-radius:4px;background:#fff;font-size:10px;font-weight:700;cursor:pointer">${zh ? "中/英" : "英/中"}</button>
+          <button data-kb-space="1" style="flex:1;height:26px;border:1px solid #000;border-radius:4px;background:#fff;font-size:10px;cursor:pointer">${zh ? "空格" : "Space"}</button>
+          <button data-kb-ok="1" style="width:46px;height:26px;border:1.5px solid #000;border-radius:4px;background:#fff;font-size:12px;font-weight:700;cursor:pointer">✓</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+const SIM_PY_DICT = {
+  a: "阿啊", ai: "爱哀埃碍艾", an: "安案暗岸按", ba: "八巴吧把爸霸", bai: "百白拜败柏", ban: "半办版班般板",
+  bao: "包宝保报抱暴薄", bei: "北被倍备悲杯碑背", ben: "本奔笨", bi: "比笔必彼币壁避闭", bian: "边变便编遍辨辩",
+  biao: "表标彪", bie: "别憋", bin: "宾滨彬", bing: "并病兵冰丙", bo: "波伯博播薄玻璃", bu: "不步部布补捕",
+  cai: "才采彩材菜财裁", can: "参残惨餐灿", cang: "藏苍仓沧舱", cao: "草曹操槽", ce: "策侧册测", ceng: "曾层",
+  cha: "茶查察差插叉", chai: "拆柴", chan: "产单禅缠蝉", chang: "长场常唱厂偿畅", chao: "朝超潮吵抄", che: "车彻扯撤",
+  chen: "陈沉尘晨臣辰", cheng: "成城程承乘称诚", chi: "吃持尺池迟赤翅", chong: "重充冲虫宠崇", chou: "愁抽仇丑筹绸",
+  chu: "出初楚处除厨础触", chuan: "传船川穿串", chuang: "创窗床闯", chui: "吹垂锤", chun: "春纯唇醇", ci: "此词次辞慈刺磁",
+  cong: "从聪丛匆", cu: "促粗簇", cun: "存村寸", cuo: "错措搓", da: "大打达答搭塔", dai: "代带待袋戴贷呆",
+  dan: "但单担淡旦弹胆", dang: "当党档荡挡", dao: "到道岛导刀倒盗稻", de: "的得地德", deng: "等灯登邓",
+  di: "地第底低帝弟敌滴", dian: "点电店典殿垫颠", diao: "调掉雕钓吊", die: "爹跌叠蝶", ding: "定顶丁钉订鼎",
+  dong: "东动冬懂洞冻栋", dou: "都斗豆逗陡", du: "读度独都毒渡肚赌", duan: "段断短端锻", dui: "对队堆兑",
+  dun: "盾顿蹲吨", duo: "多朵夺躲堕", e: "恶俄额鹅饿", en: "恩", er: "而二耳儿尔", fa: "发法罚乏伐阀",
+  fan: "反饭翻凡犯范繁烦", fang: "方放房防访仿芳", fei: "非飞费肥废菲匪", fen: "分份纷粉愤坟奋", feng: "风封峰丰逢锋凤疯",
+  fo: "佛", fu: "夫父服富福府复付负附浮妇肤", gai: "改该概盖钙", gan: "感干敢甘肝赶竿", gang: "刚港钢岗纲缸",
+  gao: "高告搞稿糕膏", ge: "个各歌格哥革割阁葛", gei: "给", gen: "根跟", geng: "更耕庚颈", gong: "工公共功宫攻供恭巩",
+  gou: "够构沟狗钩购", gu: "古故孤骨谷股鼓固姑", gua: "挂刮瓜寡卦", guai: "怪乖拐", guan: "关管官观馆惯冠贯罐",
+  guang: "光广逛", gui: "归规鬼贵轨桂柜跪", gun: "滚棍", guo: "国过果锅裹郭", ha: "哈蛤", hai: "海还孩害亥",
+  han: "汉寒含喊汗韩翰", hang: "行航杭巷", hao: "好号毫豪浩耗", he: "和合河何喝荷核贺鹤", hei: "黑嘿",
+  hen: "很恨狠痕", heng: "横恒衡哼", hong: "红洪宏虹鸿哄", hou: "后候厚喉猴侯", hu: "乎呼湖护狐壶胡虎忽糊",
+  hua: "话花化画华滑划哗", huai: "怀坏淮槐", huan: "还换欢环缓幻唤宦", huang: "黄皇荒慌煌晃谎", hui: "会回灰挥辉恢悔汇慧毁",
+  hun: "混婚魂昏浑", huo: "活火或获惑祸货伙", ji: "记己几机及集级急计际极既纪技季寄吉疾迹籍", jia: "家加假价架甲佳嘉嫁稼",
+  jian: "见间件建简坚剑渐减检肩艰监箭", jiang: "将讲江降奖疆蒋匠酱", jiao: "叫教交角觉较脚骄焦胶蕉", jie: "界解接节姐借皆街结阶届戒杰洁",
+  jin: "进金今近尽仅紧禁锦津筋斤", jing: "经京精景静境惊竟敬镜井颈晶", jiu: "就九久酒旧究救舅纠", ju: "局居句具举剧巨聚拒距俱菊",
+  juan: "卷捐倦绢眷", jue: "觉决绝角爵掘倔", jun: "军均君俊菌郡", kai: "开慨凯楷", kan: "看刊堪砍坎",
+  kang: "康抗慷扛糠", kao: "考靠烤拷", ke: "可科刻客课颗渴壳咳", ken: "肯恳啃垦", kong: "空恐孔控",
+  kou: "口扣寇叩", ku: "苦库哭酷裤枯", kua: "跨夸垮挎", kuai: "快块会筷", kuan: "宽款", kuang: "况狂旷框矿筐",
+  kui: "亏愧魁窥葵", kun: "困昆坤捆", kuo: "括扩阔廓", la: "拉啦辣蜡腊", lai: "来赖莱徕", lan: "兰蓝栏拦篮懒览烂",
+  lang: "浪狼郎朗廊", lao: "老劳牢姥捞涝", le: "了乐勒", lei: "类泪累雷垒蕾", leng: "冷愣棱",
+  li: "里理力立利历离礼丽例励梨璃黎粒", lian: "连脸练联怜莲帘廉链", liang: "两量良亮凉粮梁辆晾", liao: "了料聊辽疗寥僚",
+  lie: "列烈猎裂劣", lin: "林临邻淋麟磷", ling: "另令领灵零龄岭铃凌", liu: "六流留刘柳溜硫", long: "龙隆笼聋垄拢",
+  lou: "楼露漏陋搂", lu: "路鲁录陆鹿炉芦卢颅", lv: "旅律绿虑率履驴", luan: "乱卵峦孪", lue: "略掠",
+  lun: "论轮伦沦仑", luo: "落罗络骆逻裸锣", ma: "吗妈马嘛麻骂码抹", mai: "买卖麦迈脉埋", man: "满慢漫曼瞒馒",
+  mang: "忙茫盲芒莽", mao: "毛猫冒矛貌茅茂锚", me: "么", mei: "没美每妹梅媒煤眉枚霉", men: "们门闷",
+  meng: "梦蒙猛盟孟朦", mi: "米密迷秘蜜谜弥", mian: "面免眠棉绵勉缅", miao: "秒苗庙妙描瞄", mie: "灭蔑",
+  min: "民敏悯皿闽", ming: "明名命鸣冥铭", miu: "谬", mo: "莫么没末模墨默磨魔漠抹陌", mou: "某谋眸",
+  mu: "木目母墓幕牧慕穆姆", na: "那拿哪纳娜呐", nai: "乃奶耐奈", nan: "南男难喃楠", nang: "囊",
+  nao: "脑闹恼挠", ne: "呢呐", nei: "内馁", nen: "嫩", neng: "能", ni: "你尼泥逆拟腻妮",
+  nian: "年念捻碾廿", niang: "娘酿", niao: "鸟尿袅", nie: "捏聂孽涅", nin: "您", ning: "宁凝拧柠",
+  niu: "牛扭纽钮", nong: "农浓弄脓", nu: "怒奴努", nv: "女", nuan: "暖", nue: "虐疟",
+  nuo: "诺挪懦糯", ou: "欧偶鸥呕藕", pa: "怕爬帕趴琵", pai: "派排拍牌徘", pan: "判盘盼畔攀潘",
+  pang: "旁胖庞螃", pao: "跑炮抛泡袍咆", pei: "配陪培佩赔沛", pen: "喷盆", peng: "朋碰彭棚蓬捧膨",
+  pi: "批皮披疲匹脾辟屁劈", pian: "片篇便偏骗", piao: "票飘漂朴瓢", pie: "撇瞥", pin: "品贫拼频聘",
+  ping: "平评凭瓶屏萍苹", po: "破迫婆坡颇泊泼魄", pou: "剖", pu: "普铺扑仆葡蒲朴瀑", qi: "起其七期气奇齐企妻器骑棋旗弃泣启契",
+  qia: "恰洽掐", qian: "前千钱浅签迁潜遣谦铅歉", qiang: "强枪墙抢腔蔷", qiao: "桥悄巧敲乔侨翘壳", qie: "且切窃怯茄",
+  qin: "亲琴侵勤秦禽钦寝", qing: "情清青轻请晴庆倾卿氢", qiong: "穷琼穹", qiu: "求秋球丘囚邱蚯", qu: "去取区曲趣驱屈渠娶",
+  quan: "全权劝圈泉犬券拳", que: "却确缺雀瘸", qun: "群裙", ran: "然染燃冉", rang: "让壤嚷攘",
+  rao: "绕扰饶", re: "热惹", ren: "人任认忍仁刃韧", reng: "仍扔", ri: "日", rong: "容荣融绒溶榕",
+  rou: "肉柔揉", ru: "如入儒乳辱汝濡", ruan: "软阮", rui: "瑞锐蕊", run: "润闰", ruo: "若弱",
+  sa: "撒萨飒", sai: "赛塞腮", san: "三散伞叁", sang: "桑丧嗓", sao: "扫嫂骚臊", se: "色涩瑟",
+  sen: "森", seng: "僧", sha: "杀沙傻纱刹砂莎", shai: "晒筛", shan: "山善闪衫扇珊删单",
+  shang: "上商伤尚赏裳", shao: "少烧绍稍哨勺梢", she: "社设舍射涉蛇舌奢", shei: "谁", shen: "什身深神甚审伸沈慎渗",
+  sheng: "生声省胜升盛圣剩牲绳", shi: "是时事十师史世石识实式施示失士市室始诗适氏释誓狮", shou: "手受首收守授瘦兽寿售", shu: "书数树属术述束熟叔署鼠蔬舒殊",
+  shua: "刷耍", shuai: "摔甩帅衰", shuan: "拴栓", shuang: "双霜爽", shui: "水说谁睡税", shun: "顺瞬舜",
+  shuo: "说数硕烁朔", si: "四思死司丝私似寺撕斯饲", song: "送松宋颂耸诵", sou: "搜艘嗽擞", su: "苏速俗诉宿素肃粟",
+  suan: "算酸蒜", sui: "随岁虽碎遂髓", sun: "孙损笋", suo: "所索锁缩琐", ta: "他她它踏塔塌",
+  tai: "太台态抬泰胎苔", tan: "谈探坦叹摊贪滩坛檀", tang: "唐堂汤糖躺倘趟膛", tao: "讨逃桃套涛陶掏淘葡萄", te: "特",
+  teng: "疼腾藤誉", ti: "体提题替梯踢啼惕", tian: "天田填甜添恬", tiao: "条调跳挑迢", tie: "铁贴帖",
+  ting: "听停庭挺亭艇厅", tong: "同通统童痛铜桶筒", tou: "头投透偷", tu: "土图突途徒涂兔吐屠", tuan: "团湍",
+  tui: "推退腿颓褪", tun: "吞屯臀", tuo: "托脱拖妥驼陀拓", wa: "瓦挖娃蛙洼袜", wai: "外歪",
+  wan: "完万晚湾玩碗弯挽顽丸", wang: "王望往忘网亡旺汪枉", wei: "为位未味委围维唯微危伟卫尾慰威胃谓", wen: "文问温闻稳纹吻蚊瘟",
+  weng: "翁嗡", wo: "我握窝卧沃涡", wu: "无五物午屋武舞务误悟雾巫侮乌", xi: "西习喜系息希席细昔吸戏惜悉析溪夕牺膝",
+  xia: "下夏吓狭霞瞎峡侠匣", xian: "先现见线限显险仙鲜闲贤弦嫌县献宪", xiang: "想向相象香像响项乡降详享箱祥巷", xiao: "小笑消校效晓销肖萧潇孝宵",
+  xie: "写些谢解协邪斜血鞋携胁歇", xin: "心新信辛欣薪馨衅", xing: "行形星性兴幸型醒姓刑杏腥", xiong: "兄胸雄凶熊匈",
+  xiu: "修秀休袖宿羞绣锈嗅", xu: "须需许续序虚徐蓄叙绪恤", xuan: "选悬宣玄旋轩喧绚", xue: "学雪血削穴靴薛",
+  xun: "迅寻训讯巡旬循勋熏", ya: "呀压亚牙芽雅押鸭涯衙", yan: "言眼演严烟延沿研颜掩厌宴雁焰盐岩", yang: "样阳洋央养扬羊仰痒杨",
+  yao: "要摇药遥腰咬邀耀谣妖尧", ye: "也夜业叶野爷页液耶", yi: "一以已意医易依移衣义议艺亿役异疑亦翼译遗椅", yin: "因音引银印饮阴隐吟瘾姻",
+  ying: "应影英营迎硬映赢鹰婴莹樱", yong: "用永拥勇涌泳庸咏踊", you: "有又由友游右油优忧尤邮诱幽犹", yu: "与于语育余雨遇域欲玉鱼愈宇予狱羽誉愚",
+  yuan: "远原元院员园愿源缘怨猿冤", yue: "月越约乐跃阅岳钥悦", yun: "云运允孕晕韵蕴酝", za: "杂砸咱扎",
+  zai: "在再载灾宰栽仔", zan: "赞暂攒咱", zang: "藏脏葬赃", zao: "早造遭糟燥皂藻", ze: "则责择泽仄",
+  zei: "贼", zen: "怎", zeng: "曾增赠憎", zha: "扎炸查诈闸眨渣", zhai: "斋宅摘债窄寨",
+  zhan: "站展战占沾斩盏毡瞻", zhang: "长张章丈掌障帐涨杖彰", zhao: "着找照朝招赵罩兆沼", zhe: "这者着折哲浙遮辙",
+  zhen: "真阵针震镇珍枕振侦贞", zheng: "正整争政证征挣郑症蒸", zhi: "之只知直制至治指支志值织纸止质智职置执植殖脂", zhong: "中种重终众钟忠肿仲",
+  zhou: "周州洲宙粥舟骤轴昼", zhu: "主住注助著诸属猪竹烛逐祝珠株筑柱", zhua: "抓爪", zhuai: "拽",
+  zhuan: "传专转撰砖赚篆", zhuang: "装状庄撞壮桩妆", zhui: "追坠缀椎", zhun: "准谆", zhuo: "着桌捉浊啄灼拙",
+  zi: "子自字资紫姿滋仔兹咨", zong: "总宗纵踪棕综", zou: "走奏揍邹", zu: "足族组祖阻租卒",
+  zuan: "钻纂", zui: "最罪嘴醉", zun: "尊遵", zuo: "作做坐左座昨佐",
+};
+
 function v2Shelf() {
   if (state.libOpds) return v2OpdsScreen();
   if (state.libBook) {
@@ -316,7 +446,7 @@ function v2Shelf() {
       ? renderShelfList(all)
       : renderShelfGrid(all, "gallery");
   const rightAct = `<div class="v-lhead-acts">${searchBtn}${libBtn}${view}</div>`;
-  return `${bar()}<main class="v-page">${v2Head(L("书架", "Shelf"), count, rightAct)}<div class="v-pane v-lib">${search}${body}</div></main>`;
+  return `${bar()}<main class="v-page" style="position:relative">${v2Head(L("书架", "Shelf"), count, rightAct)}<div class="v-pane v-lib">${search}${body}</div>${renderSearchKbOverlay()}</main>`;
 }
 
 // ── 书库浏览页（对应固件 kScreenOpds）──────────────────────────────────────
@@ -408,7 +538,7 @@ function v2OpdsScreen() {
   const body = rows.length ? `<div class="v-opds-list">${rows.join("")}</div>`
     : `<p class="v-lhint">${L("这里没有书。换个词，或回上一层看看。", "Nothing here.")}</p>`;
   const pg = entries.length ? `<div class="v-lbar"><span>${L(`${entries.length} 项`, `${entries.length} items`)}</span></div>` : "";
-  return `${bar()}<main class="v-page">${v2Head("")}<div class="v-pane v-lib">${searchBar}${pg}${body}</div></main>`;
+  return `${bar()}<main class="v-page" style="position:relative">${v2Head("")}<div class="v-pane v-lib">${searchBar}${pg}${body}</div>${renderSearchKbOverlay()}</main>`;
 }
 function libSettingsPane() {
   const rows = libOn().map((s) => `<div class="v-row"><span><b>${esc(s.name)}</b><em>${esc(new URL(s.url).host)}${s.auth || s.rich ? L(" · 已认证", " · Auth") : ""}</em></span>
@@ -483,12 +613,84 @@ panel.addEventListener("click", (e) => {
     flash();
     return render();
   }
-  // 书架一级「搜书」按钮
-  if (hit("[data-shelf-search]")) {
-    const q = window.prompt(L("搜书（书名/作者/拼音首字母）", "Search (title/author)"), state.libQuery || "") || "";
-    if (!q.trim()) return;
+  // 书架一级「搜书」按钮与软键盘中英拼音输入
+  if (hit("[data-shelf-search]") || hit("[data-opds-search]")) {
+    state.kbOpen = true;
+    state.kbZh = state.kbZh !== false;
+    state.kbPy = "";
+    state.kbCandPage = 0;
+    state.kbText = state.libOpdsQuery || "";
+    flash();
+    return render();
+  }
+  if (hit("[data-kb-close]")) { state.kbOpen = false; state.kbPy = ""; flash(); return render(); }
+  if (hit("[data-kb-lang]")) {
+    if (state.kbPy) { state.kbText = (state.kbText || "") + state.kbPy; state.kbPy = ""; }
+    state.kbZh = !(state.kbZh !== false);
+    state.kbCandPage = 0;
+    return render();
+  }
+  if ((el = hit("[data-kb-char]"))) {
+    const ch = el.dataset.kbChar;
+    if (state.kbZh !== false) {
+      state.kbPy = ((state.kbPy || "") + ch).slice(0, 12);
+      state.kbCandPage = 0;
+    } else {
+      state.kbText = (state.kbText || "") + ch;
+    }
+    return render();
+  }
+  if ((el = hit("[data-kb-cand]"))) {
+    const idx = Number(el.dataset.kbCand);
+    const py = state.kbPy || "";
+    const cands = [];
+    for (const ch of (SIM_PY_DICT[py] || "")) cands.push(ch);
+    for (const [k, v] of Object.entries(SIM_PY_DICT)) {
+      if (k !== py && k.startsWith(py)) for (const ch of v.slice(0, 4)) if (!cands.includes(ch)) cands.push(ch);
+    }
+    const picked = cands[(state.kbCandPage || 0) * 7 + idx];
+    if (picked) {
+      state.kbText = (state.kbText || "") + picked;
+      state.kbPy = "";
+      state.kbCandPage = 0;
+    }
+    return render();
+  }
+  if ((el = hit("[data-kb-page]"))) {
+    state.kbCandPage = Math.max(0, (state.kbCandPage || 0) + Number(el.dataset.kbPage));
+    return render();
+  }
+  if (hit("[data-kb-bs]")) {
+    if (state.kbZh !== false && state.kbPy) {
+      state.kbPy = state.kbPy.slice(0, -1);
+      state.kbCandPage = 0;
+    } else {
+      state.kbText = [...(state.kbText || "")].slice(0, -1).join("");
+    }
+    return render();
+  }
+  if (hit("[data-kb-space]")) {
+    if (state.kbZh !== false && state.kbPy) {
+      const first = (SIM_PY_DICT[state.kbPy] || "")[0] || state.kbPy;
+      state.kbText = (state.kbText || "") + first;
+      state.kbPy = "";
+      state.kbCandPage = 0;
+    } else {
+      state.kbText = (state.kbText || "") + " ";
+    }
+    return render();
+  }
+  if (hit("[data-kb-ok]")) {
+    if (state.kbZh !== false && state.kbPy) {
+      const first = (SIM_PY_DICT[state.kbPy] || "")[0] || state.kbPy;
+      state.kbText = (state.kbText || "") + first;
+      state.kbPy = "";
+    }
+    const q = (state.kbText || "").trim();
+    if (!q) return;
+    state.kbOpen = false;
     state.libOpds = true;
-    state.libOpdsQuery = q.trim();
+    state.libOpdsQuery = q;
     state.libOpdsBrowse = "search";
     flash();
     return render();
@@ -507,14 +709,6 @@ panel.addEventListener("click", (e) => {
   }
   if (hit("[data-weread-shelf]")) { state.libOpdsBrowse = "new"; flash(); return render(); }
   if ((el = hit("[data-opds-lib]"))) { state.libOpdsBrowse = "new"; flash(); return render(); }
-  if (hit("[data-opds-search]")) {
-    const q = window.prompt(L("搜书（书名/作者/拼音首字母）", "Search (title/author)")) || "";
-    if (!q.trim()) return;
-    state.libOpdsQuery = q.trim();
-    state.libOpdsBrowse = "search";
-    flash();
-    return render();
-  }
   if ((el = hit("[data-opds-entry]"))) {
     const idx = Number(el.dataset.opdsEntry);
     const entries = state.libOpdsBrowse === "search" ? opdsSearchEntries(state.libOpdsQuery) : opdsEntries(state.libOpdsBrowse);

@@ -1,6 +1,5 @@
 #include "assets/lang_screen.h"
 #include "assets/lang_network.h"
-#pragma GCC optimize("O1")
 
 // network_wifi.cc — split from parent .cc
 #include "network_screen/network_screen.h"

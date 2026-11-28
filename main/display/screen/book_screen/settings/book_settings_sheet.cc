@@ -1,6 +1,5 @@
 #include "assets/lang_screen.h"
 #include "standby_screen/standby_screen.h"
-#pragma GCC optimize("O1")
 
 #include "assets/lang_reader.h"
 

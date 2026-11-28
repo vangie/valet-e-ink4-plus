@@ -140,6 +140,7 @@ struct FetchDone {
 };
 
 void ApplyFetch(void* p);
+reader::CloudBookTask TaskFor(const valet::opds::Entry& entry);
 
 bool FetchParse(const std::string& url, valet::opds::Feed& feed, std::string& error) {
     auto got = valet::opds::FetchFeed(url);
@@ -163,6 +164,20 @@ void FetchTask(void* arg) {
         done->ok = valet::weread::FetchShelf(shelf_books, done->error);
         if (done->ok) {
             done->feed_title = Text("微信读书 · 书架", "WeRead Shelf");
+            int reading_count = 0;
+            for (const auto& b : shelf_books) {
+                if (b.progress > 0.0f && !TaskFor(b).IsDownloaded()) ++reading_count;
+            }
+            if (reading_count > 0) {
+                valet::opds::Entry sync_reading;
+                char buf[96];
+                std::snprintf(buf, sizeof(buf), Text("一键同步在读书籍到本地书架（%d 本）", "Sync reading books to shelf (%d)"),
+                              reading_count);
+                sync_reading.title = buf;
+                sync_reading.author = Text("自动下载微信读书读了一半的书与阅读进度", "Downloads in-progress WeRead books & progress");
+                sync_reading.nav = "weread://sync_reading";
+                done->entries.push_back(std::move(sync_reading));
+            }
             for (auto& b : shelf_books) done->entries.push_back(std::move(b));
             valet::opds::Entry logout_entry;
             logout_entry.title = Text("退出微信读书登录", "Sign out of WeRead");
@@ -335,14 +350,20 @@ void OpenSetupQr();
 void CloseSetupQr();
 void StartRoot();
 
+void StartBatchSyncReading();
+
 void OnRowClicked(lv_event_t* e) {
-    if (s_loading) return;
+    if (s_loading || s_downloading) return;
     Level* top = Top();
     const int index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
     if (top == nullptr || index < 0 || index >= static_cast<int>(top->entries.size())) return;
     const auto& entry = top->entries[static_cast<size_t>(index)];
     if (!entry.files.empty()) { OpenDetail(index); return; }
     if (entry.nav.empty()) return;
+    if (entry.nav == "weread://sync_reading") {
+        StartBatchSyncReading();
+        return;
+    }
     if (entry.nav == "setup://library") {
         OpenSetupQr();
         return;
@@ -581,6 +602,92 @@ void StartEntryDownload(const valet::opds::Entry& entry, bool force_overwrite) {
     UpdateAction();
 }
 
+struct BatchSyncItem {
+    reader::CloudBookTask task;
+    std::string author;
+};
+struct BatchSyncJob {
+    uint32_t gen;
+    std::vector<BatchSyncItem> items;
+};
+struct BatchSyncMsg {
+    uint32_t gen;
+    int done_count;
+    int total_count;
+    bool finished;
+    std::string current_title;
+};
+
+void ApplyBatchSync(void* p) {
+    auto* msg = static_cast<BatchSyncMsg*>(p);
+    if (msg->finished) s_downloading = false;
+    if (msg->gen == s_gen && s_ui.scr != nullptr) {
+        Level* top = Top();
+        if (top && !top->entries.empty() && top->entries.front().nav == "weread://sync_reading") {
+            char buf[96];
+            if (!msg->finished) {
+                std::snprintf(buf, sizeof(buf), Text("正在同步 (%d/%d)：%s", "Syncing (%d/%d): %s"),
+                              msg->done_count + 1, msg->total_count, msg->current_title.c_str());
+                top->entries.front().title = buf;
+            } else {
+                top->entries.erase(top->entries.begin());
+                ScreenShowToast(Text("在读书籍已同步到本地书架", "In-progress books synced to shelf"));
+            }
+            Render();
+        }
+    }
+    delete msg;
+}
+
+void BatchSyncTask(void* arg) {
+    auto* job = static_cast<BatchSyncJob*>(arg);
+    const int total = static_cast<int>(job->items.size());
+    for (int i = 0; i < total; ++i) {
+        if (s_gate.IsCancelled()) break;
+        const auto& item = job->items[static_cast<size_t>(i)];
+        {
+            auto* m = new BatchSyncMsg{job->gen, i, total, false, item.task.title};
+            if (!ScreenLvAsync(ApplyBatchSync, m)) delete m;
+        }
+        if (item.task.download_url.rfind("weread://", 0) == 0) {
+            std::string err;
+            const std::string wr_id = item.task.download_url.substr(9);
+            valet::weread::DownloadBookAsEpub(wr_id, item.task.title, item.author,
+                                              item.task.cover_image_url, item.task.LocalPath(),
+                                              err, nullptr, nullptr, &s_gate);
+        }
+    }
+    auto* fin = new BatchSyncMsg{job->gen, total, total, true, {}};
+    delete job;
+    if (!ScreenLvAsync(ApplyBatchSync, fin)) { delete fin; s_downloading = false; }
+    vTaskDeleteWithCaps(nullptr);
+}
+
+void StartBatchSyncReading() {
+    Level* top = Top();
+    if (!top || s_downloading) return;
+    auto* job = new BatchSyncJob{};
+    job->gen = s_gen;
+    for (const auto& e : top->entries) {
+        if (e.files.empty() || e.progress <= 0.0f) continue;
+        auto task = TaskFor(e);
+        if (task.LocalPath().empty() || task.IsDownloaded()) continue;
+        job->items.push_back({std::move(task), e.author});
+        if (job->items.size() >= 6) break; // 单次最多批量同步前 6 本最近在读
+    }
+    if (job->items.empty()) {
+        delete job;
+        return;
+    }
+    s_gate.Reset();
+    s_downloading = true;
+    if (xTaskCreatePinnedToCoreWithCaps(BatchSyncTask, "wr_batch", 12 * 1024, job, tskIDLE_PRIORITY + 2, nullptr, 0,
+                                        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) != pdPASS) {
+        delete job;
+        s_downloading = false;
+    }
+}
+
 void OnActionClicked(lv_event_t*) {
     Level* top = Top();
     if (!top || s_detail < 0 || s_detail >= static_cast<int>(top->entries.size()) || s_downloading) return;
@@ -755,7 +862,7 @@ void OpenEditor() {
     lv_obj_add_event_cb(mask, [](lv_event_t*) { s_ui.editor = s_ui.edit_text = nullptr; }, LV_EVENT_DELETE, nullptr);
     auto* sheet = lv_obj_create(mask);
     lv_obj_remove_style_all(sheet);
-    lv_obj_set_size(sheet, lv_pct(100), UiSx(260) + 330);
+    lv_obj_set_size(sheet, lv_pct(100), UiSx(314) + 330);
     lv_obj_align(sheet, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(sheet, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(sheet, LV_OPA_COVER, 0);
@@ -821,7 +928,7 @@ void OpenEditor() {
     if (!keyboard) { CloseEditor(); return; }
     lv_obj_set_height(keyboard, 0);
     lv_obj_set_flex_grow(keyboard, 1);
-    ScreenKeyboardReset(keyboard);
+    ScreenKeyboardEnableChinese(keyboard, true);
     RefreshEditText();
 }
 

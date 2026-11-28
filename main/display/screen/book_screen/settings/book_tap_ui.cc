@@ -1,5 +1,4 @@
 #include "assets/lang_reader.h"
-#pragma GCC optimize("O1")
 
 #include "book_screen/settings/book_tap_ui.h"
 #include "screen_common.h"

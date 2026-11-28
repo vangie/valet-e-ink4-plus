@@ -1,6 +1,5 @@
 #include "assets/lang_reader.h"
 #include "assets/lang_config.h"
-#pragma GCC optimize("O1")
 
 #include "book_screen/settings/book_ttf_actions.h"
 #include "book_screen/book_screen_priv.h"

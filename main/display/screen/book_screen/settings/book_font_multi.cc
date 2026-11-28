@@ -1,5 +1,3 @@
-#pragma GCC optimize("O1")
-
 #include "book_screen/settings/book_font_multi.h"
 #include "book_screen/settings/book_ttf_panel.h"
 #include "display/font/epdfont.h"
